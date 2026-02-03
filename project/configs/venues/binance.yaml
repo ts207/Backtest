@@ -1,0 +1,4 @@
+venue: binance
+market: perp
+base_url: https://fapi.binance.com
+interval: 15m

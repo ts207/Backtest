@@ -1,0 +1,8 @@
+version: 1
+pipeline: crypto_perp_15m
+stages:
+  - ingest
+  - clean
+  - features
+  - backtest
+  - report
