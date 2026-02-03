@@ -1,0 +1,7 @@
+venue: binance
+market: perp
+base_url: https://fapi.binance.com
+interval: 15m
+timeout_seconds: 15
+max_retries: 5
+backoff_factor: 0.5

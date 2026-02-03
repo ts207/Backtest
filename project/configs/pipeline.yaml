@@ -1,0 +1,9 @@
+version: 1
+pipeline: crypto_perp_15m
+trade_day_timezone: UTC
+stages:
+  - ingest
+  - clean
+  - features
+  - backtest
+  - report
