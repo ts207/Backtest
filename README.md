@@ -4,7 +4,7 @@
 Run the full pipeline from the repo root (Windows PowerShell examples shown):
 
 ```powershell
-python project\pipelines\run_all.py --symbols BTCUSDT,ETHUSDT --start 2023-06-01 --end 2023-07-10
+python project\pipelines\run_all.py --symbols BTCUSDT,ETHUSDT --start 2023-06-01 --end 2023-07-10 --allow_funding_timestamp_rounding=1
 ```
 
 The orchestrator auto-generates `run_id` (format `YYYYMMDD_HHMMSS`) unless you provide one via `--run_id`.
@@ -39,9 +39,15 @@ python project\pipelines\report\make_report.py --run_id 20240101_120000
 - Reports: `project\reports\vol_compression_expansion_v1\<run_id>\summary.md`
 - Manifests/logs: `project\runs\<run_id>\<stage>.json` and `.log`
 
+## Sanity gates & funding handling
+- Funding is treated as discrete 8h events. Cleaned funding stores `funding_event_ts` and `funding_rate_scaled` aligned to each 15m bar.
+- Missing funding fails the clean/features stages unless `--allow_missing_funding=1` is provided.
+- Constant funding within a month (std == 0 after scaling) fails the clean stage unless `--allow_constant_funding=1`.
+- Funding timestamps must be on-the-hour; `--allow_funding_timestamp_rounding=1` will round to the nearest hour and record counts in manifests.
+- Sanity checks enforce UTC, monotonic timestamps and funding bounds (abs <= 1% per 8h).
+
 ## Data availability & gaps
 - USD-M futures archives do not exist before late 2019. Requests earlier than that are clamped to the first
   available date and recorded in manifests as `requested_start` vs `effective_start`.
 - Missing archive files are recorded in manifests and do **not** fail the run.
-- Funding gaps are filled using the Binance REST API when enabled; aligned funding is forward-filled to 15m and
-  missing leading values are filled with `0.0` (recorded as funding fill percentage in manifests).
+- Funding gaps are recorded in manifests; missing funding does not get silently filled.

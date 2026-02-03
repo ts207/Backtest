@@ -138,11 +138,11 @@ def main() -> int:
                 for month, values in details.get("pct_missing_ohlcv", {}).items():
                     lines.append(f"  - {month}: {values.get('pct_missing_ohlcv', 0.0):.2%}")
             lines.append("")
-            lines.append("### Funding fill (%) by month")
+            lines.append("### Funding missing (%) by month")
             for symbol, details in cleaned_stats.get("symbols", {}).items():
                 lines.append(f"- **{symbol}**")
-                for month, values in details.get("pct_missing_funding_filled", {}).items():
-                    lines.append(f"  - {month}: {values.get('pct_missing_funding_filled', 0.0):.2%}")
+                for month, values in details.get("pct_missing_funding_event", {}).items():
+                    lines.append(f"  - {month}: {values.get('pct_missing_funding_event', 0.0):.2%}")
 
         report_path.write_text("\n".join(lines), encoding="utf-8")
         outputs.append({"path": str(report_path), "rows": len(lines), "start_ts": None, "end_ts": None})

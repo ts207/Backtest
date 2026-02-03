@@ -48,6 +48,9 @@ def main() -> int:
     parser.add_argument("--force", type=int, default=0)
     parser.add_argument("--skip_ingest_ohlcv", type=int, default=0)
     parser.add_argument("--skip_ingest_funding", type=int, default=0)
+    parser.add_argument("--allow_missing_funding", type=int, default=0)
+    parser.add_argument("--allow_constant_funding", type=int, default=0)
+    parser.add_argument("--allow_funding_timestamp_rounding", type=int, default=0)
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--fees_bps", type=float, default=None)
     parser.add_argument("--slippage_bps", type=float, default=None)
@@ -58,6 +61,9 @@ def main() -> int:
     start = args.start
     end = args.end
     force_flag = str(int(args.force))
+    allow_missing_funding_flag = str(int(args.allow_missing_funding))
+    allow_constant_funding_flag = str(int(args.allow_constant_funding))
+    allow_funding_timestamp_rounding_flag = str(int(args.allow_funding_timestamp_rounding))
 
     stages: List[Tuple[str, Path, List[str]]] = []
     if not args.skip_ingest_ohlcv:
@@ -115,6 +121,12 @@ def main() -> int:
                     end,
                     "--force",
                     force_flag,
+                    "--allow_missing_funding",
+                    allow_missing_funding_flag,
+                    "--allow_constant_funding",
+                    allow_constant_funding_flag,
+                    "--allow_funding_timestamp_rounding",
+                    allow_funding_timestamp_rounding_flag,
                 ],
             ),
             (
@@ -127,6 +139,8 @@ def main() -> int:
                     symbols,
                     "--force",
                     force_flag,
+                    "--allow_missing_funding",
+                    allow_missing_funding_flag,
                 ],
             ),
             (

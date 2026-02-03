@@ -24,6 +24,16 @@ FEE_RATE = 0.0004
 SLIP_RATE = 0.0002
 RISK_PCT = 0.005
 INITIAL_EQUITY = 1_000_000.0
+REQUIRED_FIELDS = [
+    "rv_pct_17280",
+    "range_96",
+    "range_med_2880",
+    "prior_high_96",
+    "prior_low_96",
+    "low_96",
+    "high_96",
+    "close",
+]
 
 
 @dataclass
@@ -141,19 +151,7 @@ def _run_backtest(symbol: str, data: pd.DataFrame, trade_day_timezone: str) -> L
         # Normalize to configured time zone for one-trade-per-day rule.
         day = ts.tz_convert(trade_day_timezone).normalize()
 
-        required_fields = [
-            "rv_pct_17280",
-            "range_96",
-            "range_med_2880",
-            "prior_high_96",
-            "prior_low_96",
-            "low_96",
-            "high_96",
-            "close",
-            "is_gap",
-            "gap_len",
-        ]
-        if row[required_fields].isna().any() or row["is_gap"] or row["gap_len"] > 0:
+        if row[REQUIRED_FIELDS].isna().any() or row["is_gap"] or row["gap_len"] > 0:
             continue
 
         if in_position:
@@ -296,6 +294,21 @@ def _run_scenario(
     return trades
 
 
+def _skip_stats(data: pd.DataFrame) -> Dict[str, object]:
+    temp = data.copy()
+    temp["prior_high_96"] = temp["high_96"].shift(1)
+    temp["prior_low_96"] = temp["low_96"].shift(1)
+    mask = temp[REQUIRED_FIELDS].isna().any(axis=1) | temp["is_gap"] | (temp["gap_len"] > 0)
+    total_rows = int(len(temp))
+    skipped_rows = int(mask.sum()) if total_rows else 0
+    pct_skipped = float(skipped_rows / total_rows) if total_rows else 0.0
+    return {
+        "rows_total": total_rows,
+        "rows_skipped": skipped_rows,
+        "pct_rows_skipped": pct_skipped,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Backtest volatility compression -> expansion")
     parser.add_argument("--run_id", required=True)
@@ -349,9 +362,11 @@ def main() -> int:
             return 0
 
         data_map: Dict[str, pd.DataFrame] = {}
+        skip_stats_map: Dict[str, Dict[str, object]] = {}
         for symbol in symbols:
             data = _prepare_data(symbol)
             data_map[symbol] = data
+            skip_stats_map[symbol] = _skip_stats(data)
             inputs.append({"path": f"features+bars:{symbol}", **_collect_stats(data)})
 
         global FEE_RATE, SLIP_RATE, RISK_PCT
@@ -410,7 +425,13 @@ def main() -> int:
             json.dump(fee_sensitivity, f, indent=2, sort_keys=True)
         outputs.append({"path": str(fee_path), "rows": len(fee_sensitivity), "start_ts": None, "end_ts": None})
 
-        stats["symbols"] = {symbol: {"trades": len([t for t in base_trades if t.symbol == symbol])} for symbol in symbols}
+        stats["symbols"] = {
+            symbol: {
+                "trades": len([t for t in base_trades if t.symbol == symbol]),
+                **skip_stats_map.get(symbol, {}),
+            }
+            for symbol in symbols
+        }
         finalize_manifest(manifest, "success", stats=stats)
         return 0
     except Exception as exc:

@@ -57,6 +57,7 @@ def main() -> int:
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--force", type=int, default=0)
+    parser.add_argument("--allow_missing_funding", type=int, default=0)
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
@@ -80,6 +81,7 @@ def main() -> int:
         "symbols": symbols,
         "trade_day_timezone": config.get("trade_day_timezone", "UTC"),
         "force": int(args.force),
+        "allow_missing_funding": int(args.allow_missing_funding),
     }
     manifest = start_manifest("build_features_v1", run_id, params, inputs, outputs)
     stats: Dict[str, object] = {"symbols": {}}
@@ -104,14 +106,27 @@ def main() -> int:
             if not funding.empty:
                 inputs.append({"path": str(funding_dir), **_collect_stats(funding)})
 
-            if not funding.empty:
-                funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
-                funding = funding.sort_values("timestamp").reset_index(drop=True)
-                bars = bars.merge(funding[["timestamp", "funding_rate"]], on="timestamp", how="left")
+            if funding.empty:
+                if not args.allow_missing_funding:
+                    raise ValueError(
+                        f"No cleaned funding data for {symbol}. Use --allow_missing_funding=1 to proceed."
+                    )
+                bars["funding_event_ts"] = pd.NaT
+                bars["funding_rate_scaled"] = np.nan
             else:
-                bars["funding_rate"] = 0.0
+                validate_columns(funding, ["timestamp", "funding_event_ts", "funding_rate_scaled"])
+                funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
+                funding["funding_event_ts"] = pd.to_datetime(funding["funding_event_ts"], utc=True)
+                funding = funding.sort_values("timestamp").reset_index(drop=True)
+                bars = bars.merge(
+                    funding[["timestamp", "funding_event_ts", "funding_rate_scaled"]],
+                    on="timestamp",
+                    how="left",
+                )
 
-            features = bars[["timestamp", "open", "high", "low", "close", "funding_rate"]].copy()
+            features = bars[
+                ["timestamp", "open", "high", "low", "close", "funding_event_ts", "funding_rate_scaled"]
+            ].copy()
             features["logret_1"] = np.log(features["close"]).diff()
             features["rv_96"] = features["logret_1"].rolling(window=96, min_periods=96).std()
             features["rv_pct_17280"] = _rolling_percentile(features["rv_96"], window=17280)
