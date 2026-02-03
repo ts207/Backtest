@@ -7,7 +7,6 @@ Each stage accepts a `--run_id`, writes a manifest, and stores artifacts in `pro
 ## Run the full pipeline
 ```bash
 python project/pipelines/run_all.py \
-  --run_id 2024-01-01 \
   --symbols BTCUSDT,ETHUSDT \
   --start 2023-01-01 \
   --end 2023-12-31
@@ -20,6 +19,10 @@ python project/pipelines/run_all.py \
 - Trades and metrics: `project/lake/trades/backtests/vol_compression_expansion_v1/<run_id>/...`
 - Report: `project/reports/vol_compression_expansion_v1/<run_id>/summary.md`
 - Manifests: `project/runs/<run_id>/<stage>.json`
+
+## Notes on availability
+- USD-M futures data begins in late 2019. Requests earlier than that are clamped and recorded in manifests.
+- Missing archive files are noted in manifests and are not fatal.
 
 ## Agent Mode
 External orchestrators should call:

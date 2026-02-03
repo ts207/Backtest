@@ -10,38 +10,48 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def start_manifest(run_id: str, stage: str, config_paths: List[str]) -> Dict[str, Any]:
+def _manifest_path(run_id: str, stage: str) -> Path:
+    project_root = Path(__file__).resolve().parents[2]
+    out_dir = project_root / "runs" / run_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir / f"{stage}.json"
+
+
+def start_manifest(
+    stage_name: str,
+    run_id: str,
+    params: Dict[str, Any],
+    inputs: List[Dict[str, Any]],
+    outputs: List[Dict[str, Any]],
+) -> Dict[str, Any]:
     return {
         "run_id": run_id,
-        "stage": stage,
+        "stage": stage_name,
         "started_at": _utc_now_iso(),
         "finished_at": None,
-        "status": "failed",
-        "config_paths": config_paths,
-        "inputs": [],
-        "outputs": [],
+        "status": "running",
+        "parameters": params,
+        "inputs": inputs,
+        "outputs": outputs,
         "error": None,
+        "stats": None,
     }
 
 
 def finalize_manifest(
     manifest: Dict[str, Any],
-    inputs: List[Dict[str, Any]],
-    outputs: List[Dict[str, Any]],
     status: str,
     error: Optional[str] = None,
+    stats: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     manifest["finished_at"] = _utc_now_iso()
     manifest["status"] = status
-    manifest["inputs"] = inputs
-    manifest["outputs"] = outputs
     manifest["error"] = error
+    manifest["stats"] = stats
 
-    run_id = manifest["run_id"]
-    stage = manifest["stage"]
-    out_dir = Path("project") / "runs" / run_id
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{stage}.json"
-    with out_path.open("w", encoding="utf-8") as f:
+    out_path = _manifest_path(manifest["run_id"], manifest["stage"])
+    temp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+    with temp_path.open("w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, sort_keys=True)
+    temp_path.replace(out_path)
     return manifest
