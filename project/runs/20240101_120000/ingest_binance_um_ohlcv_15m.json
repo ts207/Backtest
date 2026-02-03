@@ -1,0 +1,897 @@
+{
+  "error": null,
+  "finished_at": "2026-02-03T18:45:05.320706+00:00",
+  "inputs": [],
+  "outputs": [
+    {
+      "end_ts": "2022-01-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=01\\ohlcv_BTCUSDT_15m_2022-01.csv",
+      "rows": 2976,
+      "start_ts": "2022-01-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-02-28T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=02\\ohlcv_BTCUSDT_15m_2022-02.csv",
+      "rows": 2688,
+      "start_ts": "2022-02-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-03-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=03\\ohlcv_BTCUSDT_15m_2022-03.csv",
+      "rows": 2976,
+      "start_ts": "2022-03-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-04-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=04\\ohlcv_BTCUSDT_15m_2022-04.csv",
+      "rows": 2880,
+      "start_ts": "2022-04-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-05-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=05\\ohlcv_BTCUSDT_15m_2022-05.csv",
+      "rows": 2976,
+      "start_ts": "2022-05-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-06-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=06\\ohlcv_BTCUSDT_15m_2022-06.csv",
+      "rows": 2880,
+      "start_ts": "2022-06-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-07-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=07\\ohlcv_BTCUSDT_15m_2022-07.csv",
+      "rows": 2976,
+      "start_ts": "2022-07-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-08-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=08\\ohlcv_BTCUSDT_15m_2022-08.csv",
+      "rows": 2976,
+      "start_ts": "2022-08-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-09-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=09\\ohlcv_BTCUSDT_15m_2022-09.csv",
+      "rows": 2880,
+      "start_ts": "2022-09-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-10-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=10\\ohlcv_BTCUSDT_15m_2022-10.csv",
+      "rows": 2976,
+      "start_ts": "2022-10-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-11-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=11\\ohlcv_BTCUSDT_15m_2022-11.csv",
+      "rows": 2880,
+      "start_ts": "2022-11-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-12-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=12\\ohlcv_BTCUSDT_15m_2022-12.csv",
+      "rows": 2976,
+      "start_ts": "2022-12-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-01-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=01\\ohlcv_BTCUSDT_15m_2023-01.csv",
+      "rows": 2976,
+      "start_ts": "2023-01-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-02-28T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=02\\ohlcv_BTCUSDT_15m_2023-02.csv",
+      "rows": 2688,
+      "start_ts": "2023-02-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-03-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=03\\ohlcv_BTCUSDT_15m_2023-03.csv",
+      "rows": 2976,
+      "start_ts": "2023-03-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-04-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=04\\ohlcv_BTCUSDT_15m_2023-04.csv",
+      "rows": 2880,
+      "start_ts": "2023-04-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-05-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=05\\ohlcv_BTCUSDT_15m_2023-05.csv",
+      "rows": 2976,
+      "start_ts": "2023-05-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-06-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=06\\ohlcv_BTCUSDT_15m_2023-06.csv",
+      "rows": 2880,
+      "start_ts": "2023-06-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-07-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=07\\ohlcv_BTCUSDT_15m_2023-07.csv",
+      "rows": 2976,
+      "start_ts": "2023-07-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-08-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=08\\ohlcv_BTCUSDT_15m_2023-08.csv",
+      "rows": 2976,
+      "start_ts": "2023-08-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-09-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=09\\ohlcv_BTCUSDT_15m_2023-09.csv",
+      "rows": 2880,
+      "start_ts": "2023-09-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-10-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=10\\ohlcv_BTCUSDT_15m_2023-10.csv",
+      "rows": 2976,
+      "start_ts": "2023-10-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-11-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=11\\ohlcv_BTCUSDT_15m_2023-11.csv",
+      "rows": 2880,
+      "start_ts": "2023-11-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-12-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=12\\ohlcv_BTCUSDT_15m_2023-12.csv",
+      "rows": 2976,
+      "start_ts": "2023-12-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-01-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=01\\ohlcv_BTCUSDT_15m_2024-01.csv",
+      "rows": 2976,
+      "start_ts": "2024-01-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-02-29T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=02\\ohlcv_BTCUSDT_15m_2024-02.csv",
+      "rows": 2784,
+      "start_ts": "2024-02-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-03-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=03\\ohlcv_BTCUSDT_15m_2024-03.csv",
+      "rows": 2976,
+      "start_ts": "2024-03-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-04-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=04\\ohlcv_BTCUSDT_15m_2024-04.csv",
+      "rows": 2880,
+      "start_ts": "2024-04-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-05-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=05\\ohlcv_BTCUSDT_15m_2024-05.csv",
+      "rows": 2976,
+      "start_ts": "2024-05-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-06-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=06\\ohlcv_BTCUSDT_15m_2024-06.csv",
+      "rows": 2880,
+      "start_ts": "2024-06-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-07-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=07\\ohlcv_BTCUSDT_15m_2024-07.csv",
+      "rows": 2976,
+      "start_ts": "2024-07-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-08-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=08\\ohlcv_BTCUSDT_15m_2024-08.csv",
+      "rows": 2976,
+      "start_ts": "2024-08-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-09-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=09\\ohlcv_BTCUSDT_15m_2024-09.csv",
+      "rows": 2880,
+      "start_ts": "2024-09-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-10-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=10\\ohlcv_BTCUSDT_15m_2024-10.csv",
+      "rows": 2976,
+      "start_ts": "2024-10-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-11-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=11\\ohlcv_BTCUSDT_15m_2024-11.csv",
+      "rows": 2880,
+      "start_ts": "2024-11-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-12-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=12\\ohlcv_BTCUSDT_15m_2024-12.csv",
+      "rows": 2976,
+      "start_ts": "2024-12-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2025-01-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2025\\month=01\\ohlcv_BTCUSDT_15m_2025-01.csv",
+      "rows": 2976,
+      "start_ts": "2025-01-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2025-02-28T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2025\\month=02\\ohlcv_BTCUSDT_15m_2025-02.csv",
+      "rows": 2688,
+      "start_ts": "2025-02-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2025-03-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2025\\month=03\\ohlcv_BTCUSDT_15m_2025-03.csv",
+      "rows": 2976,
+      "start_ts": "2025-03-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2025-04-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2025\\month=04\\ohlcv_BTCUSDT_15m_2025-04.csv",
+      "rows": 2880,
+      "start_ts": "2025-04-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2025-05-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2025\\month=05\\ohlcv_BTCUSDT_15m_2025-05.csv",
+      "rows": 2976,
+      "start_ts": "2025-05-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2025-06-01T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2025\\month=06\\ohlcv_BTCUSDT_15m_2025-06.csv",
+      "rows": 96,
+      "start_ts": "2025-06-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2020-06-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2020\\month=06\\ohlcv_ETHUSDT_15m_2020-06.csv",
+      "rows": 2880,
+      "start_ts": "2020-06-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2020-07-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2020\\month=07\\ohlcv_ETHUSDT_15m_2020-07.csv",
+      "rows": 2976,
+      "start_ts": "2020-07-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2020-08-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2020\\month=08\\ohlcv_ETHUSDT_15m_2020-08.csv",
+      "rows": 2976,
+      "start_ts": "2020-08-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2020-09-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2020\\month=09\\ohlcv_ETHUSDT_15m_2020-09.csv",
+      "rows": 2880,
+      "start_ts": "2020-09-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2020-10-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2020\\month=10\\ohlcv_ETHUSDT_15m_2020-10.csv",
+      "rows": 2976,
+      "start_ts": "2020-10-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2020-11-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2020\\month=11\\ohlcv_ETHUSDT_15m_2020-11.csv",
+      "rows": 2880,
+      "start_ts": "2020-11-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2020-12-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2020\\month=12\\ohlcv_ETHUSDT_15m_2020-12.csv",
+      "rows": 2976,
+      "start_ts": "2020-12-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2021-01-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=01\\ohlcv_ETHUSDT_15m_2021-01.csv",
+      "rows": 2976,
+      "start_ts": "2021-01-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2021-02-28T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=02\\ohlcv_ETHUSDT_15m_2021-02.csv",
+      "rows": 2688,
+      "start_ts": "2021-02-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2021-03-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=03\\ohlcv_ETHUSDT_15m_2021-03.csv",
+      "rows": 2976,
+      "start_ts": "2021-03-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2021-04-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=04\\ohlcv_ETHUSDT_15m_2021-04.csv",
+      "rows": 2880,
+      "start_ts": "2021-04-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2021-05-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=05\\ohlcv_ETHUSDT_15m_2021-05.csv",
+      "rows": 2976,
+      "start_ts": "2021-05-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2021-06-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=06\\ohlcv_ETHUSDT_15m_2021-06.csv",
+      "rows": 2880,
+      "start_ts": "2021-06-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2021-07-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=07\\ohlcv_ETHUSDT_15m_2021-07.csv",
+      "rows": 2976,
+      "start_ts": "2021-07-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2021-08-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=08\\ohlcv_ETHUSDT_15m_2021-08.csv",
+      "rows": 2976,
+      "start_ts": "2021-08-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2021-09-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=09\\ohlcv_ETHUSDT_15m_2021-09.csv",
+      "rows": 2880,
+      "start_ts": "2021-09-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2021-10-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=10\\ohlcv_ETHUSDT_15m_2021-10.csv",
+      "rows": 2976,
+      "start_ts": "2021-10-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2021-11-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=11\\ohlcv_ETHUSDT_15m_2021-11.csv",
+      "rows": 2880,
+      "start_ts": "2021-11-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2021-12-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=12\\ohlcv_ETHUSDT_15m_2021-12.csv",
+      "rows": 2976,
+      "start_ts": "2021-12-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-01-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=01\\ohlcv_ETHUSDT_15m_2022-01.csv",
+      "rows": 2976,
+      "start_ts": "2022-01-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-02-28T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=02\\ohlcv_ETHUSDT_15m_2022-02.csv",
+      "rows": 2688,
+      "start_ts": "2022-02-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-03-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=03\\ohlcv_ETHUSDT_15m_2022-03.csv",
+      "rows": 2976,
+      "start_ts": "2022-03-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-04-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=04\\ohlcv_ETHUSDT_15m_2022-04.csv",
+      "rows": 2880,
+      "start_ts": "2022-04-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-05-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=05\\ohlcv_ETHUSDT_15m_2022-05.csv",
+      "rows": 2976,
+      "start_ts": "2022-05-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-06-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=06\\ohlcv_ETHUSDT_15m_2022-06.csv",
+      "rows": 2880,
+      "start_ts": "2022-06-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-07-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=07\\ohlcv_ETHUSDT_15m_2022-07.csv",
+      "rows": 2976,
+      "start_ts": "2022-07-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-08-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=08\\ohlcv_ETHUSDT_15m_2022-08.csv",
+      "rows": 2976,
+      "start_ts": "2022-08-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-09-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=09\\ohlcv_ETHUSDT_15m_2022-09.csv",
+      "rows": 2880,
+      "start_ts": "2022-09-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-10-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=10\\ohlcv_ETHUSDT_15m_2022-10.csv",
+      "rows": 2976,
+      "start_ts": "2022-10-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-11-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=11\\ohlcv_ETHUSDT_15m_2022-11.csv",
+      "rows": 2880,
+      "start_ts": "2022-11-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2022-12-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=12\\ohlcv_ETHUSDT_15m_2022-12.csv",
+      "rows": 2976,
+      "start_ts": "2022-12-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-01-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=01\\ohlcv_ETHUSDT_15m_2023-01.csv",
+      "rows": 2976,
+      "start_ts": "2023-01-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-02-28T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=02\\ohlcv_ETHUSDT_15m_2023-02.csv",
+      "rows": 2688,
+      "start_ts": "2023-02-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-03-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=03\\ohlcv_ETHUSDT_15m_2023-03.csv",
+      "rows": 2976,
+      "start_ts": "2023-03-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-04-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=04\\ohlcv_ETHUSDT_15m_2023-04.csv",
+      "rows": 2880,
+      "start_ts": "2023-04-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-05-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=05\\ohlcv_ETHUSDT_15m_2023-05.csv",
+      "rows": 2976,
+      "start_ts": "2023-05-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-06-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=06\\ohlcv_ETHUSDT_15m_2023-06.csv",
+      "rows": 2880,
+      "start_ts": "2023-06-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-07-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=07\\ohlcv_ETHUSDT_15m_2023-07.csv",
+      "rows": 2976,
+      "start_ts": "2023-07-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-08-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=08\\ohlcv_ETHUSDT_15m_2023-08.csv",
+      "rows": 2976,
+      "start_ts": "2023-08-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-09-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=09\\ohlcv_ETHUSDT_15m_2023-09.csv",
+      "rows": 2880,
+      "start_ts": "2023-09-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-10-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=10\\ohlcv_ETHUSDT_15m_2023-10.csv",
+      "rows": 2976,
+      "start_ts": "2023-10-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-11-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=11\\ohlcv_ETHUSDT_15m_2023-11.csv",
+      "rows": 2880,
+      "start_ts": "2023-11-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2023-12-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=12\\ohlcv_ETHUSDT_15m_2023-12.csv",
+      "rows": 2976,
+      "start_ts": "2023-12-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-01-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=01\\ohlcv_ETHUSDT_15m_2024-01.csv",
+      "rows": 2976,
+      "start_ts": "2024-01-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-02-29T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=02\\ohlcv_ETHUSDT_15m_2024-02.csv",
+      "rows": 2784,
+      "start_ts": "2024-02-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-03-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=03\\ohlcv_ETHUSDT_15m_2024-03.csv",
+      "rows": 2976,
+      "start_ts": "2024-03-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-04-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=04\\ohlcv_ETHUSDT_15m_2024-04.csv",
+      "rows": 2880,
+      "start_ts": "2024-04-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-05-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=05\\ohlcv_ETHUSDT_15m_2024-05.csv",
+      "rows": 2976,
+      "start_ts": "2024-05-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-06-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=06\\ohlcv_ETHUSDT_15m_2024-06.csv",
+      "rows": 2880,
+      "start_ts": "2024-06-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-07-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=07\\ohlcv_ETHUSDT_15m_2024-07.csv",
+      "rows": 2976,
+      "start_ts": "2024-07-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-08-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=08\\ohlcv_ETHUSDT_15m_2024-08.csv",
+      "rows": 2976,
+      "start_ts": "2024-08-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-09-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=09\\ohlcv_ETHUSDT_15m_2024-09.csv",
+      "rows": 2880,
+      "start_ts": "2024-09-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-10-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=10\\ohlcv_ETHUSDT_15m_2024-10.csv",
+      "rows": 2976,
+      "start_ts": "2024-10-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-11-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=11\\ohlcv_ETHUSDT_15m_2024-11.csv",
+      "rows": 2880,
+      "start_ts": "2024-11-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2024-12-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=12\\ohlcv_ETHUSDT_15m_2024-12.csv",
+      "rows": 2976,
+      "start_ts": "2024-12-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2025-01-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2025\\month=01\\ohlcv_ETHUSDT_15m_2025-01.csv",
+      "rows": 2976,
+      "start_ts": "2025-01-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2025-02-28T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2025\\month=02\\ohlcv_ETHUSDT_15m_2025-02.csv",
+      "rows": 2688,
+      "start_ts": "2025-02-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2025-03-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2025\\month=03\\ohlcv_ETHUSDT_15m_2025-03.csv",
+      "rows": 2976,
+      "start_ts": "2025-03-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2025-04-30T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2025\\month=04\\ohlcv_ETHUSDT_15m_2025-04.csv",
+      "rows": 2880,
+      "start_ts": "2025-04-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2025-05-31T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2025\\month=05\\ohlcv_ETHUSDT_15m_2025-05.csv",
+      "rows": 2976,
+      "start_ts": "2025-05-01T00:00:00+00:00",
+      "storage": "csv"
+    },
+    {
+      "end_ts": "2025-06-01T23:45:00+00:00",
+      "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2025\\month=06\\ohlcv_ETHUSDT_15m_2025-06.csv",
+      "rows": 96,
+      "start_ts": "2025-06-01T00:00:00+00:00",
+      "storage": "csv"
+    }
+  ],
+  "parameters": {
+    "effective_end": "2025-06-01T00:00:00+00:00",
+    "effective_start": "2020-06-01T00:00:00+00:00",
+    "force": 0,
+    "max_retries": 5,
+    "out_root": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp",
+    "requested_end": "2025-06-01",
+    "requested_start": "2020-06-01",
+    "retry_backoff_sec": 2.0,
+    "symbols": [
+      "BTCUSDT",
+      "ETHUSDT"
+    ]
+  },
+  "run_id": "20240101_120000",
+  "stage": "ingest_binance_um_ohlcv_15m",
+  "started_at": "2026-02-03T18:43:33.799487+00:00",
+  "stats": {
+    "symbols": {
+      "BTCUSDT": {
+        "bars_expected": 175392,
+        "bars_written": 119808,
+        "effective_end": "2025-06-01T00:00:00+00:00",
+        "effective_start": "2020-06-01T00:00:00+00:00",
+        "missing_archive_files": [],
+        "partitions_skipped": [
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2020\\month=06\\ohlcv_BTCUSDT_15m_2020-06.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2020\\month=07\\ohlcv_BTCUSDT_15m_2020-07.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2020\\month=08\\ohlcv_BTCUSDT_15m_2020-08.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2020\\month=09\\ohlcv_BTCUSDT_15m_2020-09.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2020\\month=10\\ohlcv_BTCUSDT_15m_2020-10.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2020\\month=11\\ohlcv_BTCUSDT_15m_2020-11.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2020\\month=12\\ohlcv_BTCUSDT_15m_2020-12.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2021\\month=01\\ohlcv_BTCUSDT_15m_2021-01.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2021\\month=02\\ohlcv_BTCUSDT_15m_2021-02.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2021\\month=03\\ohlcv_BTCUSDT_15m_2021-03.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2021\\month=04\\ohlcv_BTCUSDT_15m_2021-04.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2021\\month=05\\ohlcv_BTCUSDT_15m_2021-05.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2021\\month=06\\ohlcv_BTCUSDT_15m_2021-06.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2021\\month=07\\ohlcv_BTCUSDT_15m_2021-07.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2021\\month=08\\ohlcv_BTCUSDT_15m_2021-08.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2021\\month=09\\ohlcv_BTCUSDT_15m_2021-09.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2021\\month=10\\ohlcv_BTCUSDT_15m_2021-10.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2021\\month=11\\ohlcv_BTCUSDT_15m_2021-11.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2021\\month=12\\ohlcv_BTCUSDT_15m_2021-12.parquet"
+        ],
+        "partitions_written": [
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=01\\ohlcv_BTCUSDT_15m_2022-01.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=02\\ohlcv_BTCUSDT_15m_2022-02.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=03\\ohlcv_BTCUSDT_15m_2022-03.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=04\\ohlcv_BTCUSDT_15m_2022-04.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=05\\ohlcv_BTCUSDT_15m_2022-05.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=06\\ohlcv_BTCUSDT_15m_2022-06.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=07\\ohlcv_BTCUSDT_15m_2022-07.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=08\\ohlcv_BTCUSDT_15m_2022-08.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=09\\ohlcv_BTCUSDT_15m_2022-09.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=10\\ohlcv_BTCUSDT_15m_2022-10.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=11\\ohlcv_BTCUSDT_15m_2022-11.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2022\\month=12\\ohlcv_BTCUSDT_15m_2022-12.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=01\\ohlcv_BTCUSDT_15m_2023-01.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=02\\ohlcv_BTCUSDT_15m_2023-02.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=03\\ohlcv_BTCUSDT_15m_2023-03.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=04\\ohlcv_BTCUSDT_15m_2023-04.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=05\\ohlcv_BTCUSDT_15m_2023-05.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=06\\ohlcv_BTCUSDT_15m_2023-06.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=07\\ohlcv_BTCUSDT_15m_2023-07.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=08\\ohlcv_BTCUSDT_15m_2023-08.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=09\\ohlcv_BTCUSDT_15m_2023-09.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=10\\ohlcv_BTCUSDT_15m_2023-10.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=11\\ohlcv_BTCUSDT_15m_2023-11.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2023\\month=12\\ohlcv_BTCUSDT_15m_2023-12.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=01\\ohlcv_BTCUSDT_15m_2024-01.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=02\\ohlcv_BTCUSDT_15m_2024-02.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=03\\ohlcv_BTCUSDT_15m_2024-03.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=04\\ohlcv_BTCUSDT_15m_2024-04.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=05\\ohlcv_BTCUSDT_15m_2024-05.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=06\\ohlcv_BTCUSDT_15m_2024-06.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=07\\ohlcv_BTCUSDT_15m_2024-07.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=08\\ohlcv_BTCUSDT_15m_2024-08.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=09\\ohlcv_BTCUSDT_15m_2024-09.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=10\\ohlcv_BTCUSDT_15m_2024-10.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=11\\ohlcv_BTCUSDT_15m_2024-11.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2024\\month=12\\ohlcv_BTCUSDT_15m_2024-12.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2025\\month=01\\ohlcv_BTCUSDT_15m_2025-01.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2025\\month=02\\ohlcv_BTCUSDT_15m_2025-02.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2025\\month=03\\ohlcv_BTCUSDT_15m_2025-03.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2025\\month=04\\ohlcv_BTCUSDT_15m_2025-04.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2025\\month=05\\ohlcv_BTCUSDT_15m_2025-05.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\BTCUSDT\\ohlcv_15m\\year=2025\\month=06\\ohlcv_BTCUSDT_15m_2025-06.csv"
+        ],
+        "requested_end": "2025-06-01",
+        "requested_start": "2020-06-01"
+      },
+      "ETHUSDT": {
+        "bars_expected": 175392,
+        "bars_written": 175392,
+        "effective_end": "2025-06-01T00:00:00+00:00",
+        "effective_start": "2020-06-01T00:00:00+00:00",
+        "missing_archive_files": [],
+        "partitions_skipped": [],
+        "partitions_written": [
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2020\\month=06\\ohlcv_ETHUSDT_15m_2020-06.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2020\\month=07\\ohlcv_ETHUSDT_15m_2020-07.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2020\\month=08\\ohlcv_ETHUSDT_15m_2020-08.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2020\\month=09\\ohlcv_ETHUSDT_15m_2020-09.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2020\\month=10\\ohlcv_ETHUSDT_15m_2020-10.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2020\\month=11\\ohlcv_ETHUSDT_15m_2020-11.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2020\\month=12\\ohlcv_ETHUSDT_15m_2020-12.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=01\\ohlcv_ETHUSDT_15m_2021-01.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=02\\ohlcv_ETHUSDT_15m_2021-02.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=03\\ohlcv_ETHUSDT_15m_2021-03.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=04\\ohlcv_ETHUSDT_15m_2021-04.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=05\\ohlcv_ETHUSDT_15m_2021-05.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=06\\ohlcv_ETHUSDT_15m_2021-06.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=07\\ohlcv_ETHUSDT_15m_2021-07.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=08\\ohlcv_ETHUSDT_15m_2021-08.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=09\\ohlcv_ETHUSDT_15m_2021-09.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=10\\ohlcv_ETHUSDT_15m_2021-10.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=11\\ohlcv_ETHUSDT_15m_2021-11.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2021\\month=12\\ohlcv_ETHUSDT_15m_2021-12.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=01\\ohlcv_ETHUSDT_15m_2022-01.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=02\\ohlcv_ETHUSDT_15m_2022-02.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=03\\ohlcv_ETHUSDT_15m_2022-03.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=04\\ohlcv_ETHUSDT_15m_2022-04.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=05\\ohlcv_ETHUSDT_15m_2022-05.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=06\\ohlcv_ETHUSDT_15m_2022-06.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=07\\ohlcv_ETHUSDT_15m_2022-07.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=08\\ohlcv_ETHUSDT_15m_2022-08.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=09\\ohlcv_ETHUSDT_15m_2022-09.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=10\\ohlcv_ETHUSDT_15m_2022-10.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=11\\ohlcv_ETHUSDT_15m_2022-11.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2022\\month=12\\ohlcv_ETHUSDT_15m_2022-12.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=01\\ohlcv_ETHUSDT_15m_2023-01.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=02\\ohlcv_ETHUSDT_15m_2023-02.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=03\\ohlcv_ETHUSDT_15m_2023-03.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=04\\ohlcv_ETHUSDT_15m_2023-04.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=05\\ohlcv_ETHUSDT_15m_2023-05.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=06\\ohlcv_ETHUSDT_15m_2023-06.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=07\\ohlcv_ETHUSDT_15m_2023-07.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=08\\ohlcv_ETHUSDT_15m_2023-08.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=09\\ohlcv_ETHUSDT_15m_2023-09.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=10\\ohlcv_ETHUSDT_15m_2023-10.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=11\\ohlcv_ETHUSDT_15m_2023-11.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2023\\month=12\\ohlcv_ETHUSDT_15m_2023-12.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=01\\ohlcv_ETHUSDT_15m_2024-01.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=02\\ohlcv_ETHUSDT_15m_2024-02.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=03\\ohlcv_ETHUSDT_15m_2024-03.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=04\\ohlcv_ETHUSDT_15m_2024-04.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=05\\ohlcv_ETHUSDT_15m_2024-05.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=06\\ohlcv_ETHUSDT_15m_2024-06.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=07\\ohlcv_ETHUSDT_15m_2024-07.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=08\\ohlcv_ETHUSDT_15m_2024-08.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=09\\ohlcv_ETHUSDT_15m_2024-09.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=10\\ohlcv_ETHUSDT_15m_2024-10.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=11\\ohlcv_ETHUSDT_15m_2024-11.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2024\\month=12\\ohlcv_ETHUSDT_15m_2024-12.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2025\\month=01\\ohlcv_ETHUSDT_15m_2025-01.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2025\\month=02\\ohlcv_ETHUSDT_15m_2025-02.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2025\\month=03\\ohlcv_ETHUSDT_15m_2025-03.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2025\\month=04\\ohlcv_ETHUSDT_15m_2025-04.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2025\\month=05\\ohlcv_ETHUSDT_15m_2025-05.csv",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\raw\\binance\\perp\\ETHUSDT\\ohlcv_15m\\year=2025\\month=06\\ohlcv_ETHUSDT_15m_2025-06.csv"
+        ],
+        "requested_end": "2025-06-01",
+        "requested_start": "2020-06-01"
+      }
+    }
+  },
+  "status": "success"
+}

@@ -143,7 +143,9 @@ def main() -> int:
                 raise ValueError(f"No raw OHLCV data for {symbol}")
 
             validate_columns(raw, ["timestamp", "open", "high", "low", "close", "volume"])
-            raw["timestamp"] = pd.to_datetime(raw["timestamp"], utc=True)
+            raw["timestamp"] = pd.to_datetime(raw["timestamp"], utc=True, format="mixed")
+            if raw["timestamp"].isna().any():
+                raise ValueError(f"Invalid raw timestamps for {symbol}")
             ensure_utc_timestamp(raw["timestamp"], "timestamp")
             raw = raw.sort_values("timestamp").drop_duplicates(subset=["timestamp"]).reset_index(drop=True)
 
@@ -169,7 +171,9 @@ def main() -> int:
 
             if not funding.empty:
                 validate_columns(funding, ["timestamp", "funding_rate"])
-                funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
+                funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True, format="mixed")
+                if funding["timestamp"].isna().any():
+                    raise ValueError(f"Invalid funding timestamps for {symbol}")
                 funding = funding.sort_values("timestamp").drop_duplicates(subset=["timestamp"]).reset_index(drop=True)
             aligned_funding, funding_fill_pct = _align_funding(bars, funding)
 

@@ -83,6 +83,10 @@ def _read_ohlcv_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame:
         csv_name = zf.namelist()[0]
         with zf.open(csv_name) as f:
             df = pd.read_csv(f, header=None, names=columns)
+    df["open_time"] = pd.to_numeric(df["open_time"], errors="coerce")
+    if df["open_time"].isna().any():
+        df = df.loc[df["open_time"].notna()].copy()
+    df["open_time"] = df["open_time"].astype("int64")
     df["timestamp"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
     df = df[["timestamp", "open", "high", "low", "close", "volume"]]
     df[["open", "high", "low", "close", "volume"]] = df[

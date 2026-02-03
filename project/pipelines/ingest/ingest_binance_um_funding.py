@@ -69,7 +69,7 @@ def _read_funding_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame
             columns = {col.lower(): col for col in df.columns}
             ts_col = None
             rate_col = None
-            for candidate in ["fundingtime", "funding_time", "calctime", "timestamp"]:
+            for candidate in ["fundingtime", "funding_time", "calctime", "calc_time", "timestamp"]:
                 if candidate in columns:
                     ts_col = columns[candidate]
                     break
@@ -84,8 +84,11 @@ def _read_funding_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame
                 ts_col = df.columns[0]
                 rate_col = df.columns[1]
 
-    df["timestamp"] = pd.to_datetime(df[ts_col], unit="ms", utc=True)
-    df["funding_rate"] = df[rate_col].astype(float)
+    df["_ts"] = pd.to_numeric(df[ts_col], errors="coerce")
+    df["_rate"] = pd.to_numeric(df[rate_col], errors="coerce")
+    df = df.loc[df["_ts"].notna() & df["_rate"].notna()].copy()
+    df["timestamp"] = pd.to_datetime(df["_ts"].astype("int64"), unit="ms", utc=True)
+    df["funding_rate"] = df["_rate"].astype(float)
     df = df[["timestamp", "funding_rate"]]
     df["symbol"] = symbol
     df["source"] = source
