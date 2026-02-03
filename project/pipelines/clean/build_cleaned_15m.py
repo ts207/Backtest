@@ -219,6 +219,11 @@ def main() -> int:
                 assert_funding_sane(funding, "funding_rate_scaled")
 
             aligned_funding, funding_missing_pct = _align_funding(bars, funding)
+            funding_event_coverage_total = float(aligned_funding["funding_event_ts"].notna().mean()) if len(aligned_funding) else 0.0
+            funding_rate_values = aligned_funding["funding_rate_scaled"].dropna()
+            funding_rate_min = float(funding_rate_values.min()) if len(funding_rate_values) else None
+            funding_rate_max = float(funding_rate_values.max()) if len(funding_rate_values) else None
+            funding_rate_std = float(funding_rate_values.std()) if len(funding_rate_values) else None
 
             inputs.append(
                 {"path": str(raw_dir), "rows": int(len(raw)), "start_ts": raw_start.isoformat(), "end_ts": raw_end.isoformat()}
@@ -260,11 +265,16 @@ def main() -> int:
 
                 missing_pct = float(bars_month["is_gap"].mean()) if len(bars_month) else 0.0
                 funding_missing = float(funding_month["funding_missing"].mean()) if len(funding_month) else 0.0
-                funding_coverage = 1.0 - funding_missing
+                funding_event_coverage = float(funding_month["funding_event_ts"].notna().mean()) if len(funding_month) else 0.0
+                funding_event_count = int(funding_month["funding_event_ts"].dropna().nunique()) if len(funding_month) else 0
+                funding_month_values = funding_month["funding_rate_scaled"].dropna()
+                funding_rate_month_std = float(funding_month_values.std()) if len(funding_month_values) else None
                 missing_stats[f"{month_start.year}-{month_start.month:02d}"] = {"pct_missing_ohlcv": missing_pct}
                 funding_stats[f"{month_start.year}-{month_start.month:02d}"] = {
                     "pct_missing_funding_event": funding_missing,
-                    "pct_funding_event_coverage": funding_coverage,
+                    "pct_funding_event_coverage": funding_event_coverage,
+                    "funding_event_count": funding_event_count,
+                    "funding_rate_scaled_std": funding_rate_month_std,
                 }
 
                 if not args.allow_constant_funding:
@@ -327,6 +337,10 @@ def main() -> int:
                 "pct_missing_funding_event": funding_stats,
                 "funding_scale_used": funding_scale_used,
                 "funding_missing_pct": funding_missing_pct,
+                "pct_bars_with_funding_event": funding_event_coverage_total,
+                "funding_rate_scaled_min": funding_rate_min,
+                "funding_rate_scaled_max": funding_rate_max,
+                "funding_rate_scaled_std": funding_rate_std,
                 "funding_timestamp_rounded_count": funding_timestamp_rounded,
                 "gap_stats": {
                     "pct_missing_ohlcv": pct_missing_bars,

@@ -54,6 +54,8 @@ def main() -> int:
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--fees_bps", type=float, default=None)
     parser.add_argument("--slippage_bps", type=float, default=None)
+    parser.add_argument("--cost_bps", type=float, default=None)
+    parser.add_argument("--strategies", default=None)
     args = parser.parse_args()
 
     run_id = args.run_id or _run_id_default()
@@ -178,6 +180,10 @@ def main() -> int:
                 base_args.extend(["--fees_bps", str(args.fees_bps)])
             if args.slippage_bps is not None:
                 base_args.extend(["--slippage_bps", str(args.slippage_bps)])
+            if args.cost_bps is not None:
+                base_args.extend(["--cost_bps", str(args.cost_bps)])
+            if args.strategies is not None:
+                base_args.extend(["--strategies", str(args.strategies)])
 
     for stage, script, base_args in stages:
         if not _run_stage(stage, script, base_args, run_id):
