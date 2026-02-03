@@ -259,8 +259,7 @@ def main() -> int:
     config_paths.extend(args.config)
     config = load_configs(config_paths)
 
-    manifest = start_manifest(run_id, "ingest_binance_perp_15m", config_paths)
-    manifest["parameters"] = {
+    params = {
         "base_url": config.get("base_url", DEFAULT_BASE_URL),
         "interval": config.get("interval", DEFAULT_INTERVAL),
         "timeout_seconds": config.get("timeout_seconds", 15),
@@ -269,12 +268,15 @@ def main() -> int:
         "symbols": symbols,
         "start": args.start,
         "end": args.end,
+        "config_paths": config_paths,
     }
 
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
     if args.log_path:
         outputs.append({"path": args.log_path, "rows": None, "start_ts": None, "end_ts": None})
+
+    manifest = start_manifest("ingest_binance_perp_15m", run_id, params, inputs, outputs)
 
     try:
         base_url = config.get("base_url", DEFAULT_BASE_URL)
@@ -349,10 +351,10 @@ def main() -> int:
                 write_parquet(group, out_path)
                 outputs.append({"path": str(out_path), **_collect_stats(group)})
 
-        finalize_manifest(manifest, inputs, outputs, "success")
+        finalize_manifest(manifest, "success")
         return 0
     except Exception as exc:
-        finalize_manifest(manifest, inputs, outputs, "failed", error=str(exc))
+        finalize_manifest(manifest, "failed", error=str(exc))
         return 1
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,12 +11,11 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-# Make the project root importable.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.config import load_configs
-from pipelines._lib.io_utils import list_parquet_files, read_parquet
+from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.validation import ensure_utc_timestamp
 
@@ -43,9 +43,6 @@ class Trade:
 
 
 def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
-    """
-    Collect row count and start/end timestamps for a DataFrame.
-    """
     if df.empty:
         return {"rows": 0, "start_ts": None, "end_ts": None}
     return {
@@ -101,8 +98,8 @@ def _prepare_data(symbol: str) -> pd.DataFrame:
     """
     Load and merge features and cleaned bars for a symbol.
     """
-    features_dir = Path("project") / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
-    bars_dir = Path("project") / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
+    features_dir = PROJECT_ROOT / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
+    bars_dir = PROJECT_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
     feature_files = list_parquet_files(features_dir)
     bars_files = list_parquet_files(bars_dir)
     features = read_parquet(feature_files)
@@ -287,13 +284,25 @@ def _metrics_from_trades(trades: List[Trade]) -> Dict[str, object]:
     }
 
 
+def _run_scenario(
+    symbols: List[str],
+    data_map: Dict[str, pd.DataFrame],
+    trade_day_timezone: str,
+) -> List[Trade]:
+    trades: List[Trade] = []
+    for symbol in symbols:
+        symbol_trades = _run_backtest(symbol, data_map[symbol], trade_day_timezone)
+        trades.extend(symbol_trades)
+    return trades
+
+
 def main() -> int:
-    """
-    Entry point for the backtest stage.
-    """
     parser = argparse.ArgumentParser(description="Backtest volatility compression -> expansion")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
+    parser.add_argument("--fees_bps", type=float, default=None)
+    parser.add_argument("--slippage_bps", type=float, default=None)
+    parser.add_argument("--force", type=int, default=0)
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
@@ -301,47 +310,61 @@ def main() -> int:
     run_id = args.run_id
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
 
-    config_paths = ["project/configs/pipeline.yaml", "project/configs/fees.yaml"]
+    log_handlers = [logging.StreamHandler(sys.stdout)]
+    if args.log_path:
+        ensure_dir(Path(args.log_path).parent)
+        log_handlers.append(logging.FileHandler(args.log_path))
+    logging.basicConfig(level=logging.INFO, handlers=log_handlers, format="%(asctime)s %(levelname)s %(message)s")
+
+    config_paths = [str(PROJECT_ROOT / "configs" / "pipeline.yaml"), str(PROJECT_ROOT / "configs" / "fees.yaml")]
     config_paths.extend(args.config)
     config = load_configs(config_paths)
-    manifest = start_manifest(run_id, "backtest_vol_compression_v1", config_paths)
-    manifest["parameters"] = {
-        "fee_bps_per_side": config.get("fee_bps_per_side", 4),
-        "slippage_bps_per_fill": config.get("slippage_bps_per_fill", 2),
-        "risk_per_trade_pct": config.get("risk_per_trade_pct", 0.5),
-        "trade_day_timezone": config.get("trade_day_timezone", "UTC"),
+
+    fee_bps = float(args.fees_bps) if args.fees_bps is not None else float(config.get("fee_bps_per_side", 4))
+    slippage_bps = (
+        float(args.slippage_bps) if args.slippage_bps is not None else float(config.get("slippage_bps_per_fill", 2))
+    )
+    risk_pct = float(config.get("risk_per_trade_pct", 0.5))
+    trade_day_timezone = str(config.get("trade_day_timezone", "UTC"))
+
+    params = {
+        "fee_bps_per_side": fee_bps,
+        "slippage_bps_per_fill": slippage_bps,
+        "risk_per_trade_pct": risk_pct,
+        "trade_day_timezone": trade_day_timezone,
         "symbols": symbols,
+        "force": int(args.force),
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
-    if args.log_path:
-        outputs.append({"path": args.log_path, "rows": None, "start_ts": None, "end_ts": None})
+    manifest = start_manifest("backtest_vol_compression_v1", run_id, params, inputs, outputs)
+    stats: Dict[str, object] = {"symbols": {}}
 
     try:
-        global FEE_RATE, SLIP_RATE, RISK_PCT
-        FEE_RATE = float(config.get("fee_bps_per_side", 4)) / 10_000
-        SLIP_RATE = float(config.get("slippage_bps_per_fill", 2)) / 10_000
-        RISK_PCT = float(config.get("risk_per_trade_pct", 0.5)) / 100
-        trade_day_timezone = str(config.get("trade_day_timezone", "UTC"))
-
-        trades_dir = (
-            Path("project")
-            / "lake"
-            / "trades"
-            / "backtests"
-            / "vol_compression_expansion_v1"
-            / run_id
-        )
+        trades_dir = PROJECT_ROOT / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id
         trades_dir.mkdir(parents=True, exist_ok=True)
 
+        if not args.force and (trades_dir / "metrics.json").exists():
+            finalize_manifest(manifest, "success", stats={"skipped": True})
+            return 0
+
+        data_map: Dict[str, pd.DataFrame] = {}
+        for symbol in symbols:
+            data = _prepare_data(symbol)
+            data_map[symbol] = data
+            inputs.append({"path": f"features+bars:{symbol}", **_collect_stats(data)})
+
+        global FEE_RATE, SLIP_RATE, RISK_PCT
+        FEE_RATE = fee_bps / 10_000
+        SLIP_RATE = slippage_bps / 10_000
+        RISK_PCT = risk_pct / 100
+
+        base_trades = _run_scenario(symbols, data_map, trade_day_timezone)
         all_trades: List[Trade] = []
 
         for symbol in symbols:
-            data = _prepare_data(symbol)
-            inputs.append({"path": f"features+bars:{symbol}", **_collect_stats(data)})
-            symbol_trades = _run_backtest(symbol, data, trade_day_timezone)
+            symbol_trades = [t for t in base_trades if t.symbol == symbol]
             all_trades.extend(symbol_trades)
-
             trades_df = pd.DataFrame([t.__dict__ for t in symbol_trades])
             trades_path = trades_dir / f"trades_{symbol}.csv"
             trades_df.to_csv(trades_path, index=False)
@@ -354,7 +377,6 @@ def main() -> int:
             json.dump(metrics, f, indent=2, sort_keys=True)
         outputs.append({"path": str(metrics_path), "rows": 1, "start_ts": None, "end_ts": None})
 
-        # Build equity curve from sorted trades.
         equity_curve = pd.DataFrame(
             {
                 "timestamp": [t.exit_time for t in sorted_trades],
@@ -365,10 +387,35 @@ def main() -> int:
         equity_curve.to_csv(equity_curve_path, index=False)
         outputs.append({"path": str(equity_curve_path), "rows": len(equity_curve), "start_ts": None, "end_ts": None})
 
-        finalize_manifest(manifest, inputs, outputs, "success")
+        fee_scenarios = [0, 2, 5, 10]
+        if fee_bps not in fee_scenarios:
+            fee_scenarios.insert(0, fee_bps)
+        fee_sensitivity: Dict[str, Dict[str, object]] = {}
+
+        for scenario_fee in fee_scenarios:
+            FEE_RATE = float(scenario_fee) / 10_000
+            scenario_trades = _run_scenario(symbols, data_map, trade_day_timezone)
+            scenario_sorted = sorted(scenario_trades, key=lambda trade: (trade.exit_time, trade.entry_time))
+            scenario_metrics = _metrics_from_trades(scenario_sorted)
+            fee_sensitivity[str(scenario_fee)] = {
+                "fee_bps_per_side": scenario_fee,
+                "net_return": scenario_metrics["ending_equity"] - INITIAL_EQUITY,
+                "avg_r": scenario_metrics["avg_r"],
+                "max_drawdown": scenario_metrics["max_drawdown"],
+                "trades": scenario_metrics["total_trades"],
+            }
+
+        fee_path = trades_dir / "fee_sensitivity.json"
+        with fee_path.open("w", encoding="utf-8") as f:
+            json.dump(fee_sensitivity, f, indent=2, sort_keys=True)
+        outputs.append({"path": str(fee_path), "rows": len(fee_sensitivity), "start_ts": None, "end_ts": None})
+
+        stats["symbols"] = {symbol: {"trades": len([t for t in base_trades if t.symbol == symbol])} for symbol in symbols}
+        finalize_manifest(manifest, "success", stats=stats)
         return 0
     except Exception as exc:
-        finalize_manifest(manifest, inputs, outputs, "failed", error=str(exc))
+        logging.exception("Backtest failed")
+        finalize_manifest(manifest, "failed", error=str(exc), stats=stats)
         return 1
 
 
