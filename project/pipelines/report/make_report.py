@@ -30,6 +30,24 @@ def _load_trades(trades_dir: Path) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def _format_funding_section(cleaned_stats: Dict[str, object]) -> List[str]:
+    lines: List[str] = []
+    lines.append("### Funding coverage (%) by month")
+    for symbol, details in cleaned_stats.get("symbols", {}).items():
+        lines.append(f"- **{symbol}**")
+        for month, values in details.get("pct_missing_funding_event", {}).items():
+            coverage = float(values.get("pct_funding_event_coverage", 0.0))
+            lines.append(f"  - {month}: {coverage:.2%}")
+    lines.append("")
+    lines.append("### Funding missing (%) by month")
+    for symbol, details in cleaned_stats.get("symbols", {}).items():
+        lines.append(f"- **{symbol}**")
+        for month, values in details.get("pct_missing_funding_event", {}).items():
+            missing = float(values.get("pct_missing_funding_event", 0.0))
+            lines.append(f"  - {month}: {missing:.2%}")
+    return lines
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate report")
     parser.add_argument("--run_id", required=True)
@@ -138,11 +156,7 @@ def main() -> int:
                 for month, values in details.get("pct_missing_ohlcv", {}).items():
                     lines.append(f"  - {month}: {values.get('pct_missing_ohlcv', 0.0):.2%}")
             lines.append("")
-            lines.append("### Funding missing (%) by month")
-            for symbol, details in cleaned_stats.get("symbols", {}).items():
-                lines.append(f"- **{symbol}**")
-                for month, values in details.get("pct_missing_funding_event", {}).items():
-                    lines.append(f"  - {month}: {values.get('pct_missing_funding_event', 0.0):.2%}")
+            lines.extend(_format_funding_section(cleaned_stats))
 
         report_path.write_text("\n".join(lines), encoding="utf-8")
         outputs.append({"path": str(report_path), "rows": len(lines), "start_ts": None, "end_ts": None})

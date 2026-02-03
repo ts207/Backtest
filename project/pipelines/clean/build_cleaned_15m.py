@@ -260,9 +260,11 @@ def main() -> int:
 
                 missing_pct = float(bars_month["is_gap"].mean()) if len(bars_month) else 0.0
                 funding_missing = float(funding_month["funding_missing"].mean()) if len(funding_month) else 0.0
+                funding_coverage = 1.0 - funding_missing
                 missing_stats[f"{month_start.year}-{month_start.month:02d}"] = {"pct_missing_ohlcv": missing_pct}
                 funding_stats[f"{month_start.year}-{month_start.month:02d}"] = {
-                    "pct_missing_funding_event": funding_missing
+                    "pct_missing_funding_event": funding_missing,
+                    "pct_funding_event_coverage": funding_coverage,
                 }
 
                 if not args.allow_constant_funding:
