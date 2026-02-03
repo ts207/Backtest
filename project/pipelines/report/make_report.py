@@ -45,6 +45,19 @@ def _format_funding_section(cleaned_stats: Dict[str, object]) -> List[str]:
         for month, values in details.get("pct_missing_funding_event", {}).items():
             missing = float(values.get("pct_missing_funding_event", 0.0))
             lines.append(f"  - {month}: {missing:.2%}")
+    lines.append("")
+    lines.append("### Funding diagnostics")
+    for symbol, details in cleaned_stats.get("symbols", {}).items():
+        lines.append(f"- **{symbol}**")
+        pct_bars_with_event = float(details.get("pct_bars_with_funding_event", 0.0))
+        funding_min = details.get("funding_rate_scaled_min")
+        funding_max = details.get("funding_rate_scaled_max")
+        funding_std = details.get("funding_rate_scaled_std")
+        funding_min_display = f"{funding_min:.6f}" if isinstance(funding_min, (float, int)) else "n/a"
+        funding_max_display = f"{funding_max:.6f}" if isinstance(funding_max, (float, int)) else "n/a"
+        funding_std_display = f"{funding_std:.6f}" if isinstance(funding_std, (float, int)) else "n/a"
+        lines.append(f"  - % bars with funding_event_ts: {pct_bars_with_event:.2%}")
+        lines.append(f"  - funding_rate_scaled min/max/std: {funding_min_display} / {funding_max_display} / {funding_std_display}")
     return lines
 
 
