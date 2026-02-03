@@ -15,6 +15,10 @@ STAGES = [
 ]
 
 
+def _run_stage(cmd: list[str], log_path: Path) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("w", encoding="utf-8") as log_file:
+        result = subprocess.run(cmd, check=False, stdout=log_file, stderr=subprocess.STDOUT, text=True)
 def _run_stage(cmd: list[str]) -> None:
     result = subprocess.run(cmd, check=False)
     if result.returncode != 0:
@@ -27,6 +31,7 @@ def main() -> int:
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
+    parser.add_argument("--config", action="append", default=[])
     args = parser.parse_args()
 
     run_id = args.run_id
@@ -35,12 +40,19 @@ def main() -> int:
     end = args.end
 
     try:
+        log_dir = Path("project") / "runs" / run_id / "logs"
+        for name, script in STAGES:
+            log_path = log_dir / f"{name}.log"
+            cmd = [sys.executable, script, "--run_id", run_id, "--log_path", str(log_path)]
         for name, script in STAGES:
             cmd = [sys.executable, script, "--run_id", run_id]
             if name in {"ingest"}:
                 cmd.extend(["--symbols", symbols, "--start", start, "--end", end])
             elif name in {"clean", "features", "backtest"}:
                 cmd.extend(["--symbols", symbols])
+            for config_path in args.config:
+                cmd.extend(["--config", config_path])
+            _run_stage(cmd, log_path)
             _run_stage(cmd)
 
         report_path = Path("project") / "reports" / "vol_compression_expansion_v1" / run_id / "summary.md"
