@@ -19,6 +19,8 @@ def _run_stage(cmd: list[str], log_path: Path) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w", encoding="utf-8") as log_file:
         result = subprocess.run(cmd, check=False, stdout=log_file, stderr=subprocess.STDOUT, text=True)
+def _run_stage(cmd: list[str]) -> None:
+    result = subprocess.run(cmd, check=False)
     if result.returncode != 0:
         raise RuntimeError(f"Stage failed: {' '.join(cmd)}")
 
@@ -42,6 +44,8 @@ def main() -> int:
         for name, script in STAGES:
             log_path = log_dir / f"{name}.log"
             cmd = [sys.executable, script, "--run_id", run_id, "--log_path", str(log_path)]
+        for name, script in STAGES:
+            cmd = [sys.executable, script, "--run_id", run_id]
             if name in {"ingest"}:
                 cmd.extend(["--symbols", symbols, "--start", start, "--end", end])
             elif name in {"clean", "features", "backtest"}:
@@ -49,6 +53,7 @@ def main() -> int:
             for config_path in args.config:
                 cmd.extend(["--config", config_path])
             _run_stage(cmd, log_path)
+            _run_stage(cmd)
 
         report_path = Path("project") / "reports" / "vol_compression_expansion_v1" / run_id / "summary.md"
         print(f"Report generated: {report_path}")

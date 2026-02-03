@@ -101,11 +101,13 @@ def _prepare_data(symbol: str) -> pd.DataFrame:
         on="timestamp",
         suffixes=("", "_bar"),
     )
+    merged = pd.merge(features, bars[["timestamp", "close", "high", "low"]], on="timestamp", suffixes=("", "_bar"))
     merged = merged.sort_values("timestamp").reset_index(drop=True)
     return merged
 
 
 def _run_backtest(symbol: str, data: pd.DataFrame, trade_day_timezone: str) -> List[Trade]:
+def _run_backtest(symbol: str, data: pd.DataFrame) -> List[Trade]:
     trades: List[Trade] = []
     equity = INITIAL_EQUITY
     in_position = False
@@ -134,6 +136,7 @@ def _run_backtest(symbol: str, data: pd.DataFrame, trade_day_timezone: str) -> L
         ]
         if row[required_fields].isna().any() or row["is_gap"] or row["gap_len"] > 0:
             continue
+        day = ts.normalize()
 
         if in_position:
             bars_held = int(idx - position["entry_index"])
@@ -204,6 +207,10 @@ def _run_backtest(symbol: str, data: pd.DataFrame, trade_day_timezone: str) -> L
             continue
 
         compression = row["rv_pct_17280"] <= 10 and row["range_96"] <= 0.8 * row["range_med_2880"]
+        compression = (
+            row["rv_pct_17280"] <= 10
+            and row["range_96"] <= 0.8 * row["range_med_2880"]
+        )
         if not compression:
             continue
 
@@ -303,6 +310,11 @@ def main() -> int:
         RISK_PCT = float(config.get("risk_per_trade_pct", 0.5)) / 100
         trade_day_timezone = str(config.get("trade_day_timezone", "UTC"))
 
+    manifest = start_manifest(run_id, "backtest_vol_compression_v1", ["project/configs/pipeline.yaml", "project/configs/fees.yaml"])
+    inputs: List[Dict[str, object]] = []
+    outputs: List[Dict[str, object]] = []
+
+    try:
         trades_dir = (
             Path("project")
             / "lake"
@@ -319,6 +331,7 @@ def main() -> int:
             data = _prepare_data(symbol)
             inputs.append({"path": f"features+bars:{symbol}", **_collect_stats(data)})
             symbol_trades = _run_backtest(symbol, data, trade_day_timezone)
+            symbol_trades = _run_backtest(symbol, data)
             all_trades.extend(symbol_trades)
 
             trades_df = pd.DataFrame([t.__dict__ for t in symbol_trades])
@@ -328,6 +341,7 @@ def main() -> int:
 
         sorted_trades = sorted(all_trades, key=lambda trade: (trade.exit_time, trade.entry_time))
         metrics = _metrics_from_trades(sorted_trades)
+        metrics = _metrics_from_trades(all_trades)
         metrics_path = trades_dir / "metrics.json"
         with metrics_path.open("w", encoding="utf-8") as f:
             json.dump(metrics, f, indent=2, sort_keys=True)
@@ -336,6 +350,8 @@ def main() -> int:
             {
                 "timestamp": [t.exit_time for t in sorted_trades],
                 "equity": INITIAL_EQUITY + pd.Series([t.pnl for t in sorted_trades]).cumsum(),
+                "timestamp": [t.exit_time for t in all_trades],
+                "equity": INITIAL_EQUITY + pd.Series([t.pnl for t in all_trades]).cumsum(),
             }
         )
         equity_curve_path = trades_dir / "equity_curve.csv"

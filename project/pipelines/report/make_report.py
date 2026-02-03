@@ -48,6 +48,12 @@ def main() -> int:
     outputs: List[Dict[str, object]] = []
     if args.log_path:
         outputs.append({"path": args.log_path, "rows": None, "start_ts": None, "end_ts": None})
+    args = parser.parse_args()
+
+    run_id = args.run_id
+    manifest = start_manifest(run_id, "make_report", ["project/configs/pipeline.yaml"])
+    inputs: List[Dict[str, object]] = []
+    outputs: List[Dict[str, object]] = []
 
     try:
         trades_dir = (

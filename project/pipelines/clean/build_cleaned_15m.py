@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 from datetime import timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
 
@@ -76,6 +77,9 @@ def main() -> int:
     outputs: List[Dict[str, object]] = []
     if args.log_path:
         outputs.append({"path": args.log_path, "rows": None, "start_ts": None, "end_ts": None})
+    manifest = start_manifest(run_id, "build_cleaned_15m", ["project/configs/pipeline.yaml"])
+    inputs: List[Dict[str, object]] = []
+    outputs: List[Dict[str, object]] = []
 
     try:
         for symbol in symbols:

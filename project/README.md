@@ -13,11 +13,6 @@ python project/pipelines/run_all.py \
   --end 2023-12-31
 ```
 
-Or via Makefile:
-```bash
-make run RUN_ID=2024-01-01 SYMBOLS=BTCUSDT,ETHUSDT START=2023-01-01 END=2023-12-31
-```
-
 ## Expected artifacts
 - Raw data: `project/lake/raw/binance/perp/<symbol>/...`
 - Cleaned bars: `project/lake/cleaned/perp/<symbol>/bars_15m/...`
@@ -25,18 +20,10 @@ make run RUN_ID=2024-01-01 SYMBOLS=BTCUSDT,ETHUSDT START=2023-01-01 END=2023-12-
 - Trades and metrics: `project/lake/trades/backtests/vol_compression_expansion_v1/<run_id>/...`
 - Report: `project/reports/vol_compression_expansion_v1/<run_id>/summary.md`
 - Manifests: `project/runs/<run_id>/<stage>.json`
-- Stage logs: `project/runs/<run_id>/logs/<stage>.log`
 
 ## Agent Mode
 External orchestrators should call:
 ```bash
 python project/pipelines/run_all.py --run_id <run_id> --symbols <symbols> --start <YYYY-MM-DD> --end <YYYY-MM-DD>
 ```
-Optional override configs can be passed with repeated `--config` flags to any stage or `run_all.py`.
 The pipeline exits non-zero on failure and is safe to re-run for the same `run_id`.
-
-## Dependencies
-Install dependencies via:
-```bash
-pip install -r project/requirements.txt
-```

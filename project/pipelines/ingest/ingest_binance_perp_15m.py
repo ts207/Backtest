@@ -12,6 +12,11 @@ import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlencode
+from urllib.request import urlopen
+
+import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -23,10 +28,16 @@ from pipelines._lib.validation import ensure_utc_timestamp
 
 DEFAULT_BASE_URL = "https://fapi.binance.com"
 DEFAULT_INTERVAL = "15m"
+BASE_URL = "https://fapi.binance.com"
+INTERVAL = "15m"
 
 
 def _parse_date(value: str) -> datetime:
     return datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+
+
+def _month_key(ts: datetime) -> Tuple[int, int]:
+    return ts.year, ts.month
 
 
 def _month_start(ts: datetime) -> datetime:
@@ -85,6 +96,15 @@ def _fetch_klines(
     start: datetime,
     end: datetime,
 ) -> pd.DataFrame:
+def _binance_get(path: str, params: Dict[str, str]) -> List:
+    query = urlencode(params)
+    url = f"{BASE_URL}{path}?{query}"
+    with urlopen(url) as response:
+        payload = response.read().decode("utf-8")
+    return json.loads(payload)
+
+
+def _fetch_klines(symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
     rows = []
     limit = 1500
     cursor = start
@@ -92,11 +112,13 @@ def _fetch_klines(
         params = {
             "symbol": symbol,
             "interval": interval,
+            "interval": INTERVAL,
             "startTime": str(_utc_ms(cursor)),
             "endTime": str(_utc_ms(end)),
             "limit": str(limit),
         }
         data = _binance_get(session, base_url, "/fapi/v1/klines", params, timeout)
+        data = _binance_get("/fapi/v1/klines", params)
         if not data:
             break
         rows.extend(data)
@@ -153,6 +175,7 @@ def _fetch_funding(
     start: datetime,
     end: datetime,
 ) -> pd.DataFrame:
+def _fetch_funding(symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
     rows = []
     limit = 1000
     cursor = start
@@ -164,6 +187,7 @@ def _fetch_funding(
             "limit": str(limit),
         }
         data = _binance_get(session, base_url, "/fapi/v1/fundingRate", params, timeout)
+        data = _binance_get("/fapi/v1/fundingRate", params)
         if not data:
             break
         rows.extend(data)
@@ -219,6 +243,16 @@ def _checkpoint_path(base_dir: Path, month: datetime, prefix: str) -> Path:
 def _write_checkpoint(path: Path, payload: Dict[str, object]) -> None:
     ensure_dir(path.parent)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+def _split_by_month(df: pd.DataFrame) -> Dict[Tuple[int, int], pd.DataFrame]:
+    if df.empty:
+        return {}
+    df = df.copy()
+    df["year"] = df["timestamp"].dt.year
+    df["month"] = df["timestamp"].dt.month
+    grouped = {}
+    for (year, month), group in df.groupby(["year", "month"], sort=True):
+        grouped[(year, month)] = group.drop(columns=["year", "month"])
+    return grouped
 
 
 def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
@@ -274,6 +308,14 @@ def main() -> int:
         session = _build_session(max_retries=max_retries, backoff_factor=backoff_factor)
 
         for symbol in symbols:
+    manifest = start_manifest(run_id, "ingest_binance_perp_15m", ["project/configs/pipeline.yaml"])
+    inputs = []
+    outputs = []
+
+    try:
+        for symbol in symbols:
+            ohlcv_frames = []
+            funding_frames = []
             for month_start in _iter_months(start, end):
                 month_end = _next_month(month_start)
                 fetch_start = max(start, month_start)
@@ -346,6 +388,30 @@ def main() -> int:
                             "retrieved_at": datetime.now(timezone.utc).isoformat(),
                         },
                     )
+                ohlcv_frames.append(_fetch_klines(symbol, fetch_start, fetch_end))
+                funding_frames.append(_fetch_funding(symbol, fetch_start, fetch_end))
+            ohlcv = pd.concat(ohlcv_frames, ignore_index=True) if ohlcv_frames else pd.DataFrame()
+            funding = pd.concat(funding_frames, ignore_index=True) if funding_frames else pd.DataFrame()
+
+            inputs.append({"path": f"api:binance:{symbol}:ohlcv", **_collect_stats(ohlcv)})
+            inputs.append({"path": f"api:binance:{symbol}:funding", **_collect_stats(funding)})
+
+            ohlcv_base = Path("project") / "lake" / "raw" / "binance" / "perp" / symbol / "ohlcv_15m"
+            funding_base = Path("project") / "lake" / "raw" / "binance" / "perp" / symbol / "funding"
+            ensure_dir(ohlcv_base)
+            ensure_dir(funding_base)
+
+            for (year, month), group in _split_by_month(ohlcv).items():
+                month_marker = datetime(year, month, 1, tzinfo=timezone.utc)
+                path = _write_monthly(group, ohlcv_base, month_marker, "ohlcv")
+                if path:
+                    outputs.append({"path": str(path), **_collect_stats(group)})
+
+            for (year, month), group in _split_by_month(funding).items():
+                month_marker = datetime(year, month, 1, tzinfo=timezone.utc)
+                path = _write_monthly(group, funding_base, month_marker, "funding")
+                if path:
+                    outputs.append({"path": str(path), **_collect_stats(group)})
 
         finalize_manifest(manifest, inputs, outputs, "success")
         return 0
