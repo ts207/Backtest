@@ -11,6 +11,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from pipelines._lib.config import load_configs
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 
 
@@ -30,6 +31,23 @@ def _load_trades(trades_dir: Path) -> pd.DataFrame:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate report")
     parser.add_argument("--run_id", required=True)
+    parser.add_argument("--config", action="append", default=[])
+    parser.add_argument("--log_path", default=None)
+    args = parser.parse_args()
+
+    run_id = args.run_id
+    config_paths = ["project/configs/pipeline.yaml"]
+    config_paths.extend(args.config)
+    config = load_configs(config_paths)
+    manifest = start_manifest(run_id, "make_report", config_paths)
+    manifest["parameters"] = {
+        "trade_day_timezone": config.get("trade_day_timezone", "UTC"),
+        "run_id": run_id,
+    }
+    inputs: List[Dict[str, object]] = []
+    outputs: List[Dict[str, object]] = []
+    if args.log_path:
+        outputs.append({"path": args.log_path, "rows": None, "start_ts": None, "end_ts": None})
     args = parser.parse_args()
 
     run_id = args.run_id

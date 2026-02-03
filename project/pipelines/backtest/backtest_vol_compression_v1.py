@@ -13,6 +13,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from pipelines._lib.config import load_configs
 from pipelines._lib.io_utils import list_parquet_files, read_parquet
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.validation import ensure_utc_timestamp
@@ -94,11 +95,18 @@ def _prepare_data(symbol: str) -> pd.DataFrame:
     ensure_utc_timestamp(features["timestamp"], "timestamp")
     ensure_utc_timestamp(bars["timestamp"], "timestamp")
 
+    merged = pd.merge(
+        features,
+        bars[["timestamp", "close", "high", "low", "is_gap", "gap_len"]],
+        on="timestamp",
+        suffixes=("", "_bar"),
+    )
     merged = pd.merge(features, bars[["timestamp", "close", "high", "low"]], on="timestamp", suffixes=("", "_bar"))
     merged = merged.sort_values("timestamp").reset_index(drop=True)
     return merged
 
 
+def _run_backtest(symbol: str, data: pd.DataFrame, trade_day_timezone: str) -> List[Trade]:
 def _run_backtest(symbol: str, data: pd.DataFrame) -> List[Trade]:
     trades: List[Trade] = []
     equity = INITIAL_EQUITY
@@ -112,6 +120,22 @@ def _run_backtest(symbol: str, data: pd.DataFrame) -> List[Trade]:
 
     for idx, row in data.iterrows():
         ts = row["timestamp"]
+        # Trade-day boundary is configured (default UTC) for the one-trade-per-day rule.
+        day = ts.tz_convert(trade_day_timezone).normalize()
+        required_fields = [
+            "rv_pct_17280",
+            "range_96",
+            "range_med_2880",
+            "prior_high_96",
+            "prior_low_96",
+            "low_96",
+            "high_96",
+            "close",
+            "is_gap",
+            "gap_len",
+        ]
+        if row[required_fields].isna().any() or row["is_gap"] or row["gap_len"] > 0:
+            continue
         day = ts.normalize()
 
         if in_position:
@@ -182,6 +206,7 @@ def _run_backtest(symbol: str, data: pd.DataFrame) -> List[Trade]:
         if last_trade_day is not None and day == last_trade_day:
             continue
 
+        compression = row["rv_pct_17280"] <= 10 and row["range_96"] <= 0.8 * row["range_med_2880"]
         compression = (
             row["rv_pct_17280"] <= 10
             and row["range_96"] <= 0.8 * row["range_med_2880"]
@@ -255,10 +280,35 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Backtest volatility compression -> expansion")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
+    parser.add_argument("--config", action="append", default=[])
+    parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
 
     run_id = args.run_id
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+
+    config_paths = ["project/configs/pipeline.yaml", "project/configs/fees.yaml"]
+    config_paths.extend(args.config)
+    config = load_configs(config_paths)
+    manifest = start_manifest(run_id, "backtest_vol_compression_v1", config_paths)
+    manifest["parameters"] = {
+        "fee_bps_per_side": config.get("fee_bps_per_side", 4),
+        "slippage_bps_per_fill": config.get("slippage_bps_per_fill", 2),
+        "risk_per_trade_pct": config.get("risk_per_trade_pct", 0.5),
+        "trade_day_timezone": config.get("trade_day_timezone", "UTC"),
+        "symbols": symbols,
+    }
+    inputs: List[Dict[str, object]] = []
+    outputs: List[Dict[str, object]] = []
+    if args.log_path:
+        outputs.append({"path": args.log_path, "rows": None, "start_ts": None, "end_ts": None})
+
+    try:
+        global FEE_RATE, SLIP_RATE, RISK_PCT
+        FEE_RATE = float(config.get("fee_bps_per_side", 4)) / 10_000
+        SLIP_RATE = float(config.get("slippage_bps_per_fill", 2)) / 10_000
+        RISK_PCT = float(config.get("risk_per_trade_pct", 0.5)) / 100
+        trade_day_timezone = str(config.get("trade_day_timezone", "UTC"))
 
     manifest = start_manifest(run_id, "backtest_vol_compression_v1", ["project/configs/pipeline.yaml", "project/configs/fees.yaml"])
     inputs: List[Dict[str, object]] = []
@@ -280,6 +330,7 @@ def main() -> int:
         for symbol in symbols:
             data = _prepare_data(symbol)
             inputs.append({"path": f"features+bars:{symbol}", **_collect_stats(data)})
+            symbol_trades = _run_backtest(symbol, data, trade_day_timezone)
             symbol_trades = _run_backtest(symbol, data)
             all_trades.extend(symbol_trades)
 
@@ -288,6 +339,8 @@ def main() -> int:
             trades_df.to_csv(trades_path, index=False)
             outputs.append({"path": str(trades_path), "rows": len(trades_df), "start_ts": None, "end_ts": None})
 
+        sorted_trades = sorted(all_trades, key=lambda trade: (trade.exit_time, trade.entry_time))
+        metrics = _metrics_from_trades(sorted_trades)
         metrics = _metrics_from_trades(all_trades)
         metrics_path = trades_dir / "metrics.json"
         with metrics_path.open("w", encoding="utf-8") as f:
@@ -295,6 +348,8 @@ def main() -> int:
 
         equity_curve = pd.DataFrame(
             {
+                "timestamp": [t.exit_time for t in sorted_trades],
+                "equity": INITIAL_EQUITY + pd.Series([t.pnl for t in sorted_trades]).cumsum(),
                 "timestamp": [t.exit_time for t in all_trades],
                 "equity": INITIAL_EQUITY + pd.Series([t.pnl for t in all_trades]).cumsum(),
             }
