@@ -1,465 +1,133 @@
 {
-  "avg_r": -0.07811699982535715,
+  "avg_r": 0.0,
   "data_quality": {
     "symbols": {
       "BTCUSDT": {
         "effective_end": "2025-06-01T00:00:00+00:00",
-        "effective_start": "2020-06-01T00:00:00+00:00",
-        "partitions_skipped": [],
-        "partitions_written": [
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2020\\month=06\\bars_BTCUSDT_15m_2020-06.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2020\\month=06\\funding15m_BTCUSDT_2020-06.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2020\\month=07\\bars_BTCUSDT_15m_2020-07.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2020\\month=07\\funding15m_BTCUSDT_2020-07.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2020\\month=08\\bars_BTCUSDT_15m_2020-08.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2020\\month=08\\funding15m_BTCUSDT_2020-08.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2020\\month=09\\bars_BTCUSDT_15m_2020-09.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2020\\month=09\\funding15m_BTCUSDT_2020-09.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2020\\month=10\\bars_BTCUSDT_15m_2020-10.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2020\\month=10\\funding15m_BTCUSDT_2020-10.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2020\\month=11\\bars_BTCUSDT_15m_2020-11.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2020\\month=11\\funding15m_BTCUSDT_2020-11.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2020\\month=12\\bars_BTCUSDT_15m_2020-12.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2020\\month=12\\funding15m_BTCUSDT_2020-12.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2021\\month=01\\bars_BTCUSDT_15m_2021-01.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2021\\month=01\\funding15m_BTCUSDT_2021-01.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2021\\month=02\\bars_BTCUSDT_15m_2021-02.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2021\\month=02\\funding15m_BTCUSDT_2021-02.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2021\\month=03\\bars_BTCUSDT_15m_2021-03.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2021\\month=03\\funding15m_BTCUSDT_2021-03.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2021\\month=04\\bars_BTCUSDT_15m_2021-04.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2021\\month=04\\funding15m_BTCUSDT_2021-04.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2021\\month=05\\bars_BTCUSDT_15m_2021-05.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2021\\month=05\\funding15m_BTCUSDT_2021-05.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2021\\month=06\\bars_BTCUSDT_15m_2021-06.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2021\\month=06\\funding15m_BTCUSDT_2021-06.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2021\\month=07\\bars_BTCUSDT_15m_2021-07.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2021\\month=07\\funding15m_BTCUSDT_2021-07.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2021\\month=08\\bars_BTCUSDT_15m_2021-08.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2021\\month=08\\funding15m_BTCUSDT_2021-08.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2021\\month=09\\bars_BTCUSDT_15m_2021-09.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2021\\month=09\\funding15m_BTCUSDT_2021-09.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2021\\month=10\\bars_BTCUSDT_15m_2021-10.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2021\\month=10\\funding15m_BTCUSDT_2021-10.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2021\\month=11\\bars_BTCUSDT_15m_2021-11.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2021\\month=11\\funding15m_BTCUSDT_2021-11.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2021\\month=12\\bars_BTCUSDT_15m_2021-12.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2021\\month=12\\funding15m_BTCUSDT_2021-12.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2022\\month=01\\bars_BTCUSDT_15m_2022-01.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2022\\month=01\\funding15m_BTCUSDT_2022-01.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2022\\month=02\\bars_BTCUSDT_15m_2022-02.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2022\\month=02\\funding15m_BTCUSDT_2022-02.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2022\\month=03\\bars_BTCUSDT_15m_2022-03.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2022\\month=03\\funding15m_BTCUSDT_2022-03.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2022\\month=04\\bars_BTCUSDT_15m_2022-04.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2022\\month=04\\funding15m_BTCUSDT_2022-04.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2022\\month=05\\bars_BTCUSDT_15m_2022-05.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2022\\month=05\\funding15m_BTCUSDT_2022-05.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2022\\month=06\\bars_BTCUSDT_15m_2022-06.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2022\\month=06\\funding15m_BTCUSDT_2022-06.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2022\\month=07\\bars_BTCUSDT_15m_2022-07.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2022\\month=07\\funding15m_BTCUSDT_2022-07.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2022\\month=08\\bars_BTCUSDT_15m_2022-08.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2022\\month=08\\funding15m_BTCUSDT_2022-08.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2022\\month=09\\bars_BTCUSDT_15m_2022-09.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2022\\month=09\\funding15m_BTCUSDT_2022-09.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2022\\month=10\\bars_BTCUSDT_15m_2022-10.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2022\\month=10\\funding15m_BTCUSDT_2022-10.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2022\\month=11\\bars_BTCUSDT_15m_2022-11.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2022\\month=11\\funding15m_BTCUSDT_2022-11.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2022\\month=12\\bars_BTCUSDT_15m_2022-12.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2022\\month=12\\funding15m_BTCUSDT_2022-12.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2023\\month=01\\bars_BTCUSDT_15m_2023-01.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2023\\month=01\\funding15m_BTCUSDT_2023-01.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2023\\month=02\\bars_BTCUSDT_15m_2023-02.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2023\\month=02\\funding15m_BTCUSDT_2023-02.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2023\\month=03\\bars_BTCUSDT_15m_2023-03.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2023\\month=03\\funding15m_BTCUSDT_2023-03.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2023\\month=04\\bars_BTCUSDT_15m_2023-04.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2023\\month=04\\funding15m_BTCUSDT_2023-04.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2023\\month=05\\bars_BTCUSDT_15m_2023-05.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2023\\month=05\\funding15m_BTCUSDT_2023-05.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2023\\month=06\\bars_BTCUSDT_15m_2023-06.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2023\\month=06\\funding15m_BTCUSDT_2023-06.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2023\\month=07\\bars_BTCUSDT_15m_2023-07.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2023\\month=07\\funding15m_BTCUSDT_2023-07.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2023\\month=08\\bars_BTCUSDT_15m_2023-08.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2023\\month=08\\funding15m_BTCUSDT_2023-08.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2023\\month=09\\bars_BTCUSDT_15m_2023-09.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2023\\month=09\\funding15m_BTCUSDT_2023-09.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2023\\month=10\\bars_BTCUSDT_15m_2023-10.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2023\\month=10\\funding15m_BTCUSDT_2023-10.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2023\\month=11\\bars_BTCUSDT_15m_2023-11.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2023\\month=11\\funding15m_BTCUSDT_2023-11.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2023\\month=12\\bars_BTCUSDT_15m_2023-12.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2023\\month=12\\funding15m_BTCUSDT_2023-12.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2024\\month=01\\bars_BTCUSDT_15m_2024-01.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=01\\funding15m_BTCUSDT_2024-01.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2024\\month=02\\bars_BTCUSDT_15m_2024-02.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=02\\funding15m_BTCUSDT_2024-02.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2024\\month=03\\bars_BTCUSDT_15m_2024-03.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=03\\funding15m_BTCUSDT_2024-03.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2024\\month=04\\bars_BTCUSDT_15m_2024-04.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=04\\funding15m_BTCUSDT_2024-04.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2024\\month=05\\bars_BTCUSDT_15m_2024-05.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=05\\funding15m_BTCUSDT_2024-05.parquet",
+        "effective_start": "2024-06-01T00:00:00+00:00",
+        "funding_missing_pct": 0.0,
+        "funding_rate_scaled_max": 0.00072446,
+        "funding_rate_scaled_min": -0.00012232,
+        "funding_rate_scaled_std": 6.533322676153253e-05,
+        "funding_scale_used": 1.0,
+        "funding_timestamp_rounded_count": 0,
+        "gap_stats": {
+          "gap_count": 0,
+          "max_gap_len": 0,
+          "pct_missing_ohlcv": 0.0
+        },
+        "partitions_skipped": [
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2024\\month=06\\bars_BTCUSDT_15m_2024-06.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=06\\funding15m_BTCUSDT_2024-06.parquet",
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2024\\month=07\\bars_BTCUSDT_15m_2024-07.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=07\\funding15m_BTCUSDT_2024-07.parquet",
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2024\\month=08\\bars_BTCUSDT_15m_2024-08.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=08\\funding15m_BTCUSDT_2024-08.parquet",
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2024\\month=09\\bars_BTCUSDT_15m_2024-09.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=09\\funding15m_BTCUSDT_2024-09.parquet",
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2024\\month=10\\bars_BTCUSDT_15m_2024-10.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=10\\funding15m_BTCUSDT_2024-10.parquet",
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2024\\month=11\\bars_BTCUSDT_15m_2024-11.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=11\\funding15m_BTCUSDT_2024-11.parquet",
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2024\\month=12\\bars_BTCUSDT_15m_2024-12.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=12\\funding15m_BTCUSDT_2024-12.parquet",
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2025\\month=01\\bars_BTCUSDT_15m_2025-01.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2025\\month=01\\funding15m_BTCUSDT_2025-01.parquet",
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2025\\month=02\\bars_BTCUSDT_15m_2025-02.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2025\\month=02\\funding15m_BTCUSDT_2025-02.parquet",
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2025\\month=03\\bars_BTCUSDT_15m_2025-03.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2025\\month=03\\funding15m_BTCUSDT_2025-03.parquet",
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2025\\month=04\\bars_BTCUSDT_15m_2025-04.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2025\\month=04\\funding15m_BTCUSDT_2025-04.parquet",
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2025\\month=05\\bars_BTCUSDT_15m_2025-05.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2025\\month=06\\bars_BTCUSDT_15m_2025-06.parquet"
+        ],
+        "partitions_written": [
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=06\\funding15m_BTCUSDT_2024-06.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=07\\funding15m_BTCUSDT_2024-07.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=08\\funding15m_BTCUSDT_2024-08.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=09\\funding15m_BTCUSDT_2024-09.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=10\\funding15m_BTCUSDT_2024-10.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=11\\funding15m_BTCUSDT_2024-11.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2024\\month=12\\funding15m_BTCUSDT_2024-12.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2025\\month=01\\funding15m_BTCUSDT_2025-01.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2025\\month=02\\funding15m_BTCUSDT_2025-02.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2025\\month=03\\funding15m_BTCUSDT_2025-03.parquet",
+          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2025\\month=04\\funding15m_BTCUSDT_2025-04.parquet",
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2025\\month=05\\funding15m_BTCUSDT_2025-05.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\bars_15m\\year=2025\\month=06\\bars_BTCUSDT_15m_2025-06.parquet",
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\BTCUSDT\\funding_15m\\year=2025\\month=06\\funding15m_BTCUSDT_2025-06.parquet"
         ],
-        "pct_missing_funding_filled": {
-          "2020-06": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2020-07": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2020-08": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2020-09": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2020-10": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2020-11": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2020-12": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-01": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-02": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-03": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-04": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-05": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-06": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-07": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-08": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-09": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-10": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-11": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-12": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-01": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-02": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-03": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-04": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-05": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-06": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-07": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-08": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-09": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-10": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-11": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-12": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-01": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-02": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-03": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-04": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-05": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-06": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-07": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-08": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-09": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-10": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-11": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-12": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2024-01": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2024-02": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2024-03": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2024-04": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2024-05": {
-            "pct_missing_funding_filled": 0.0
-          },
+        "pct_bars_with_funding_event": 1.0,
+        "pct_missing_funding_event": {
           "2024-06": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 90,
+            "funding_rate_scaled_std": 2.1248097582941748e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2024-07": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 93,
+            "funding_rate_scaled_std": 3.89242825482256e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2024-08": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 93,
+            "funding_rate_scaled_std": 4.973915021545319e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2024-09": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 90,
+            "funding_rate_scaled_std": 4.6162797709987864e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2024-10": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 93,
+            "funding_rate_scaled_std": 3.7612333064703176e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2024-11": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 90,
+            "funding_rate_scaled_std": 8.35239143043855e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2024-12": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 93,
+            "funding_rate_scaled_std": 9.144473541029955e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2025-01": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 93,
+            "funding_rate_scaled_std": 3.08919849884206e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2025-02": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 84,
+            "funding_rate_scaled_std": 3.5528229546017844e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2025-03": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 93,
+            "funding_rate_scaled_std": 3.340764430081576e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2025-04": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 90,
+            "funding_rate_scaled_std": 3.962455524223823e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2025-05": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 93,
+            "funding_rate_scaled_std": 4.530691901432014e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2025-06": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 3,
+            "funding_rate_scaled_std": 1.9470899996319293e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           }
         },
         "pct_missing_ohlcv": {
-          "2020-06": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2020-07": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2020-08": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2020-09": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2020-10": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2020-11": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2020-12": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-01": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-02": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-03": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-04": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-05": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-06": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-07": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-08": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-09": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-10": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-11": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-12": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-01": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-02": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-03": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-04": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-05": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-06": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-07": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-08": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-09": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-10": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-11": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-12": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-01": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-02": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-03": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-04": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-05": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-06": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-07": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-08": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-09": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-10": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-11": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-12": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2024-01": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2024-02": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2024-03": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2024-04": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2024-05": {
-            "pct_missing_ohlcv": 0.0
-          },
           "2024-06": {
             "pct_missing_ohlcv": 0.0
           },
@@ -503,105 +171,19 @@
       },
       "ETHUSDT": {
         "effective_end": "2025-06-01T00:00:00+00:00",
-        "effective_start": "2020-06-01T00:00:00+00:00",
-        "partitions_skipped": [],
-        "partitions_written": [
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2020\\month=06\\bars_ETHUSDT_15m_2020-06.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2020\\month=06\\funding15m_ETHUSDT_2020-06.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2020\\month=07\\bars_ETHUSDT_15m_2020-07.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2020\\month=07\\funding15m_ETHUSDT_2020-07.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2020\\month=08\\bars_ETHUSDT_15m_2020-08.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2020\\month=08\\funding15m_ETHUSDT_2020-08.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2020\\month=09\\bars_ETHUSDT_15m_2020-09.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2020\\month=09\\funding15m_ETHUSDT_2020-09.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2020\\month=10\\bars_ETHUSDT_15m_2020-10.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2020\\month=10\\funding15m_ETHUSDT_2020-10.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2020\\month=11\\bars_ETHUSDT_15m_2020-11.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2020\\month=11\\funding15m_ETHUSDT_2020-11.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2020\\month=12\\bars_ETHUSDT_15m_2020-12.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2020\\month=12\\funding15m_ETHUSDT_2020-12.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2021\\month=01\\bars_ETHUSDT_15m_2021-01.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2021\\month=01\\funding15m_ETHUSDT_2021-01.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2021\\month=02\\bars_ETHUSDT_15m_2021-02.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2021\\month=02\\funding15m_ETHUSDT_2021-02.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2021\\month=03\\bars_ETHUSDT_15m_2021-03.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2021\\month=03\\funding15m_ETHUSDT_2021-03.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2021\\month=04\\bars_ETHUSDT_15m_2021-04.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2021\\month=04\\funding15m_ETHUSDT_2021-04.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2021\\month=05\\bars_ETHUSDT_15m_2021-05.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2021\\month=05\\funding15m_ETHUSDT_2021-05.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2021\\month=06\\bars_ETHUSDT_15m_2021-06.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2021\\month=06\\funding15m_ETHUSDT_2021-06.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2021\\month=07\\bars_ETHUSDT_15m_2021-07.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2021\\month=07\\funding15m_ETHUSDT_2021-07.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2021\\month=08\\bars_ETHUSDT_15m_2021-08.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2021\\month=08\\funding15m_ETHUSDT_2021-08.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2021\\month=09\\bars_ETHUSDT_15m_2021-09.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2021\\month=09\\funding15m_ETHUSDT_2021-09.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2021\\month=10\\bars_ETHUSDT_15m_2021-10.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2021\\month=10\\funding15m_ETHUSDT_2021-10.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2021\\month=11\\bars_ETHUSDT_15m_2021-11.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2021\\month=11\\funding15m_ETHUSDT_2021-11.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2021\\month=12\\bars_ETHUSDT_15m_2021-12.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2021\\month=12\\funding15m_ETHUSDT_2021-12.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2022\\month=01\\bars_ETHUSDT_15m_2022-01.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2022\\month=01\\funding15m_ETHUSDT_2022-01.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2022\\month=02\\bars_ETHUSDT_15m_2022-02.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2022\\month=02\\funding15m_ETHUSDT_2022-02.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2022\\month=03\\bars_ETHUSDT_15m_2022-03.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2022\\month=03\\funding15m_ETHUSDT_2022-03.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2022\\month=04\\bars_ETHUSDT_15m_2022-04.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2022\\month=04\\funding15m_ETHUSDT_2022-04.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2022\\month=05\\bars_ETHUSDT_15m_2022-05.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2022\\month=05\\funding15m_ETHUSDT_2022-05.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2022\\month=06\\bars_ETHUSDT_15m_2022-06.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2022\\month=06\\funding15m_ETHUSDT_2022-06.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2022\\month=07\\bars_ETHUSDT_15m_2022-07.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2022\\month=07\\funding15m_ETHUSDT_2022-07.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2022\\month=08\\bars_ETHUSDT_15m_2022-08.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2022\\month=08\\funding15m_ETHUSDT_2022-08.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2022\\month=09\\bars_ETHUSDT_15m_2022-09.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2022\\month=09\\funding15m_ETHUSDT_2022-09.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2022\\month=10\\bars_ETHUSDT_15m_2022-10.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2022\\month=10\\funding15m_ETHUSDT_2022-10.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2022\\month=11\\bars_ETHUSDT_15m_2022-11.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2022\\month=11\\funding15m_ETHUSDT_2022-11.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2022\\month=12\\bars_ETHUSDT_15m_2022-12.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2022\\month=12\\funding15m_ETHUSDT_2022-12.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2023\\month=01\\bars_ETHUSDT_15m_2023-01.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2023\\month=01\\funding15m_ETHUSDT_2023-01.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2023\\month=02\\bars_ETHUSDT_15m_2023-02.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2023\\month=02\\funding15m_ETHUSDT_2023-02.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2023\\month=03\\bars_ETHUSDT_15m_2023-03.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2023\\month=03\\funding15m_ETHUSDT_2023-03.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2023\\month=04\\bars_ETHUSDT_15m_2023-04.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2023\\month=04\\funding15m_ETHUSDT_2023-04.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2023\\month=05\\bars_ETHUSDT_15m_2023-05.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2023\\month=05\\funding15m_ETHUSDT_2023-05.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2023\\month=06\\bars_ETHUSDT_15m_2023-06.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2023\\month=06\\funding15m_ETHUSDT_2023-06.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2023\\month=07\\bars_ETHUSDT_15m_2023-07.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2023\\month=07\\funding15m_ETHUSDT_2023-07.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2023\\month=08\\bars_ETHUSDT_15m_2023-08.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2023\\month=08\\funding15m_ETHUSDT_2023-08.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2023\\month=09\\bars_ETHUSDT_15m_2023-09.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2023\\month=09\\funding15m_ETHUSDT_2023-09.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2023\\month=10\\bars_ETHUSDT_15m_2023-10.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2023\\month=10\\funding15m_ETHUSDT_2023-10.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2023\\month=11\\bars_ETHUSDT_15m_2023-11.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2023\\month=11\\funding15m_ETHUSDT_2023-11.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2023\\month=12\\bars_ETHUSDT_15m_2023-12.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2023\\month=12\\funding15m_ETHUSDT_2023-12.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2024\\month=01\\bars_ETHUSDT_15m_2024-01.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2024\\month=01\\funding15m_ETHUSDT_2024-01.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2024\\month=02\\bars_ETHUSDT_15m_2024-02.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2024\\month=02\\funding15m_ETHUSDT_2024-02.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2024\\month=03\\bars_ETHUSDT_15m_2024-03.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2024\\month=03\\funding15m_ETHUSDT_2024-03.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2024\\month=04\\bars_ETHUSDT_15m_2024-04.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2024\\month=04\\funding15m_ETHUSDT_2024-04.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2024\\month=05\\bars_ETHUSDT_15m_2024-05.parquet",
-          "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2024\\month=05\\funding15m_ETHUSDT_2024-05.parquet",
+        "effective_start": "2024-06-01T00:00:00+00:00",
+        "funding_missing_pct": 0.0,
+        "funding_rate_scaled_max": 0.0005762,
+        "funding_rate_scaled_min": -0.00025121,
+        "funding_rate_scaled_std": 6.721086006412235e-05,
+        "funding_scale_used": 1.0,
+        "funding_timestamp_rounded_count": 0,
+        "gap_stats": {
+          "gap_count": 0,
+          "max_gap_len": 0,
+          "pct_missing_ohlcv": 0.0
+        },
+        "partitions_skipped": [
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2024\\month=06\\bars_ETHUSDT_15m_2024-06.parquet",
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2024\\month=06\\funding15m_ETHUSDT_2024-06.parquet",
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2024\\month=07\\bars_ETHUSDT_15m_2024-07.parquet",
@@ -629,336 +211,89 @@
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\bars_15m\\year=2025\\month=06\\bars_ETHUSDT_15m_2025-06.parquet",
           "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\cleaned\\perp\\ETHUSDT\\funding_15m\\year=2025\\month=06\\funding15m_ETHUSDT_2025-06.parquet"
         ],
-        "pct_missing_funding_filled": {
-          "2020-06": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2020-07": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2020-08": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2020-09": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2020-10": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2020-11": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2020-12": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-01": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-02": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-03": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-04": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-05": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-06": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-07": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-08": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-09": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-10": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-11": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2021-12": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-01": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-02": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-03": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-04": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-05": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-06": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-07": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-08": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-09": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-10": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-11": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2022-12": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-01": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-02": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-03": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-04": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-05": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-06": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-07": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-08": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-09": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-10": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-11": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2023-12": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2024-01": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2024-02": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2024-03": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2024-04": {
-            "pct_missing_funding_filled": 0.0
-          },
-          "2024-05": {
-            "pct_missing_funding_filled": 0.0
-          },
+        "partitions_written": [],
+        "pct_bars_with_funding_event": 1.0,
+        "pct_missing_funding_event": {
           "2024-06": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 90,
+            "funding_rate_scaled_std": 3.2366922817883904e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2024-07": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 93,
+            "funding_rate_scaled_std": 2.840457873125976e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2024-08": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 93,
+            "funding_rate_scaled_std": 4.232970531215047e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2024-09": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 90,
+            "funding_rate_scaled_std": 3.3980127116697055e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2024-10": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 93,
+            "funding_rate_scaled_std": 2.33517389081988e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2024-11": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 90,
+            "funding_rate_scaled_std": 9.268771213776411e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2024-12": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 93,
+            "funding_rate_scaled_std": 8.133312515770582e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2025-01": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 93,
+            "funding_rate_scaled_std": 2.2293395851106653e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2025-02": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 84,
+            "funding_rate_scaled_std": 5.695095344470952e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2025-03": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 93,
+            "funding_rate_scaled_std": 3.3611045592142096e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2025-04": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 90,
+            "funding_rate_scaled_std": 4.646580990836546e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2025-05": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 93,
+            "funding_rate_scaled_std": 4.159780827166975e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           },
           "2025-06": {
-            "pct_missing_funding_filled": 0.0
+            "funding_event_count": 3,
+            "funding_rate_scaled_std": 1.845324165883323e-05,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
           }
         },
         "pct_missing_ohlcv": {
-          "2020-06": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2020-07": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2020-08": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2020-09": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2020-10": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2020-11": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2020-12": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-01": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-02": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-03": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-04": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-05": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-06": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-07": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-08": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-09": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-10": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-11": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2021-12": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-01": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-02": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-03": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-04": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-05": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-06": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-07": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-08": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-09": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-10": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-11": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2022-12": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-01": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-02": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-03": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-04": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-05": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-06": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-07": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-08": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-09": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-10": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-11": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2023-12": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2024-01": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2024-02": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2024-03": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2024-04": {
-            "pct_missing_ohlcv": 0.0
-          },
-          "2024-05": {
-            "pct_missing_ohlcv": 0.0
-          },
           "2024-06": {
             "pct_missing_ohlcv": 0.0
           },
@@ -1004,54 +339,43 @@
   },
   "fee_sensitivity": [
     {
-      "avg_r": -0.028176883031838327,
+      "avg_r": 0.0,
       "fee_bps_per_side": 0,
-      "max_drawdown": -0.1612541866994537,
-      "net_return": -48109.41272725409,
-      "trades": 331
+      "max_drawdown": -9.298193224568912e-08,
+      "net_return": -0.04483608813862927,
+      "trades": 40
     },
     {
-      "avg_r": -0.1530271750156354,
+      "avg_r": 0.0,
       "fee_bps_per_side": 10,
-      "max_drawdown": -0.2597568036555344,
-      "net_return": -238628.45810049155,
-      "trades": 331
+      "max_drawdown": -1.3359792716801166e-07,
+      "net_return": -0.12383608813862931,
+      "trades": 40
     },
     {
-      "avg_r": -0.05314694142859775,
+      "avg_r": 0.0,
       "fee_bps_per_side": 2,
-      "max_drawdown": -0.1790448435450036,
-      "net_return": -87836.66379629332,
-      "trades": 331
+      "max_drawdown": -9.899655593889747e-08,
+      "net_return": -0.0606360881386293,
+      "trades": 40
     },
     {
-      "avg_r": -0.07811699982535714,
-      "fee_bps_per_side": 4.0,
-      "max_drawdown": -0.19690594509030698,
-      "net_return": -126734.6770286673,
-      "trades": 331
-    },
-    {
-      "avg_r": -0.09060202902373686,
+      "avg_r": 0.0,
       "fee_bps_per_side": 5,
-      "max_drawdown": -0.20586448653091383,
-      "net_return": -145878.26857841213,
-      "trades": 331
-    }
-  ],
-  "max_drawdown": -0.19690594509030715,
-  "per_symbol": [
-    {
-      "avg_r": -0.11208602239090333,
-      "symbol": "BTCUSDT",
-      "total_trades": 177
+      "max_drawdown": -1.1159655586269761e-07,
+      "net_return": -0.0843360881386293,
+      "trades": 40
     },
     {
-      "avg_r": -0.03907468168183978,
-      "symbol": "ETHUSDT",
-      "total_trades": 154
+      "avg_r": 0.0,
+      "fee_bps_per_side": 6.0,
+      "max_drawdown": -1.1579655595539296e-07,
+      "net_return": -0.09223608813862927,
+      "trades": 40
     }
   ],
+  "max_drawdown": -1.1579655595539295e-07,
+  "per_symbol": [],
   "run_id": "20240101_120000",
-  "total_trades": 331
+  "total_trades": 0
 }

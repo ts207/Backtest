@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import argparse
@@ -22,10 +23,12 @@ from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.url_utils import join_url
 from pipelines._lib.validation import ensure_utc_timestamp
 
-
 ARCHIVE_BASE = "https://data.binance.vision/data/futures/um"
 DEFAULT_API_BASE = "https://fapi.binance.com"
 EARLIEST_UM_FUTURES = datetime(2019, 9, 1, tzinfo=timezone.utc)
+
+FUNDING_HOURS = (0, 8, 16)
+FUNDING_STEP = timedelta(hours=8)
 
 
 def _parse_date(value: str) -> datetime:
@@ -33,13 +36,19 @@ def _parse_date(value: str) -> datetime:
 
 
 def _month_start(ts: datetime) -> datetime:
+    ts = ts.astimezone(timezone.utc)
     return ts.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
 def _next_month(ts: datetime) -> datetime:
-    year = ts.year + (ts.month // 12)
-    month = 1 if ts.month == 12 else ts.month + 1
-    return ts.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
+    ts = ts.astimezone(timezone.utc)
+    y, m = ts.year, ts.month
+    if m == 12:
+        y += 1
+        m = 1
+    else:
+        m += 1
+    return ts.replace(year=y, month=m, day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
 def _iter_months(start: datetime, end: datetime) -> List[datetime]:
@@ -53,11 +62,49 @@ def _iter_months(start: datetime, end: datetime) -> List[datetime]:
 
 def _iter_days(start: datetime, end: datetime) -> List[datetime]:
     days: List[datetime] = []
-    cursor = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    cursor = start.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     while cursor <= end:
         days.append(cursor)
         cursor += timedelta(days=1)
     return days
+
+
+def _ceil_to_next_funding(ts: datetime) -> datetime:
+    ts = ts.astimezone(timezone.utc)
+    base = ts.replace(minute=0, second=0, microsecond=0)
+    candidates: List[datetime] = []
+    for h in FUNDING_HOURS:
+        cand = base.replace(hour=h)
+        if cand < ts:
+            cand += timedelta(days=1)
+        candidates.append(cand)
+    return min(candidates)
+
+
+def _expected_funding_timestamps(start: datetime, end_exclusive: datetime) -> List[pd.Timestamp]:
+    start = start.astimezone(timezone.utc)
+    end_exclusive = end_exclusive.astimezone(timezone.utc)
+    cur = _ceil_to_next_funding(start)
+    out: List[pd.Timestamp] = []
+    while cur < end_exclusive:
+        out.append(pd.Timestamp(cur))
+        cur += FUNDING_STEP
+    return out
+
+
+def _infer_epoch_unit(ts_series: pd.Series) -> str:
+    vals = pd.to_numeric(ts_series, errors="coerce").dropna().astype("int64")
+    if vals.empty:
+        return "ms"
+    med = int(vals.median())
+    return "s" if med < 1_000_000_000_000 else "ms"
+
+
+def _snap_to_8h_grid(ts: pd.Series) -> pd.Series:
+    ts = pd.to_datetime(ts, utc=True).dt.round("1s")
+    secs = (ts.view("int64") // 1_000_000_000).astype("int64")
+    snap = ((secs + 4 * 3600) // (8 * 3600)) * (8 * 3600)
+    return pd.to_datetime(snap, unit="s", utc=True)
 
 
 def _read_funding_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame:
@@ -66,29 +113,48 @@ def _read_funding_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame
         with zf.open(csv_name) as f:
             df = pd.read_csv(f)
 
-            columns = {col.lower(): col for col in df.columns}
+            # Header-based detection first
+            columns = {str(col).lower(): col for col in df.columns}
             ts_col = None
             rate_col = None
-            for candidate in ["fundingtime", "funding_time", "calctime", "calc_time", "timestamp"]:
+
+            for candidate in ["fundingtime", "funding_time", "calctime", "calc_time", "timestamp", "time"]:
                 if candidate in columns:
                     ts_col = columns[candidate]
                     break
+
             for candidate in ["fundingrate", "funding_rate", "lastfundingrate"]:
                 if candidate in columns:
                     rate_col = columns[candidate]
                     break
 
+            # If missing/ambiguous headers, re-read as headerless and use observed Data.Vision format:
+            # [timestamp_ms, interval_hours(=8), fundingRate(decimal)]
             if ts_col is None or rate_col is None:
                 f.seek(0)
                 df = pd.read_csv(f, header=None)
+
+                if df.shape[1] < 2:
+                    raise ValueError(f"Unexpected fundingRate CSV format (cols={df.shape[1]}) in {csv_name}")
+
                 ts_col = df.columns[0]
-                rate_col = df.columns[1]
+
+                if df.shape[1] >= 3:
+                    rate_col = df.columns[2]  # IMPORTANT FIX: skip constant interval-hours column
+                else:
+                    rate_col = df.columns[1]
 
     df["_ts"] = pd.to_numeric(df[ts_col], errors="coerce")
     df["_rate"] = pd.to_numeric(df[rate_col], errors="coerce")
     df = df.loc[df["_ts"].notna() & df["_rate"].notna()].copy()
-    df["timestamp"] = pd.to_datetime(df["_ts"].astype("int64"), unit="ms", utc=True)
+
+    unit = _infer_epoch_unit(df["_ts"])
+    df["timestamp"] = pd.to_datetime(df["_ts"].astype("int64"), unit=unit, utc=True)
+    df["timestamp"] = _snap_to_8h_grid(df["timestamp"])
+
+    # IMPORTANT FIX: Data.Vision column 2 is already decimal funding rate; do NOT rescale.
     df["funding_rate"] = df["_rate"].astype(float)
+
     df = df[["timestamp", "funding_rate"]]
     df["symbol"] = symbol
     df["source"] = source
@@ -101,18 +167,20 @@ def _fetch_funding_api(
     base_url: str,
     symbol: str,
     start: datetime,
-    end: datetime,
+    end_exclusive: datetime,
     limit: int,
     sleep_sec: float,
 ) -> Tuple[pd.DataFrame, int]:
     rows: List[Dict[str, object]] = []
-    cursor = start
+    cursor = start.astimezone(timezone.utc)
+    end_exclusive = end_exclusive.astimezone(timezone.utc)
     api_calls = 0
-    while cursor < end:
+
+    while cursor < end_exclusive:
         params = {
             "symbol": symbol,
             "startTime": int(cursor.timestamp() * 1000),
-            "endTime": int(end.timestamp() * 1000),
+            "endTime": int(end_exclusive.timestamp() * 1000),
             "limit": limit,
         }
         url = join_url(base_url, "fapi", "v1", "fundingRate")
@@ -120,43 +188,57 @@ def _fetch_funding_api(
         api_calls += 1
         if response.status_code != 200:
             raise RuntimeError(f"API error {response.status_code}: {response.text}")
+
         payload = response.json()
         if not payload:
             break
+
         rows.extend(payload)
-        last_time = int(payload[-1]["fundingTime"])
-        next_cursor = datetime.fromtimestamp(last_time / 1000, tz=timezone.utc) + timedelta(hours=8)
-        if next_cursor <= cursor:
-            break
-        cursor = next_cursor
+        last_time_ms = int(payload[-1]["fundingTime"])
+        cursor = datetime.fromtimestamp(last_time_ms / 1000, tz=timezone.utc) + timedelta(milliseconds=1)
+
         if sleep_sec:
             time.sleep(sleep_sec)
+
     if not rows:
         return pd.DataFrame(columns=["timestamp", "funding_rate", "symbol", "source"]), api_calls
+
     df = pd.DataFrame(rows)
     df["timestamp"] = pd.to_datetime(df["fundingTime"], unit="ms", utc=True)
-    df["funding_rate"] = df["fundingRate"].astype(float)
+    df["timestamp"] = _snap_to_8h_grid(df["timestamp"])
+    df["funding_rate"] = pd.to_numeric(df["fundingRate"], errors="coerce").astype(float)
     df["symbol"] = symbol
     df["source"] = "api"
     df = df[["timestamp", "funding_rate", "symbol", "source"]]
     ensure_utc_timestamp(df["timestamp"], "timestamp")
+    df = df.dropna(subset=["timestamp", "funding_rate"]).sort_values("timestamp").drop_duplicates(subset=["timestamp"])
     return df, api_calls
 
 
-def _partition_complete(path: Path, expected_rows: int) -> bool:
+def _partition_complete(path: Path, expected_ts: List[pd.Timestamp]) -> bool:
     if not path.exists():
-        csv_path = path.with_suffix(".csv")
-        if csv_path.exists():
-            path = csv_path
-        else:
-            return False
+        return False
     try:
-        if expected_rows == 0:
-            return True
-        data = read_parquet([path])
-        return len(data) >= expected_rows
+        df = read_parquet([path])
+        if df.empty:
+            return len(expected_ts) == 0
+        if "timestamp" not in df.columns:
+            return False
+        ts = pd.to_datetime(df["timestamp"], utc=True)
+        if ts.duplicated().any():
+            return False
+        got = set(ts)
+        exp = set(expected_ts)
+        return exp.issubset(got)
     except Exception:
         return False
+
+
+def _missing_expected_timestamps(df: pd.DataFrame, expected_ts: List[pd.Timestamp]) -> List[pd.Timestamp]:
+    if df is None or df.empty:
+        return expected_ts
+    got = set(pd.to_datetime(df["timestamp"], utc=True))
+    return [t for t in expected_ts if t not in got]
 
 
 def main() -> int:
@@ -180,8 +262,10 @@ def main() -> int:
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
     requested_start = _parse_date(args.start)
     requested_end = _parse_date(args.end)
+
     effective_start = max(requested_start, EARLIEST_UM_FUTURES)
     effective_end = requested_end
+    end_exclusive_all = effective_end + timedelta(days=1)
 
     log_handlers = [logging.StreamHandler(sys.stdout)]
     if args.log_path:
@@ -220,15 +304,16 @@ def main() -> int:
             partitions_skipped: List[str] = []
             archive_files_downloaded: List[str] = []
             api_calls = 0
-            archive_rows_assumed = 0
 
             month_frames: List[pd.DataFrame] = []
 
+            # ---------- archive ingest per month ----------
             for month_start in _iter_months(effective_start, effective_end):
                 month_end = _next_month(month_start)
                 range_start = max(effective_start, month_start)
-                range_end_exclusive = min(effective_end + timedelta(days=1), month_end)
-                expected_rows = int((range_end_exclusive - range_start).total_seconds() // (8 * 3600))
+                range_end_exclusive = min(end_exclusive_all, month_end)
+
+                expected_ts_month = _expected_funding_timestamps(range_start, range_end_exclusive)
 
                 out_dir = (
                     out_root
@@ -239,9 +324,11 @@ def main() -> int:
                 )
                 out_path = out_dir / f"funding_{symbol}_{month_start.year}-{month_start.month:02d}.parquet"
 
-                if not args.force and _partition_complete(out_path, expected_rows):
+                if not args.force and _partition_complete(out_path, expected_ts_month):
                     partitions_skipped.append(str(out_path))
-                    archive_rows_assumed += expected_rows
+                    df_month = read_parquet([out_path]).sort_values("timestamp")
+                    df_month = df_month[(df_month["timestamp"] >= range_start) & (df_month["timestamp"] < range_end_exclusive)]
+                    month_frames.append(df_month)
                     continue
 
                 monthly_url = join_url(
@@ -253,7 +340,9 @@ def main() -> int:
                 )
                 logging.info("Downloading monthly archive %s", monthly_url)
 
+                frames: List[pd.DataFrame] = []
                 with tempfile.TemporaryDirectory() as tmpdir:
+                    tmpdir = str(tmpdir)
                     temp_zip = Path(tmpdir) / "funding.zip"
                     result = download_with_retries(
                         monthly_url,
@@ -263,7 +352,6 @@ def main() -> int:
                         session=session,
                     )
 
-                    frames: List[pd.DataFrame] = []
                     if result.status == "ok":
                         archive_files_downloaded.append(monthly_url)
                         frames.append(_read_funding_from_zip(temp_zip, symbol, "archive_monthly"))
@@ -273,6 +361,7 @@ def main() -> int:
                         else:
                             raise RuntimeError(f"Failed to download {monthly_url}: {result.error}")
 
+                        # fall back to daily archives
                         for day in _iter_days(range_start, range_end_exclusive - timedelta(seconds=1)):
                             daily_url = join_url(
                                 ARCHIVE_BASE,
@@ -309,10 +398,11 @@ def main() -> int:
                     if data["timestamp"].duplicated().any():
                         raise ValueError(f"Duplicate timestamps in {symbol} {month_start:%Y-%m}")
                     if not data["timestamp"].is_monotonic_increasing:
-                        raise ValueError(f"Timestamps not sorted for {symbol} {month_start:%Y-%m}")
+                        data = data.sort_values("timestamp")
+                        if not data["timestamp"].is_monotonic_increasing:
+                            raise ValueError(f"Timestamps not sorted for {symbol} {month_start:%Y-%m}")
 
                 month_frames.append(data)
-                archive_rows_assumed += int(len(data))
 
                 if not data.empty:
                     ensure_dir(out_dir)
@@ -330,19 +420,23 @@ def main() -> int:
 
             archive_data = pd.concat(month_frames, ignore_index=True) if month_frames else pd.DataFrame()
             archive_data = archive_data.sort_values("timestamp") if not archive_data.empty else archive_data
+            if not archive_data.empty:
+                archive_data = archive_data.drop_duplicates(subset=["timestamp"], keep="first")
+
+            expected_ts_all = _expected_funding_timestamps(effective_start, end_exclusive_all)
+            missing_from_archive = _missing_expected_timestamps(archive_data, expected_ts_all)
 
             api_data = pd.DataFrame(columns=["timestamp", "funding_rate", "symbol", "source"])
             api_coverage_start = None
             api_coverage_end = None
-            expected_total = int((effective_end + timedelta(days=1) - effective_start).total_seconds() // (8 * 3600))
-            needs_api = args.use_api_fallback and (archive_data.empty or archive_rows_assumed < expected_total)
-            if needs_api:
+
+            if int(args.use_api_fallback) and len(missing_from_archive) > 0:
                 api_data, api_calls = _fetch_funding_api(
                     session,
                     args.api_base_url,
                     symbol,
                     effective_start,
-                    effective_end + timedelta(days=1),
+                    end_exclusive_all,
                     args.api_limit,
                     args.api_sleep_sec,
                 )
@@ -352,8 +446,9 @@ def main() -> int:
 
             combined = pd.concat([archive_data, api_data], ignore_index=True)
             if not combined.empty:
-                combined = combined.sort_values("timestamp")
-                combined = combined.drop_duplicates(subset=["timestamp"], keep="first")
+                combined = combined.sort_values("timestamp").drop_duplicates(subset=["timestamp"], keep="first")
+
+            missing_after_all = _missing_expected_timestamps(combined, expected_ts_all)
 
             coverage_start = combined["timestamp"].min().isoformat() if not combined.empty else None
             coverage_end = combined["timestamp"].max().isoformat() if not combined.empty else None
@@ -365,6 +460,10 @@ def main() -> int:
                 "effective_end": effective_end.isoformat(),
                 "coverage_start": coverage_start,
                 "coverage_end": coverage_end,
+                "expected_count": len(expected_ts_all),
+                "got_count": int(len(combined)) if not combined.empty else 0,
+                "missing_count": len(missing_after_all),
+                "missing_timestamps_preview": [t.isoformat() for t in missing_after_all[:200]],
                 "archive_files_downloaded": archive_files_downloaded,
                 "missing_archive_files": missing_archives,
                 "api_calls": api_calls,
@@ -376,6 +475,7 @@ def main() -> int:
 
         finalize_manifest(manifest, "success", stats=stats)
         return 0
+
     except Exception as exc:
         logging.exception("Funding ingestion failed")
         finalize_manifest(manifest, "failed", error=str(exc), stats=stats)

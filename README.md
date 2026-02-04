@@ -12,13 +12,13 @@ The orchestrator auto-generates `run_id` (format `YYYYMMDD_HHMMSS`) unless you p
 ## Run stages individually
 ```powershell
 # 1) Ingest 15m OHLCV
-python project\pipelines\ingest\ingest_binance_um_ohlcv_15m.py --run_id 20240101_120000 --symbols BTCUSDT,ETHUSDT --start 2020-06-01 --end 2025-06-01
+python project\pipelines\ingest\ingest_binance_um_ohlcv_15m.py --run_id 20240101_120000 --symbols BTCUSDT,ETHUSDT --start 2024-06-01 --end 2025-06-01
 
 # 2) Ingest funding rates
-python project\pipelines\ingest\ingest_binance_um_funding.py --run_id 20240101_120000 --symbols BTCUSDT,ETHUSDT --start 2020-06-01 --end 2025-06-01
+python project\pipelines\ingest\ingest_binance_um_funding.py --run_id 20240101_120000 --symbols BTCUSDT,ETHUSDT --start 2024-06-01 --end 2025-06-01
 
 # 3) Build cleaned canonical 15m bars + aligned funding
-python project\pipelines\clean\build_cleaned_15m.py --run_id 20240101_120000 --symbols BTCUSDT,ETHUSDT --start 2020-06-01 --end 2025-06-01
+python project\pipelines\clean\build_cleaned_15m.py --run_id 20240101_120000 --symbols BTCUSDT,ETHUSDT --start 2024-06-01 --end 2025-06-01
 
 # 4) Build features v1
 python project\pipelines\features\build_features_v1.py --run_id 20240101_120000 --symbols BTCUSDT,ETHUSDT

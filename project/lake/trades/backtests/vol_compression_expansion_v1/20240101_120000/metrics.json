@@ -1,7 +1,7 @@
 {
-  "avg_r": -0.07811699982535714,
-  "ending_equity": 873265.3229713327,
-  "max_drawdown": -0.19690594509030698,
-  "total_trades": 331,
-  "win_rate": 0.3413897280966767
+  "avg_r": 0.0,
+  "ending_equity": 999999.9077639119,
+  "max_drawdown": -1.1579655595539296e-07,
+  "total_trades": 40,
+  "win_rate": 0.0
 }

@@ -1,37 +1,37 @@
 {
   "0": {
-    "avg_r": -0.028176883031838327,
+    "avg_r": 0.0,
     "fee_bps_per_side": 0,
-    "max_drawdown": -0.1612541866994537,
-    "net_return": -48109.41272725409,
-    "trades": 331
+    "max_drawdown": -9.298193224568912e-08,
+    "net_return": -0.04483608813862927,
+    "trades": 40
   },
   "10": {
-    "avg_r": -0.1530271750156354,
+    "avg_r": 0.0,
     "fee_bps_per_side": 10,
-    "max_drawdown": -0.2597568036555344,
-    "net_return": -238628.45810049155,
-    "trades": 331
+    "max_drawdown": -1.3359792716801166e-07,
+    "net_return": -0.12383608813862931,
+    "trades": 40
   },
   "2": {
-    "avg_r": -0.05314694142859775,
+    "avg_r": 0.0,
     "fee_bps_per_side": 2,
-    "max_drawdown": -0.1790448435450036,
-    "net_return": -87836.66379629332,
-    "trades": 331
-  },
-  "4.0": {
-    "avg_r": -0.07811699982535714,
-    "fee_bps_per_side": 4.0,
-    "max_drawdown": -0.19690594509030698,
-    "net_return": -126734.6770286673,
-    "trades": 331
+    "max_drawdown": -9.899655593889747e-08,
+    "net_return": -0.0606360881386293,
+    "trades": 40
   },
   "5": {
-    "avg_r": -0.09060202902373686,
+    "avg_r": 0.0,
     "fee_bps_per_side": 5,
-    "max_drawdown": -0.20586448653091383,
-    "net_return": -145878.26857841213,
-    "trades": 331
+    "max_drawdown": -1.1159655586269761e-07,
+    "net_return": -0.0843360881386293,
+    "trades": 40
+  },
+  "6.0": {
+    "avg_r": 0.0,
+    "fee_bps_per_side": 6.0,
+    "max_drawdown": -1.1579655595539296e-07,
+    "net_return": -0.09223608813862927,
+    "trades": 40
   }
 }

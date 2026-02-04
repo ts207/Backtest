@@ -33,13 +33,20 @@ def _parse_date(value: str) -> datetime:
 
 
 def _month_start(ts: datetime) -> datetime:
+    ts = ts.astimezone(timezone.utc)
     return ts.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
 def _next_month(ts: datetime) -> datetime:
-    year = ts.year + (ts.month // 12)
-    month = 1 if ts.month == 12 else ts.month + 1
-    return ts.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
+    # FIX: robust month increment (avoids subtle replace issues)
+    ts = ts.astimezone(timezone.utc)
+    y, m = ts.year, ts.month
+    if m == 12:
+        y += 1
+        m = 1
+    else:
+        m += 1
+    return ts.replace(year=y, month=m, day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
 def _iter_months(start: datetime, end: datetime) -> List[datetime]:
@@ -85,18 +92,42 @@ def _align_funding(bars: pd.DataFrame, funding: pd.DataFrame) -> Tuple[pd.DataFr
     return merged[["timestamp", "funding_event_ts", "funding_rate_scaled", "funding_missing"]], missing_pct
 
 
-def _partition_complete(path: Path, expected_rows: int) -> bool:
+def _expected_15m_index(range_start: datetime, range_end_exclusive: datetime) -> pd.DatetimeIndex:
+    return pd.date_range(
+        start=range_start,
+        end=range_end_exclusive - timedelta(minutes=15),
+        freq="15min",
+        tz=timezone.utc,
+    )
+
+
+def _partition_complete_15m(path: Path, range_start: datetime, range_end_exclusive: datetime) -> bool:
+    """
+    FIX: correctness-based completeness check:
+    - File exists
+    - Has timestamp column
+    - Unique timestamps
+    - Contains the entire expected 15m timestamp grid for the month partition
+    """
     if not path.exists():
-        csv_path = path.with_suffix(".csv")
-        if csv_path.exists():
-            path = csv_path
-        else:
-            return False
+        return False
     try:
-        if expected_rows == 0:
-            return True
-        data = read_parquet([path])
-        return len(data) >= expected_rows
+        df = read_parquet([path])
+        if df.empty:
+            return False
+        if "timestamp" not in df.columns:
+            return False
+
+        ts = pd.to_datetime(df["timestamp"], utc=True, format="mixed")
+        if ts.isna().any():
+            return False
+        if ts.duplicated().any():
+            return False
+
+        expected = _expected_15m_index(range_start, range_end_exclusive)
+        got = set(ts)
+        # Subset test avoids being strict about extra rows (but duplicates already rejected)
+        return set(expected).issubset(got)
     except Exception:
         return False
 
@@ -187,14 +218,13 @@ def main() -> int:
             funding_timestamp_rounded = 0
             if funding.empty:
                 if not args.allow_missing_funding:
-                    raise ValueError(
-                        f"No funding data for {symbol}. Use --allow_missing_funding=1 to proceed."
-                    )
+                    raise ValueError(f"No funding data for {symbol}. Use --allow_missing_funding=1 to proceed.")
             else:
                 validate_columns(funding, ["timestamp", "funding_rate"])
                 funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True, format="mixed")
                 if funding["timestamp"].isna().any():
                     raise ValueError(f"Invalid funding timestamps for {symbol}")
+
                 non_hour_mask = (
                     funding["timestamp"].dt.minute.ne(0)
                     | funding["timestamp"].dt.second.ne(0)
@@ -212,9 +242,13 @@ def main() -> int:
                             f"Funding timestamp rounding created duplicates for {symbol}. "
                             "Fix raw data or disable rounding."
                         )
+
                 funding = funding.sort_values("timestamp").drop_duplicates(subset=["timestamp"]).reset_index(drop=True)
                 assert_monotonic_utc_timestamp(funding, "timestamp")
                 assert_funding_event_grid(funding, "timestamp", expected_hours=8)
+
+                # Important: infer_and_apply_funding_scale should NOT “scale” decimals from Data.Vision col2.
+                # If it does, fix that function or pass a flag there.
                 funding, funding_scale_used = infer_and_apply_funding_scale(funding, "funding_rate")
                 assert_funding_sane(funding, "funding_rate_scaled")
 
@@ -269,6 +303,7 @@ def main() -> int:
                 funding_event_count = int(funding_month["funding_event_ts"].dropna().nunique()) if len(funding_month) else 0
                 funding_month_values = funding_month["funding_rate_scaled"].dropna()
                 funding_rate_month_std = float(funding_month_values.std()) if len(funding_month_values) else None
+
                 missing_stats[f"{month_start.year}-{month_start.month:02d}"] = {"pct_missing_ohlcv": missing_pct}
                 funding_stats[f"{month_start.year}-{month_start.month:02d}"] = {
                     "pct_missing_funding_event": funding_missing,
@@ -298,7 +333,7 @@ def main() -> int:
                     / f"funding15m_{symbol}_{month_start.year}-{month_start.month:02d}.parquet"
                 )
 
-                if not args.force and _partition_complete(bars_out_path, expected_rows):
+                if not args.force and _partition_complete_15m(bars_out_path, range_start, range_end_exclusive):
                     partitions_skipped.append(str(bars_out_path))
                 else:
                     ensure_dir(bars_out_path.parent)
@@ -314,7 +349,7 @@ def main() -> int:
                     )
                     partitions_written.append(str(bars_written))
 
-                if not args.force and _partition_complete(funding_out_path, expected_rows):
+                if not args.force and _partition_complete_15m(funding_out_path, range_start, range_end_exclusive):
                     partitions_skipped.append(str(funding_out_path))
                 else:
                     ensure_dir(funding_out_path.parent)
