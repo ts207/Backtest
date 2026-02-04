@@ -30,6 +30,30 @@ def _load_trades(trades_dir: Path) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def _load_engine_entries(engine_dir: Path) -> pd.DataFrame:
+    strategy_files = sorted(engine_dir.glob("strategy_returns_*.csv"))
+    if not strategy_files:
+        return pd.DataFrame()
+
+    per_symbol: Dict[str, int] = {}
+    for path in strategy_files:
+        df = pd.read_csv(path, usecols=["timestamp", "symbol", "pos"])
+        if df.empty:
+            continue
+        df = df.sort_values(["symbol", "timestamp"])
+        for symbol, group in df.groupby("symbol", sort=True):
+            pos = group["pos"].fillna(0)
+            prior = pos.shift(1).fillna(0)
+            entries = int(((prior == 0) & (pos != 0)).sum())
+            per_symbol[symbol] = per_symbol.get(symbol, 0) + entries
+
+    if not per_symbol:
+        return pd.DataFrame()
+    return pd.DataFrame(
+        [{"symbol": symbol, "total_trades": count, "avg_r": 0.0} for symbol, count in per_symbol.items()]
+    )
+
+
 def _format_funding_section(cleaned_stats: Dict[str, object]) -> List[str]:
     lines: List[str] = []
     lines.append("### Funding coverage (%) by month")
@@ -99,10 +123,17 @@ def main() -> int:
         metrics = _read_json(metrics_path)
         fee_sensitivity = _read_json(fee_path) if fee_path.exists() else {}
         trades = _load_trades(trades_dir)
+        engine_dir = PROJECT_ROOT / "runs" / run_id / "engine"
+        fallback_per_symbol = _load_engine_entries(engine_dir) if trades.empty else pd.DataFrame()
         equity_curve = pd.read_csv(equity_curve_path) if equity_curve_path.exists() else pd.DataFrame()
 
         cleaned_manifest_path = PROJECT_ROOT / "runs" / run_id / "build_cleaned_15m.json"
         cleaned_stats = _read_json(cleaned_manifest_path).get("stats", {}) if cleaned_manifest_path.exists() else {}
+        features_manifest_path = PROJECT_ROOT / "runs" / run_id / "build_features_v1.json"
+        features_stats = _read_json(features_manifest_path).get("stats", {}) if features_manifest_path.exists() else {}
+        engine_metrics_path = PROJECT_ROOT / "runs" / run_id / "engine" / "metrics.json"
+        engine_metrics = _read_json(engine_metrics_path) if engine_metrics_path.exists() else {}
+        engine_diagnostics = engine_metrics.get("diagnostics", {})
 
         inputs.append({"path": str(metrics_path), "rows": 1, "start_ts": None, "end_ts": None})
         inputs.append({"path": str(trades_dir), "rows": len(trades), "start_ts": None, "end_ts": None})
@@ -111,15 +142,27 @@ def main() -> int:
         report_dir.mkdir(parents=True, exist_ok=True)
         report_path = report_dir / "summary.md"
 
-        per_symbol_trades = trades.groupby("symbol").agg(total_trades=("symbol", "count"), avg_r=("r_multiple", "mean")) if not trades.empty else pd.DataFrame()
-        total_trades = int(len(trades))
-        avg_r_total = float(trades["r_multiple"].mean()) if not trades.empty else 0.0
+        if trades.empty and not fallback_per_symbol.empty:
+            per_symbol_trades = fallback_per_symbol
+            total_trades = int(fallback_per_symbol["total_trades"].sum())
+            avg_r_total = 0.0
+        else:
+            per_symbol_trades = (
+                trades.groupby("symbol").agg(total_trades=("symbol", "count"), avg_r=("r_multiple", "mean"))
+                if not trades.empty
+                else pd.DataFrame()
+            )
+            total_trades = int(len(trades))
+            avg_r_total = float(trades["r_multiple"].mean()) if not trades.empty else 0.0
         max_drawdown = 0.0
         if not equity_curve.empty:
             equity_series = equity_curve["equity"]
             peak = equity_series.cummax()
             drawdown = (equity_series - peak) / peak
             max_drawdown = float(drawdown.min())
+        drawdown_display = f"{max_drawdown:.2%}"
+        if abs(max_drawdown) < 0.0001 and max_drawdown != 0.0:
+            drawdown_display = f"{max_drawdown:.6%}"
 
         fee_table = []
         for key, value in fee_sensitivity.items():
@@ -142,7 +185,7 @@ def main() -> int:
             "## Summary Metrics",
             f"- Total trades (combined): {total_trades}",
             f"- Avg R (combined): {avg_r_total:.2f}",
-            f"- Max drawdown (combined): {max_drawdown:.2%}",
+            f"- Max drawdown (combined): {drawdown_display}",
             "",
             "## Trades by Symbol",
             "",
@@ -169,7 +212,56 @@ def main() -> int:
                 for month, values in details.get("pct_missing_ohlcv", {}).items():
                     lines.append(f"  - {month}: {values.get('pct_missing_ohlcv', 0.0):.2%}")
             lines.append("")
+            lines.append("### Bad bars by month")
+            for symbol, details in cleaned_stats.get("symbols", {}).items():
+                lines.append(f"- **{symbol}**")
+                for month, values in details.get("bad_bar_count", {}).items():
+                    lines.append(f"  - {month}: {values.get('bad_bar_count', 0)}")
+            lines.append("")
             lines.extend(_format_funding_section(cleaned_stats))
+
+        lines.extend(["", "## Feature Diagnostics", ""])
+        if not features_stats:
+            lines.append("No feature diagnostics available.")
+        else:
+            for symbol, details in features_stats.get("symbols", {}).items():
+                lines.append(f"- **{symbol}**")
+                nan_rates = details.get("nan_rates", {})
+                if nan_rates:
+                    lines.append(f"  - pct NaN ret_1: {nan_rates.get('ret_1', 0.0):.2%}")
+                    lines.append(f"  - pct NaN logret_1: {nan_rates.get('logret_1', 0.0):.2%}")
+                    lines.append(f"  - pct NaN rv_96: {nan_rates.get('rv_96', 0.0):.2%}")
+                    lines.append(f"  - pct NaN rv_pct_17280: {nan_rates.get('rv_pct_17280', 0.0):.2%}")
+                    lines.append(f"  - pct NaN range_med_2880: {nan_rates.get('range_med_2880', 0.0):.2%}")
+                segment_stats = details.get("segment_stats", {})
+                if segment_stats:
+                    lines.append(
+                        "  - segments count/min/median/max: "
+                        f"{segment_stats.get('count', 0)} / "
+                        f"{segment_stats.get('min', 0)} / "
+                        f"{segment_stats.get('median', 0)} / "
+                        f"{segment_stats.get('max', 0)}"
+                    )
+                lines.append(f"  - pct rows dropped: {details.get('pct_rows_dropped', 0.0):.2%}")
+
+        lines.extend(["", "## Engine Diagnostics", ""])
+        if not engine_diagnostics:
+            lines.append("No engine diagnostics available.")
+        else:
+            for strategy_name, diag in engine_diagnostics.get("strategies", {}).items():
+                lines.append(f"- **{strategy_name}**")
+                lines.append(
+                    f"  - nan_return_bars: {diag.get('nan_return_bars', 0)} "
+                    f"({diag.get('nan_return_pct', 0.0):.2%})"
+                )
+                lines.append(
+                    f"  - forced_flat_bars: {diag.get('forced_flat_bars', 0)} "
+                    f"({diag.get('forced_flat_pct', 0.0):.2%})"
+                )
+                lines.append(
+                    f"  - missing_feature_bars: {diag.get('missing_feature_bars', 0)} "
+                    f"({diag.get('missing_feature_pct', 0.0):.2%})"
+                )
 
         report_path.write_text("\n".join(lines), encoding="utf-8")
         outputs.append({"path": str(report_path), "rows": len(lines), "start_ts": None, "end_ts": None})
@@ -182,6 +274,8 @@ def main() -> int:
             "per_symbol": per_symbol_trades.reset_index().to_dict(orient="records") if not per_symbol_trades.empty else [],
             "fee_sensitivity": fee_table,
             "data_quality": cleaned_stats,
+            "feature_quality": features_stats,
+            "engine_diagnostics": engine_diagnostics,
         }
         summary_path = report_dir / "summary.json"
         summary_path.write_text(json.dumps(summary_json, indent=2, sort_keys=True), encoding="utf-8")

@@ -1,0 +1,67 @@
+{
+  "error": null,
+  "finished_at": "2026-02-04T03:10:26.174987+00:00",
+  "inputs": [],
+  "outputs": [
+    {
+      "end_ts": null,
+      "path": "C:\\Users\\tstuv\\AppData\\Local\\Temp\\pytest-of-tstuv\\pytest-2\\test_backtest_pipeline_outputs0\\runs\\run_pipeline\\engine\\strategy_returns_vol_compression_v1.csv",
+      "rows": 10,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "C:\\Users\\tstuv\\AppData\\Local\\Temp\\pytest-of-tstuv\\pytest-2\\test_backtest_pipeline_outputs0\\runs\\run_pipeline\\engine\\portfolio_returns.csv",
+      "rows": 10,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "C:\\Users\\tstuv\\AppData\\Local\\Temp\\pytest-of-tstuv\\pytest-2\\test_backtest_pipeline_outputs0\\lake\\trades\\backtests\\vol_compression_expansion_v1\\run_pipeline\\trades_BTCUSDT.csv",
+      "rows": 1,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "C:\\Users\\tstuv\\AppData\\Local\\Temp\\pytest-of-tstuv\\pytest-2\\test_backtest_pipeline_outputs0\\lake\\trades\\backtests\\vol_compression_expansion_v1\\run_pipeline\\metrics.json",
+      "rows": 1,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "C:\\Users\\tstuv\\AppData\\Local\\Temp\\pytest-of-tstuv\\pytest-2\\test_backtest_pipeline_outputs0\\lake\\trades\\backtests\\vol_compression_expansion_v1\\run_pipeline\\equity_curve.csv",
+      "rows": 10,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "C:\\Users\\tstuv\\AppData\\Local\\Temp\\pytest-of-tstuv\\pytest-2\\test_backtest_pipeline_outputs0\\lake\\trades\\backtests\\vol_compression_expansion_v1\\run_pipeline\\fee_sensitivity.json",
+      "rows": 5,
+      "start_ts": null
+    }
+  ],
+  "parameters": {
+    "cost_bps": 6.0,
+    "fee_bps_per_side": 4.0,
+    "force": 1,
+    "slippage_bps_per_fill": 2.0,
+    "strategies": [
+      "vol_compression_v1"
+    ],
+    "symbols": [
+      "BTCUSDT"
+    ],
+    "trade_day_timezone": "UTC"
+  },
+  "run_id": "run_pipeline",
+  "stage": "backtest_vol_compression_v1",
+  "started_at": "2026-02-04T03:10:26.120460+00:00",
+  "stats": {
+    "symbols": {
+      "BTCUSDT": {
+        "entries": 0
+      }
+    }
+  },
+  "status": "success"
+}

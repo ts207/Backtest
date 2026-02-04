@@ -17,6 +17,13 @@ from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.validation import ensure_utc_timestamp, validate_columns
 
+DEFAULT_WINDOWS = {
+    "rv": 96,
+    "rv_pct": 17280,
+    "range": 96,
+    "range_med": 2880,
+}
+
 
 def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
     if df.empty:
@@ -34,6 +41,88 @@ def _rolling_percentile(series: pd.Series, window: int) -> pd.Series:
         return float(np.sum(values <= last) / len(values) * 100.0)
 
     return series.rolling(window=window, min_periods=window).apply(pct_rank, raw=True)
+
+
+def _compute_segment_id(is_gap: pd.Series) -> pd.Series:
+    gap_series = is_gap.fillna(True)
+    valid = ~gap_series
+    segment_start = valid & ~valid.shift(fill_value=False)
+    segment_id = segment_start.cumsum()
+    return segment_id.where(valid)
+
+
+def _segment_rolling(
+    series: pd.Series, segment_id: pd.Series, window: int, min_periods: int, func: str
+) -> pd.Series:
+    grouped = series.groupby(segment_id, sort=False)
+    rolled = grouped.rolling(window=window, min_periods=min_periods)
+    if func == "std":
+        result = rolled.std()
+    elif func == "max":
+        result = rolled.max()
+    elif func == "min":
+        result = rolled.min()
+    elif func == "median":
+        result = rolled.median()
+    else:
+        raise ValueError(f"Unsupported rolling function: {func}")
+    return result.reset_index(level=0, drop=True)
+
+
+def _segment_rolling_percentile(series: pd.Series, segment_id: pd.Series, window: int) -> pd.Series:
+    def pct_rank(values: np.ndarray) -> float:
+        last = values[-1]
+        return float(np.sum(values <= last) / len(values) * 100.0)
+
+    grouped = series.groupby(segment_id, sort=False)
+    rolled = grouped.rolling(window=window, min_periods=window).apply(pct_rank, raw=True)
+    return rolled.reset_index(level=0, drop=True)
+
+
+def _build_features_frame(
+    bars: pd.DataFrame, windows: Dict[str, int] | None = None
+) -> tuple[pd.DataFrame, pd.Series, Dict[str, float]]:
+    windows = windows or DEFAULT_WINDOWS
+    is_gap = bars.get("is_gap", pd.Series(False, index=bars.index))
+    segment_id = _compute_segment_id(is_gap)
+
+    close = bars["close"].astype(float)
+    log_close = np.log(close)
+    logret_1 = log_close.groupby(segment_id, sort=False).diff()
+    ret_1 = (
+        close.groupby(segment_id, sort=False)
+        .apply(lambda s: s.pct_change(fill_method=None))
+        .reset_index(level=0, drop=True)
+    )
+
+    rv_96 = _segment_rolling(logret_1, segment_id, windows["rv"], windows["rv"], "std")
+    high_96 = _segment_rolling(bars["high"].astype(float), segment_id, windows["range"], windows["range"], "max")
+    low_96 = _segment_rolling(bars["low"].astype(float), segment_id, windows["range"], windows["range"], "min")
+    range_96 = high_96 - low_96
+    range_med_2880 = _segment_rolling(range_96, segment_id, windows["range_med"], windows["range_med"], "median")
+    rv_pct_17280 = _segment_rolling_percentile(rv_96, segment_id, windows["rv_pct"])
+
+    features = bars[
+        ["timestamp", "open", "high", "low", "close", "funding_event_ts", "funding_rate_scaled"]
+    ].copy()
+    features["ret_1"] = ret_1
+    features["logret_1"] = logret_1
+    features["rv_96"] = rv_96
+    features["rv_pct_17280"] = rv_pct_17280
+    features["high_96"] = high_96
+    features["low_96"] = low_96
+    features["range_96"] = range_96
+    features["range_med_2880"] = range_med_2880
+
+    nan_rates = {
+        "ret_1": float(features["ret_1"].isna().mean()),
+        "logret_1": float(features["logret_1"].isna().mean()),
+        "rv_96": float(features["rv_96"].isna().mean()),
+        "rv_pct_17280": float(features["rv_pct_17280"].isna().mean()),
+        "range_med_2880": float(features["range_med_2880"].isna().mean()),
+    }
+
+    return features, segment_id, nan_rates
 
 
 def _partition_complete(path: Path, expected_rows: int) -> bool:
@@ -124,16 +213,26 @@ def main() -> int:
                     how="left",
                 )
 
-            features = bars[
-                ["timestamp", "open", "high", "low", "close", "funding_event_ts", "funding_rate_scaled"]
-            ].copy()
-            features["logret_1"] = np.log(features["close"]).diff()
-            features["rv_96"] = features["logret_1"].rolling(window=96, min_periods=96).std()
-            features["rv_pct_17280"] = _rolling_percentile(features["rv_96"], window=17280)
-            features["high_96"] = features["high"].rolling(window=96, min_periods=96).max()
-            features["low_96"] = features["low"].rolling(window=96, min_periods=96).min()
-            features["range_96"] = features["high_96"] - features["low_96"]
-            features["range_med_2880"] = features["range_96"].rolling(window=2880, min_periods=2880).median()
+            if "is_gap" not in bars.columns:
+                logging.warning("Missing is_gap column for %s; assuming no gaps.", symbol)
+                bars["is_gap"] = False
+
+            features, segment_id, nan_rates = _build_features_frame(bars, DEFAULT_WINDOWS)
+            segment_lengths = segment_id.value_counts().sort_index()
+            if segment_lengths.empty:
+                segment_stats = {"count": 0, "min": 0, "median": 0, "max": 0}
+            else:
+                segment_stats = {
+                    "count": int(len(segment_lengths)),
+                    "min": int(segment_lengths.min()),
+                    "median": float(segment_lengths.median()),
+                    "max": int(segment_lengths.max()),
+                }
+
+            drop_mask = features[
+                ["ret_1", "logret_1", "rv_96", "rv_pct_17280", "range_med_2880"]
+            ].isna().any(axis=1)
+            pct_rows_dropped = float(drop_mask.mean()) if len(features) else 0.0
 
             features["year"] = features["timestamp"].dt.year
             features["month"] = features["timestamp"].dt.month
@@ -158,6 +257,9 @@ def main() -> int:
                 "rows_written": int(len(features)),
                 "coverage_start": features["timestamp"].min().isoformat(),
                 "coverage_end": features["timestamp"].max().isoformat(),
+                "nan_rates": nan_rates,
+                "segment_stats": segment_stats,
+                "pct_rows_dropped": pct_rows_dropped,
                 "partitions_written": partitions_written,
                 "partitions_skipped": partitions_skipped,
             }

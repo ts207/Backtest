@@ -4,7 +4,7 @@
 Run the full pipeline from the repo root (Windows PowerShell examples shown):
 
 ```powershell
-python project\pipelines\run_all.py --symbols BTCUSDT,ETHUSDT --start 2023-06-01 --end 2023-07-10 --allow_funding_timestamp_rounding=1
+python project\pipelines\run_all.py --symbols BTCUSDT,ETHUSDT --start 2023-06-01 --end 2023-07-10 
 ```
 
 The orchestrator auto-generates `run_id` (format `YYYYMMDD_HHMMSS`) unless you provide one via `--run_id`.

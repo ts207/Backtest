@@ -1,6 +1,6 @@
 {
   "error": null,
-  "finished_at": "2026-02-04T02:08:56.974357+00:00",
+  "finished_at": "2026-02-04T02:52:00.342699+00:00",
   "inputs": [],
   "outputs": [
     {
@@ -18,13 +18,13 @@
     {
       "end_ts": null,
       "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\trades\\backtests\\vol_compression_expansion_v1\\20240101_120000\\trades_BTCUSDT.csv",
-      "rows": 0,
+      "rows": 4,
       "start_ts": null
     },
     {
       "end_ts": null,
       "path": "C:\\Users\\tstuv\\backtest\\Backtest\\project\\lake\\trades\\backtests\\vol_compression_expansion_v1\\20240101_120000\\trades_ETHUSDT.csv",
-      "rows": 0,
+      "rows": 2,
       "start_ts": null
     },
     {
@@ -49,7 +49,7 @@
   "parameters": {
     "cost_bps": 6.0,
     "fee_bps_per_side": 4.0,
-    "force": 0,
+    "force": 1,
     "slippage_bps_per_fill": 2.0,
     "strategies": [
       "vol_compression_v1"
@@ -62,7 +62,7 @@
   },
   "run_id": "20240101_120000",
   "stage": "backtest_vol_compression_v1",
-  "started_at": "2026-02-04T02:08:38.568263+00:00",
+  "started_at": "2026-02-04T02:51:38.869278+00:00",
   "stats": {
     "symbols": {
       "BTCUSDT": {

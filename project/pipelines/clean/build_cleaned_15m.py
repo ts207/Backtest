@@ -70,6 +70,20 @@ def _gap_lengths(is_gap: pd.Series) -> pd.Series:
     return lengths.where(is_gap, 0).astype(int)
 
 
+def _detect_bad_bars(bars: pd.DataFrame) -> pd.Series:
+    required = ["open", "high", "low", "close", "volume"]
+    if any(col not in bars.columns for col in required):
+        return pd.Series(False, index=bars.index)
+    mask = (
+        bars[required].notna().all(axis=1)
+        & (bars["volume"] == 0)
+        & (bars["open"] == bars["high"])
+        & (bars["open"] == bars["low"])
+        & (bars["open"] == bars["close"])
+    )
+    return mask.fillna(False)
+
+
 def _align_funding(bars: pd.DataFrame, funding: pd.DataFrame) -> Tuple[pd.DataFrame, float]:
     if funding.empty:
         aligned = bars[["timestamp"]].copy()
@@ -99,6 +113,15 @@ def _expected_15m_index(range_start: datetime, range_end_exclusive: datetime) ->
         freq="15min",
         tz=timezone.utc,
     )
+
+
+def _expected_funding_events(range_start: datetime, range_end_exclusive: datetime, hours: int = 8) -> pd.DatetimeIndex:
+    if range_end_exclusive <= range_start:
+        return pd.DatetimeIndex([], tz=timezone.utc)
+    anchor = range_start.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    end_inclusive = range_end_exclusive - timedelta(seconds=1)
+    events = pd.date_range(start=anchor, end=end_inclusive, freq=f"{hours}h", tz=timezone.utc)
+    return events[(events >= range_start) & (events < range_end_exclusive)]
 
 
 def _partition_complete_15m(path: Path, range_start: datetime, range_end_exclusive: datetime) -> bool:
@@ -211,6 +234,10 @@ def main() -> int:
                 tz=timezone.utc,
             )
             bars = raw.set_index("timestamp").reindex(full_index).reset_index().rename(columns={"index": "timestamp"})
+            bad_bar_mask = _detect_bad_bars(bars)
+            bars["is_bad_bar"] = bad_bar_mask
+            if bad_bar_mask.any():
+                bars.loc[bad_bar_mask, ["open", "high", "low", "close", "volume"]] = np.nan
             bars["is_gap"] = bars[["open", "high", "low", "close", "volume"]].isna().any(axis=1)
             bars["gap_len"] = _gap_lengths(bars["is_gap"])
 
@@ -277,12 +304,14 @@ def main() -> int:
 
             missing_stats: Dict[str, Dict[str, float]] = {}
             funding_stats: Dict[str, Dict[str, float]] = {}
+            bad_bar_stats: Dict[str, Dict[str, int]] = {}
             partitions_written: List[str] = []
             partitions_skipped: List[str] = []
 
             gap_count = int((bars["is_gap"] & ~bars["is_gap"].shift(fill_value=False)).sum())
             max_gap_len = int(bars["gap_len"].max()) if len(bars) else 0
             pct_missing_bars = float(bars["is_gap"].mean()) if len(bars) else 0.0
+            bad_bar_count_total = int(bars["is_bad_bar"].sum()) if "is_bad_bar" in bars.columns else 0
 
             for month_start in _iter_months(start_ts, end_ts):
                 month_end = _next_month(month_start)
@@ -296,11 +325,18 @@ def main() -> int:
                 funding_month = aligned_funding[
                     (aligned_funding["timestamp"] >= range_start) & (aligned_funding["timestamp"] < range_end_exclusive)
                 ]
+                funding_month_events = (
+                    funding[(funding["timestamp"] >= range_start) & (funding["timestamp"] < range_end_exclusive)]
+                    if not funding.empty
+                    else pd.DataFrame()
+                )
+                bad_bar_count = int(bars_month["is_bad_bar"].sum()) if "is_bad_bar" in bars_month.columns else 0
 
                 missing_pct = float(bars_month["is_gap"].mean()) if len(bars_month) else 0.0
                 funding_missing = float(funding_month["funding_missing"].mean()) if len(funding_month) else 0.0
                 funding_event_coverage = float(funding_month["funding_event_ts"].notna().mean()) if len(funding_month) else 0.0
-                funding_event_count = int(funding_month["funding_event_ts"].dropna().nunique()) if len(funding_month) else 0
+                funding_event_count = int(funding_month_events["timestamp"].nunique()) if len(funding_month_events) else 0
+                expected_events = len(_expected_funding_events(range_start, range_end_exclusive, hours=8))
                 funding_month_values = funding_month["funding_rate_scaled"].dropna()
                 funding_rate_month_std = float(funding_month_values.std()) if len(funding_month_values) else None
 
@@ -309,8 +345,17 @@ def main() -> int:
                     "pct_missing_funding_event": funding_missing,
                     "pct_funding_event_coverage": funding_event_coverage,
                     "funding_event_count": funding_event_count,
+                    "funding_event_expected": expected_events,
                     "funding_rate_scaled_std": funding_rate_month_std,
                 }
+                bad_bar_stats[f"{month_start.year}-{month_start.month:02d}"] = {"bad_bar_count": bad_bar_count}
+
+                if not args.allow_missing_funding and funding_event_count != expected_events:
+                    raise ValueError(
+                        f"Missing funding events for {symbol} in {month_start:%Y-%m}. "
+                        f"expected={expected_events} actual={funding_event_count}. "
+                        "Use --allow_missing_funding=1 to proceed."
+                    )
 
                 if not args.allow_constant_funding:
                     funding_values = funding_month["funding_rate_scaled"].dropna()
@@ -337,13 +382,16 @@ def main() -> int:
                     partitions_skipped.append(str(bars_out_path))
                 else:
                     ensure_dir(bars_out_path.parent)
-                    bars_written, storage = write_parquet(bars_month.reset_index(drop=True), bars_out_path)
+                    bars_out = bars_month[
+                        ["timestamp", "open", "high", "low", "close", "volume", "is_gap", "gap_len"]
+                    ]
+                    bars_written, storage = write_parquet(bars_out.reset_index(drop=True), bars_out_path)
                     outputs.append(
                         {
                             "path": str(bars_written),
-                            "rows": int(len(bars_month)),
-                            "start_ts": bars_month["timestamp"].min().isoformat(),
-                            "end_ts": bars_month["timestamp"].max().isoformat(),
+                            "rows": int(len(bars_out)),
+                            "start_ts": bars_out["timestamp"].min().isoformat(),
+                            "end_ts": bars_out["timestamp"].max().isoformat(),
                             "storage": storage,
                         }
                     )
@@ -382,6 +430,8 @@ def main() -> int:
                     "gap_count": gap_count,
                     "max_gap_len": max_gap_len,
                 },
+                "bad_bar_count": bad_bar_stats,
+                "bad_bar_count_total": bad_bar_count_total,
                 "partitions_written": partitions_written,
                 "partitions_skipped": partitions_skipped,
             }

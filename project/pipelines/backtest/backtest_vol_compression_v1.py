@@ -46,6 +46,157 @@ def _empty_trades_frame() -> pd.DataFrame:
     )
 
 
+def _extract_trades(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return _empty_trades_frame()
+    if "close" not in frame.columns:
+        logging.warning("Strategy frame missing close prices; skipping trade extraction.")
+        return _empty_trades_frame()
+
+    frame = frame.sort_values("timestamp").reset_index(drop=True)
+    pos = frame["pos"].fillna(0).astype(int)
+    pnl = frame["pnl"].fillna(0.0).astype(float)
+    close = frame["close"].astype(float)
+    high = frame["high"].astype(float) if "high" in frame.columns else pd.Series([float("nan")] * len(frame))
+    low = frame["low"].astype(float) if "low" in frame.columns else pd.Series([float("nan")] * len(frame))
+    high_96 = frame["high_96"].astype(float) if "high_96" in frame.columns else pd.Series([float("nan")] * len(frame))
+    low_96 = frame["low_96"].astype(float) if "low_96" in frame.columns else pd.Series([float("nan")] * len(frame))
+    ts = frame["timestamp"]
+
+    trades: List[Dict[str, object]] = []
+    current_pos = 0
+    entry_idx: int | None = None
+    entry_time: object | None = None
+    entry_price: float | None = None
+    direction: str | None = None
+    stop_price: float | None = None
+    target_price: float | None = None
+    risk_return: float | None = None
+
+    for i in range(len(frame)):
+        pos_i = int(pos.iat[i])
+        if current_pos == 0:
+            if pos_i != 0:
+                current_pos = pos_i
+                entry_idx = i
+                entry_time = ts.iat[i]
+                entry_price = float(close.iat[i]) if pd.notna(close.iat[i]) else float("nan")
+                direction = "long" if pos_i > 0 else "short"
+                stop_price = float(low_96.iat[i]) if direction == "long" else float(high_96.iat[i])
+                if pd.notna(entry_price) and pd.notna(stop_price) and entry_price > 0:
+                    risk_per_unit = entry_price - stop_price if direction == "long" else stop_price - entry_price
+                    if risk_per_unit > 0:
+                        target_price = (
+                            entry_price + 2 * risk_per_unit if direction == "long" else entry_price - 2 * risk_per_unit
+                        )
+                        risk_return = risk_per_unit / entry_price
+                    else:
+                        target_price = float("nan")
+                        risk_return = None
+                else:
+                    stop_price = float("nan")
+                    target_price = float("nan")
+                    risk_return = None
+            continue
+
+        if pos_i == current_pos:
+            continue
+
+        exit_idx = i
+        exit_time = ts.iat[i]
+        exit_price = float(close.iat[i]) if pd.notna(close.iat[i]) else float("nan")
+        trade_pnl = float(pnl.iloc[entry_idx : exit_idx + 1].sum()) if entry_idx is not None else 0.0
+        r_multiple = trade_pnl / risk_return if risk_return and risk_return > 0 else 0.0
+        exit_reason = "position_flip" if pos_i != 0 else "position_exit"
+        bars_held = int(exit_idx - entry_idx) if entry_idx is not None else 0
+        if pd.notna(stop_price) and pd.notna(target_price):
+            high_exit = float(high.iat[exit_idx]) if pd.notna(high.iat[exit_idx]) else float("nan")
+            low_exit = float(low.iat[exit_idx]) if pd.notna(low.iat[exit_idx]) else float("nan")
+            if direction == "long":
+                if pd.notna(low_exit) and low_exit <= stop_price:
+                    exit_reason = "stop"
+                elif pd.notna(high_exit) and high_exit >= target_price:
+                    exit_reason = "target"
+            elif direction == "short":
+                if pd.notna(high_exit) and high_exit >= stop_price:
+                    exit_reason = "stop"
+                elif pd.notna(low_exit) and low_exit <= target_price:
+                    exit_reason = "target"
+        if exit_reason == "position_exit" and bars_held >= 48:
+            exit_reason = "time"
+        trades.append(
+            {
+                "symbol": frame["symbol"].iat[i],
+                "direction": direction,
+                "entry_time": entry_time,
+                "exit_time": exit_time,
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "qty": 1.0,
+                "pnl": trade_pnl,
+                "r_multiple": r_multiple,
+                "exit_reason": exit_reason,
+                "stop_price": stop_price,
+                "target_price": target_price,
+            }
+        )
+
+        if pos_i == 0:
+            current_pos = 0
+            entry_idx = None
+            entry_time = None
+            entry_price = None
+            direction = None
+        else:
+            current_pos = pos_i
+            entry_idx = i
+            entry_time = ts.iat[i]
+            entry_price = float(close.iat[i]) if pd.notna(close.iat[i]) else float("nan")
+            direction = "long" if pos_i > 0 else "short"
+            stop_price = float(low_96.iat[i]) if direction == "long" else float(high_96.iat[i])
+            if pd.notna(entry_price) and pd.notna(stop_price) and entry_price > 0:
+                risk_per_unit = entry_price - stop_price if direction == "long" else stop_price - entry_price
+                if risk_per_unit > 0:
+                    target_price = (
+                        entry_price + 2 * risk_per_unit if direction == "long" else entry_price - 2 * risk_per_unit
+                    )
+                    risk_return = risk_per_unit / entry_price
+                else:
+                    target_price = float("nan")
+                    risk_return = None
+            else:
+                stop_price = float("nan")
+                target_price = float("nan")
+                risk_return = None
+
+    if current_pos != 0 and entry_idx is not None:
+        exit_idx = len(frame) - 1
+        exit_time = ts.iat[exit_idx]
+        exit_price = float(close.iat[exit_idx]) if pd.notna(close.iat[exit_idx]) else float("nan")
+        trade_pnl = float(pnl.iloc[entry_idx : exit_idx + 1].sum())
+        r_multiple = trade_pnl / risk_return if risk_return and risk_return > 0 else 0.0
+        trades.append(
+            {
+                "symbol": frame["symbol"].iat[exit_idx],
+                "direction": direction,
+                "entry_time": entry_time,
+                "exit_time": exit_time,
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "qty": 1.0,
+                "pnl": trade_pnl,
+                "r_multiple": r_multiple,
+                "exit_reason": "eod",
+                "stop_price": stop_price,
+                "target_price": target_price,
+            }
+        )
+
+    if not trades:
+        return _empty_trades_frame()
+    return pd.DataFrame(trades, columns=_empty_trades_frame().columns)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Backtest volatility compression -> expansion")
     parser.add_argument("--run_id", required=True)
@@ -127,14 +278,30 @@ def main() -> int:
         portfolio_path = engine_results["engine_dir"] / "portfolio_returns.csv"
         outputs.append({"path": str(portfolio_path), "rows": len(portfolio), "start_ts": None, "end_ts": None})
 
+        if len(strategies) > 1:
+            logging.warning("Multiple strategies detected; trades will be combined without strategy attribution.")
+
+        trades_by_symbol: Dict[str, List[pd.DataFrame]] = {symbol: [] for symbol in symbols}
+        for _, frame in engine_results["strategy_frames"].items():
+            for symbol, symbol_frame in frame.groupby("symbol", sort=True):
+                trades_by_symbol.setdefault(symbol, []).append(_extract_trades(symbol_frame))
+
         for symbol in symbols:
+            trades_frames = [frame for frame in trades_by_symbol.get(symbol, []) if not frame.empty]
+            symbol_trades = pd.concat(trades_frames, ignore_index=True) if trades_frames else _empty_trades_frame()
             trades_path = trades_dir / f"trades_{symbol}.csv"
-            _empty_trades_frame().to_csv(trades_path, index=False)
-            outputs.append({"path": str(trades_path), "rows": 0, "start_ts": None, "end_ts": None})
+            symbol_trades.to_csv(trades_path, index=False)
+            outputs.append({"path": str(trades_path), "rows": len(symbol_trades), "start_ts": None, "end_ts": None})
 
         metrics_path = trades_dir / "metrics.json"
-        ending_equity = float(INITIAL_EQUITY + portfolio["portfolio_pnl"].sum()) if not portfolio.empty else INITIAL_EQUITY
-        max_drawdown = _compute_drawdown(INITIAL_EQUITY + portfolio["portfolio_pnl"].cumsum()) if not portfolio.empty else 0.0
+        if portfolio.empty:
+            ending_equity = INITIAL_EQUITY
+            max_drawdown = 0.0
+        else:
+            cumulative_return = portfolio["portfolio_pnl"].cumsum()
+            equity_series = INITIAL_EQUITY * (1.0 + cumulative_return)
+            ending_equity = float(equity_series.iloc[-1])
+            max_drawdown = _compute_drawdown(equity_series)
         metrics_payload = {
             "total_trades": int(sum(v.get("entries", 0) for v in engine_results["metrics"]["strategies"].values())),
             "win_rate": 0.0,
@@ -151,7 +318,7 @@ def main() -> int:
             equity_curve = pd.DataFrame(
                 {
                     "timestamp": portfolio["timestamp"],
-                    "equity": INITIAL_EQUITY + portfolio["portfolio_pnl"].cumsum(),
+                    "equity": INITIAL_EQUITY * (1.0 + portfolio["portfolio_pnl"].cumsum()),
                 }
             )
         equity_curve_path = trades_dir / "equity_curve.csv"
@@ -165,23 +332,35 @@ def main() -> int:
         fee_sensitivity: Dict[str, Dict[str, object]] = {}
         for scenario_cost in fee_scenarios:
             scenario_pnl_frames: List[pd.Series] = []
+            scenario_trade_frames: List[pd.DataFrame] = []
             entry_count = 0
             for _, frame in engine_results["strategy_frames"].items():
                 for _, symbol_frame in frame.groupby("symbol", sort=True):
-                    pos = symbol_frame.set_index("timestamp")["pos"]
-                    ret = symbol_frame.set_index("timestamp")["ret"]
+                    indexed = symbol_frame.set_index("timestamp")
+                    pos = indexed["pos"]
+                    ret = indexed["ret"]
                     pnl = compute_pnl(pos, ret, scenario_cost)
                     scenario_pnl_frames.append(pnl)
                     prior = pos.shift(1).fillna(0)
                     entry_count += int(((prior == 0) & (pos != 0)).sum())
+                    temp_frame = symbol_frame.copy()
+                    temp_frame = temp_frame.set_index("timestamp")
+                    temp_frame["pnl"] = pnl
+                    temp_frame = temp_frame.reset_index()
+                    scenario_trade_frames.append(_extract_trades(temp_frame))
             scenario_pnl = (
                 pd.concat(scenario_pnl_frames, axis=1).sum(axis=1) if scenario_pnl_frames else pd.Series(dtype=float)
             )
-            scenario_equity = INITIAL_EQUITY + scenario_pnl.cumsum()
+            scenario_equity = INITIAL_EQUITY * (1.0 + scenario_pnl.cumsum())
+            if scenario_trade_frames:
+                scenario_trades = pd.concat(scenario_trade_frames, ignore_index=True)
+                avg_r = float(scenario_trades["r_multiple"].mean()) if not scenario_trades.empty else 0.0
+            else:
+                avg_r = 0.0
             fee_sensitivity[str(scenario_cost)] = {
                 "fee_bps_per_side": scenario_cost,
                 "net_return": float(scenario_pnl.sum()),
-                "avg_r": 0.0,
+                "avg_r": avg_r,
                 "max_drawdown": _compute_drawdown(scenario_equity) if not scenario_equity.empty else 0.0,
                 "trades": entry_count,
             }
