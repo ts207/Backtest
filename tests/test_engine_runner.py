@@ -188,3 +188,9 @@ def test_backtest_pipeline_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert (engine_dir / "portfolio_returns.csv").exists()
     metrics = json.loads((engine_dir / "metrics.json").read_text())
     assert "portfolio" in metrics
+
+    stage_metrics = json.loads((trades_dir / "metrics.json").read_text())
+    trades = pd.read_csv(trades_dir / "trades_BTCUSDT.csv")
+    assert stage_metrics["total_trades"] == len(trades)
+    assert stage_metrics["win_rate"] == pytest.approx(float((trades["pnl"] > 0).mean()))
+    assert stage_metrics["avg_r"] == pytest.approx(float(trades["r_multiple"].mean()))
