@@ -142,18 +142,23 @@ def main() -> int:
         report_dir.mkdir(parents=True, exist_ok=True)
         report_path = report_dir / "summary.md"
 
+        metrics_total_trades = int(metrics.get("total_trades", 0) or 0)
+        metrics_avg_r = float(metrics.get("avg_r", 0.0) or 0.0)
+        metrics_win_rate = float(metrics.get("win_rate", 0.0) or 0.0)
+        ending_equity = float(metrics.get("ending_equity", 0.0) or 0.0)
+
         if trades.empty and not fallback_per_symbol.empty:
             per_symbol_trades = fallback_per_symbol
             total_trades = int(fallback_per_symbol["total_trades"].sum())
-            avg_r_total = 0.0
+            avg_r_total = metrics_avg_r
         else:
             per_symbol_trades = (
                 trades.groupby("symbol").agg(total_trades=("symbol", "count"), avg_r=("r_multiple", "mean"))
                 if not trades.empty
                 else pd.DataFrame()
             )
-            total_trades = int(len(trades))
-            avg_r_total = float(trades["r_multiple"].mean()) if not trades.empty else 0.0
+            total_trades = metrics_total_trades if metrics_total_trades else int(len(trades))
+            avg_r_total = metrics_avg_r if metrics_total_trades else (float(trades["r_multiple"].mean()) if not trades.empty else 0.0)
         max_drawdown = 0.0
         if not equity_curve.empty:
             equity_series = equity_curve["equity"]
@@ -184,7 +189,9 @@ def main() -> int:
             "",
             "## Summary Metrics",
             f"- Total trades (combined): {total_trades}",
+            f"- Win rate (combined): {metrics_win_rate:.2%}",
             f"- Avg R (combined): {avg_r_total:.2f}",
+            f"- Ending equity (combined): {ending_equity:,.2f}",
             f"- Max drawdown (combined): {drawdown_display}",
             "",
             "## Trades by Symbol",
@@ -269,7 +276,9 @@ def main() -> int:
         summary_json = {
             "run_id": run_id,
             "total_trades": total_trades,
+            "win_rate": metrics_win_rate,
             "avg_r": avg_r_total,
+            "ending_equity": ending_equity,
             "max_drawdown": max_drawdown,
             "per_symbol": per_symbol_trades.reset_index().to_dict(orient="records") if not per_symbol_trades.empty else [],
             "fee_sensitivity": fee_table,
