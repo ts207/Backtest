@@ -19,6 +19,14 @@ from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 
 
+
+
+def _table_text(df: pd.DataFrame) -> str:
+    try:
+        return df.to_markdown(index=False)
+    except ImportError:
+        return df.to_string(index=False)
+
 def _read_json(path: Path) -> Dict[str, object]:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
@@ -55,6 +63,57 @@ def _load_engine_entries(engine_dir: Path) -> pd.DataFrame:
         [{"symbol": symbol, "total_trades": count, "avg_r": 0.0} for symbol, count in per_symbol.items()]
     )
 
+
+
+
+def _load_context_segments(engine_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    strategy_files = sorted(engine_dir.glob("strategy_returns_*.csv"))
+    if not strategy_files:
+        return pd.DataFrame(), pd.DataFrame()
+
+    frames = []
+    for path in strategy_files:
+        usecols = ["timestamp", "symbol", "pnl", "fp_active", "fp_age_bars"]
+        try:
+            frame = pd.read_csv(path, usecols=usecols)
+        except ValueError:
+            continue
+        if frame.empty:
+            continue
+        frame["fp_active"] = frame["fp_active"].fillna(0).astype(int)
+        frame["fp_age_bars"] = frame["fp_age_bars"].fillna(0).astype(int)
+        frame["pnl"] = frame["pnl"].fillna(0.0).astype(float)
+        frames.append(frame)
+
+    if not frames:
+        return pd.DataFrame(), pd.DataFrame()
+
+    combined = pd.concat(frames, ignore_index=True)
+    by_active = (
+        combined.groupby("fp_active", sort=True)
+        .agg(bars=("pnl", "size"), total_pnl=("pnl", "sum"), mean_pnl=("pnl", "mean"))
+        .reset_index()
+    )
+
+    def _age_bucket(row: pd.Series) -> str:
+        if int(row["fp_active"]) == 0:
+            return "inactive"
+        age = int(row["fp_age_bars"])
+        if age <= 8:
+            return "0-8"
+        if age <= 30:
+            return "9-30"
+        if age <= 96:
+            return "31-96"
+        return ">96"
+
+    combined["fp_age_bucket"] = combined.apply(_age_bucket, axis=1)
+    by_age = (
+        combined.groupby("fp_age_bucket", sort=False)
+        .agg(bars=("pnl", "size"), total_pnl=("pnl", "sum"), mean_pnl=("pnl", "mean"))
+        .reset_index()
+    )
+    return by_active, by_age
 
 def _format_funding_section(cleaned_stats: Dict[str, object]) -> List[str]:
     lines: List[str] = []
@@ -127,6 +186,7 @@ def main() -> int:
         trades = _load_trades(trades_dir)
         engine_dir = DATA_ROOT / "runs" / run_id / "engine"
         fallback_per_symbol = _load_engine_entries(engine_dir) if trades.empty else pd.DataFrame()
+        context_by_active, context_by_age = _load_context_segments(engine_dir)
         equity_curve = pd.read_csv(equity_curve_path) if equity_curve_path.exists() else pd.DataFrame()
 
         cleaned_manifest_path = DATA_ROOT / "runs" / run_id / "build_cleaned_15m.json"
@@ -205,13 +265,13 @@ def main() -> int:
         if per_symbol_trades.empty:
             lines.append("No trades for this run.")
         else:
-            lines.append(per_symbol_trades.reset_index().to_markdown(index=False))
+            lines.append(_table_text(per_symbol_trades.reset_index()))
 
         lines.extend(["", "## Fee Sensitivity", ""])
         if fee_df.empty:
             lines.append("Fee sensitivity data unavailable.")
         else:
-            lines.append(fee_df.to_markdown(index=False))
+            lines.append(_table_text(fee_df))
 
         lines.extend(["", "## Data Quality", ""])
         if not cleaned_stats:
@@ -259,6 +319,16 @@ def main() -> int:
                     )
                 lines.append(f"  - pct rows dropped: {details.get('pct_rows_dropped', 0.0):.2%}")
 
+        lines.extend(["", "## Context Segmentation (Funding Persistence)", ""])
+        if context_by_active.empty:
+            lines.append("No funding persistence context columns found in engine outputs.")
+        else:
+            lines.append("### By fp_active")
+            lines.append(_table_text(context_by_active))
+            lines.append("")
+            lines.append("### By fp_age_bars bucket")
+            lines.append(_table_text(context_by_age) if not context_by_age.empty else "No rows")
+
         lines.extend(["", "## Engine Diagnostics", ""])
         if not engine_diagnostics:
             lines.append("No engine diagnostics available.")
@@ -293,6 +363,10 @@ def main() -> int:
             "data_quality": cleaned_stats,
             "feature_quality": features_stats,
             "engine_diagnostics": engine_diagnostics,
+            "context_segmentation": {
+                "by_active": context_by_active.to_dict(orient="records") if not context_by_active.empty else [],
+                "by_age_bucket": context_by_age.to_dict(orient="records") if not context_by_age.empty else [],
+            },
         }
         summary_path = report_dir / "summary.json"
         summary_path.write_text(json.dumps(summary_json, indent=2, sort_keys=True), encoding="utf-8")
