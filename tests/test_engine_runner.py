@@ -37,11 +37,11 @@ def _write_fixture(root: Path, symbol: str = "BTCUSDT") -> None:
             "close": bars["close"],
             "funding_event_ts": pd.NaT,
             "funding_rate_scaled": 0.0,
-            "rv_pct_17280": [5.0] * 10,
+            "rv_pct_2880": [5.0] * 10,
             "high_96": [100.0] * 10,
             "low_96": [90.0] * 10,
             "range_96": [10.0] * 10,
-            "range_med_2880": [20.0] * 10,
+            "range_med_480": [20.0] * 10,
         }
     )
 
@@ -75,11 +75,11 @@ def test_strategy_positions_values_and_tz() -> None:
             "close": bars["close"],
             "funding_event_ts": pd.NaT,
             "funding_rate_scaled": 0.0,
-            "rv_pct_17280": [5.0] * 6,
+            "rv_pct_2880": [5.0] * 6,
             "high_96": [100.0] * 6,
             "low_96": [90.0] * 6,
             "range_96": [10.0] * 6,
-            "range_med_2880": [20.0] * 6,
+            "range_med_480": [20.0] * 6,
         }
     )
 
@@ -137,7 +137,7 @@ def test_run_engine_determinism(tmp_path: Path) -> None:
         strategies=["vol_compression_v1"],
         params={"trade_day_timezone": "UTC", "one_trade_per_day": True},
         cost_bps=6.0,
-        project_root=tmp_path,
+        data_root=tmp_path,
     )
     result_2 = run_engine(
         run_id="run_a",
@@ -145,7 +145,7 @@ def test_run_engine_determinism(tmp_path: Path) -> None:
         strategies=["vol_compression_v1"],
         params={"trade_day_timezone": "UTC", "one_trade_per_day": True},
         cost_bps=6.0,
-        project_root=tmp_path,
+        data_root=tmp_path,
     )
 
     file_path = result_1["engine_dir"] / "strategy_returns_vol_compression_v1.csv"
@@ -155,7 +155,8 @@ def test_run_engine_determinism(tmp_path: Path) -> None:
 
 def test_backtest_pipeline_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_fixture(tmp_path)
-    monkeypatch.setattr(backtest_stage, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(backtest_stage, "DATA_ROOT", tmp_path)
     monkeypatch.setattr(
         backtest_stage,
         "load_configs",
@@ -201,7 +202,7 @@ def test_backtest_pipeline_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         "--run_id",
         run_id,
     ]
-    monkeypatch.setattr(report_stage, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(report_stage, "DATA_ROOT", tmp_path)
     monkeypatch.setattr(report_stage, "load_configs", lambda paths: {"trade_day_timezone": "UTC"})
     monkeypatch.setattr(sys, "argv", report_args)
     assert report_stage.main() == 0

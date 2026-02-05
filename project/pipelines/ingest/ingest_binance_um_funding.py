@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import tempfile
 import time
@@ -15,6 +16,7 @@ import pandas as pd
 import requests
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.http_utils import download_with_retries
@@ -247,7 +249,7 @@ def main() -> int:
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
-    parser.add_argument("--out_root", default=str(PROJECT_ROOT / "lake" / "raw" / "binance" / "perp"))
+    parser.add_argument("--out_root", default=str(DATA_ROOT / "lake" / "raw" / "binance" / "perp"))
     parser.add_argument("--use_api_fallback", type=int, default=1)
     parser.add_argument("--api_base_url", default=DEFAULT_API_BASE)
     parser.add_argument("--api_limit", type=int, default=1000)

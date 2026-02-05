@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Dict, List
@@ -10,6 +11,7 @@ from typing import Dict, List
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.config import load_configs
@@ -116,29 +118,29 @@ def main() -> int:
     stats: Dict[str, object] = {}
 
     try:
-        trades_dir = PROJECT_ROOT / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id
+        trades_dir = DATA_ROOT / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id
         metrics_path = trades_dir / "metrics.json"
         equity_curve_path = trades_dir / "equity_curve.csv"
         fee_path = trades_dir / "fee_sensitivity.json"
         metrics = _read_json(metrics_path)
         fee_sensitivity = _read_json(fee_path) if fee_path.exists() else {}
         trades = _load_trades(trades_dir)
-        engine_dir = PROJECT_ROOT / "runs" / run_id / "engine"
+        engine_dir = DATA_ROOT / "runs" / run_id / "engine"
         fallback_per_symbol = _load_engine_entries(engine_dir) if trades.empty else pd.DataFrame()
         equity_curve = pd.read_csv(equity_curve_path) if equity_curve_path.exists() else pd.DataFrame()
 
-        cleaned_manifest_path = PROJECT_ROOT / "runs" / run_id / "build_cleaned_15m.json"
+        cleaned_manifest_path = DATA_ROOT / "runs" / run_id / "build_cleaned_15m.json"
         cleaned_stats = _read_json(cleaned_manifest_path).get("stats", {}) if cleaned_manifest_path.exists() else {}
-        features_manifest_path = PROJECT_ROOT / "runs" / run_id / "build_features_v1.json"
+        features_manifest_path = DATA_ROOT / "runs" / run_id / "build_features_v1.json"
         features_stats = _read_json(features_manifest_path).get("stats", {}) if features_manifest_path.exists() else {}
-        engine_metrics_path = PROJECT_ROOT / "runs" / run_id / "engine" / "metrics.json"
+        engine_metrics_path = DATA_ROOT / "runs" / run_id / "engine" / "metrics.json"
         engine_metrics = _read_json(engine_metrics_path) if engine_metrics_path.exists() else {}
         engine_diagnostics = engine_metrics.get("diagnostics", {})
 
         inputs.append({"path": str(metrics_path), "rows": 1, "start_ts": None, "end_ts": None})
         inputs.append({"path": str(trades_dir), "rows": len(trades), "start_ts": None, "end_ts": None})
 
-        report_dir = Path(args.out_dir) if args.out_dir else PROJECT_ROOT / "reports" / "vol_compression_expansion_v1" / run_id
+        report_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "vol_compression_expansion_v1" / run_id
         report_dir.mkdir(parents=True, exist_ok=True)
         report_path = report_dir / "summary.md"
 
@@ -146,6 +148,7 @@ def main() -> int:
         metrics_avg_r = float(metrics.get("avg_r", 0.0) or 0.0)
         metrics_win_rate = float(metrics.get("win_rate", 0.0) or 0.0)
         ending_equity = float(metrics.get("ending_equity", 0.0) or 0.0)
+        metrics_sharpe = float(metrics.get("sharpe_annualized", 0.0) or 0.0)
 
         if trades.empty and not fallback_per_symbol.empty:
             per_symbol_trades = fallback_per_symbol
@@ -193,6 +196,7 @@ def main() -> int:
             f"- Avg R (combined): {avg_r_total:.2f}",
             f"- Ending equity (combined): {ending_equity:,.2f}",
             f"- Max drawdown (combined): {drawdown_display}",
+            f"- Sharpe (annualized): {metrics_sharpe:.2f}",
             "",
             "## Trades by Symbol",
             "",
@@ -238,8 +242,12 @@ def main() -> int:
                     lines.append(f"  - pct NaN ret_1: {nan_rates.get('ret_1', 0.0):.2%}")
                     lines.append(f"  - pct NaN logret_1: {nan_rates.get('logret_1', 0.0):.2%}")
                     lines.append(f"  - pct NaN rv_96: {nan_rates.get('rv_96', 0.0):.2%}")
-                    lines.append(f"  - pct NaN rv_pct_17280: {nan_rates.get('rv_pct_17280', 0.0):.2%}")
-                    lines.append(f"  - pct NaN range_med_2880: {nan_rates.get('range_med_2880', 0.0):.2%}")
+                    rv_pct_keys = sorted(key for key in nan_rates.keys() if key.startswith("rv_pct_"))
+                    range_med_keys = sorted(key for key in nan_rates.keys() if key.startswith("range_med_"))
+                    for key in rv_pct_keys:
+                        lines.append(f"  - pct NaN {key}: {nan_rates.get(key, 0.0):.2%}")
+                    for key in range_med_keys:
+                        lines.append(f"  - pct NaN {key}: {nan_rates.get(key, 0.0):.2%}")
                 segment_stats = details.get("segment_stats", {})
                 if segment_stats:
                     lines.append(

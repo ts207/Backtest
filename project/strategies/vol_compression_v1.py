@@ -16,9 +16,9 @@ class VolCompressionV1:
     def __post_init__(self) -> None:
         if self.required_features is None:
             self.required_features = [
-                "rv_pct_17280",
+                "rv_pct_2880",
                 "range_96",
-                "range_med_2880",
+                "range_med_480",
                 "high_96",
                 "low_96",
             ]
@@ -85,7 +85,7 @@ class VolCompressionV1:
                         exit_triggered = True
                     elif bars_held >= 48:
                         exit_triggered = True
-                    elif row["rv_pct_17280"] > 40:
+                    elif row["rv_pct_2880"] > 40:
                         exit_triggered = True
 
                 if exit_triggered:
@@ -98,7 +98,7 @@ class VolCompressionV1:
                 positions.append(1 if in_position and position.get("direction") == "long" else -1 if in_position else 0)
                 continue
 
-            compression = row["rv_pct_17280"] <= 10 and row["range_96"] <= 0.8 * row["range_med_2880"]
+            compression = row["rv_pct_2880"] <= 10 and row["range_96"] <= 0.8 * row["range_med_480"]
             if not compression:
                 positions.append(0)
                 continue

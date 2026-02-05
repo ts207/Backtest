@@ -23,15 +23,26 @@ def ensure_dir(path: Path) -> None:
 
 def list_parquet_files(path: Path) -> List[Path]:
     """
-    Recursively list all parquet files under a directory.
-    If no parquet files exist, fall back to CSV files.
+    Recursively list partition files under a directory, supporting parquet and csv.
+    If both parquet and csv exist for the same partition file stem, parquet is preferred.
     """
     if not path.exists():
         return []
-    parquet_files = sorted([p for p in path.rglob("*.parquet") if p.is_file()])
-    if parquet_files:
-        return parquet_files
-    return sorted([p for p in path.rglob("*.csv") if p.is_file()])
+    parquet_files = [p for p in path.rglob("*.parquet") if p.is_file()]
+    csv_files = [p for p in path.rglob("*.csv") if p.is_file()]
+    if not parquet_files and not csv_files:
+        return []
+
+    by_stem = {}
+    for file_path in parquet_files + csv_files:
+        stem_key = str(file_path.with_suffix(""))
+        chosen = by_stem.get(stem_key)
+        if chosen is None:
+            by_stem[stem_key] = file_path
+            continue
+        if chosen.suffix != ".parquet" and file_path.suffix == ".parquet":
+            by_stem[stem_key] = file_path
+    return sorted(by_stem.values())
 
 
 def read_parquet(files: Iterable[Path]) -> pd.DataFrame:

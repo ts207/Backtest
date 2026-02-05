@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
@@ -14,6 +15,7 @@ from pipelines._lib.validation import ensure_utc_timestamp
 from strategies.registry import get_strategy
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 LOGGER = logging.getLogger(__name__)
 
 
@@ -24,9 +26,9 @@ class StrategyResult:
     diagnostics: Dict[str, object]
 
 
-def _load_symbol_data(project_root: Path, symbol: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    features_dir = project_root / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
-    bars_dir = project_root / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
+def _load_symbol_data(data_root: Path, symbol: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    features_dir = data_root / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
+    bars_dir = data_root / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
     feature_files = list_parquet_files(features_dir)
     bars_files = list_parquet_files(bars_dir)
     features = read_parquet(feature_files)
@@ -177,9 +179,9 @@ def run_engine(
     strategies: List[str],
     params: Dict[str, object],
     cost_bps: float,
-    project_root: Path = PROJECT_ROOT,
+    data_root: Path = DATA_ROOT,
 ) -> Dict[str, object]:
-    engine_dir = project_root / "runs" / run_id / "engine"
+    engine_dir = data_root / "runs" / run_id / "engine"
     ensure_dir(engine_dir)
 
     strategy_frames: Dict[str, pd.DataFrame] = {}
@@ -188,7 +190,7 @@ def run_engine(
     for strategy_name in strategies:
         symbol_results: List[StrategyResult] = []
         for symbol in symbols:
-            bars, features = _load_symbol_data(project_root, symbol)
+            bars, features = _load_symbol_data(data_root, symbol)
             result = _strategy_returns(symbol, bars, features, strategy_name, params, cost_bps)
             symbol_results.append(result)
 

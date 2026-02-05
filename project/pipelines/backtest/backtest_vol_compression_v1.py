@@ -3,13 +3,16 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Dict, List
 
+import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.config import load_configs
@@ -19,12 +22,23 @@ from engine.pnl import compute_pnl
 from engine.runner import run_engine
 
 INITIAL_EQUITY = 1_000_000.0
+BARS_PER_YEAR_15M = 365 * 24 * 4
 
 
 def _compute_drawdown(equity_curve: pd.Series) -> float:
     peak = equity_curve.cummax()
     drawdown = (equity_curve - peak) / peak
     return float(drawdown.min()) if not drawdown.empty else 0.0
+
+
+def _annualized_sharpe(returns: pd.Series, periods_per_year: int = BARS_PER_YEAR_15M) -> float:
+    returns = returns.dropna()
+    if returns.empty:
+        return 0.0
+    std = float(returns.std())
+    if std == 0.0:
+        return 0.0
+    return float((returns.mean() / std) * np.sqrt(periods_per_year))
 
 
 def _empty_trades_frame() -> pd.DataFrame:
@@ -250,7 +264,7 @@ def main() -> int:
     stats: Dict[str, object] = {"symbols": {}}
 
     try:
-        trades_dir = PROJECT_ROOT / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id
+        trades_dir = DATA_ROOT / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id
         trades_dir.mkdir(parents=True, exist_ok=True)
 
         if not args.force and (trades_dir / "metrics.json").exists():
@@ -266,7 +280,7 @@ def main() -> int:
                 "one_trade_per_day": True,
             },
             cost_bps=cost_bps,
-            project_root=PROJECT_ROOT,
+            data_root=DATA_ROOT,
         )
 
         for strategy_name in strategies:
@@ -309,17 +323,20 @@ def main() -> int:
         if portfolio.empty:
             ending_equity = INITIAL_EQUITY
             max_drawdown = 0.0
+            sharpe_annualized = 0.0
         else:
             cumulative_return = portfolio["portfolio_pnl"].cumsum()
             equity_series = INITIAL_EQUITY * (1.0 + cumulative_return)
             ending_equity = float(equity_series.iloc[-1])
             max_drawdown = _compute_drawdown(equity_series)
+            sharpe_annualized = _annualized_sharpe(portfolio["portfolio_pnl"])
         metrics_payload = {
             "total_trades": total_trades,
             "win_rate": win_rate,
             "avg_r": avg_r,
             "max_drawdown": max_drawdown,
             "ending_equity": ending_equity,
+            "sharpe_annualized": sharpe_annualized,
         }
         metrics_path.write_text(json.dumps(metrics_payload, indent=2, sort_keys=True), encoding="utf-8")
         outputs.append({"path": str(metrics_path), "rows": 1, "start_ts": None, "end_ts": None})

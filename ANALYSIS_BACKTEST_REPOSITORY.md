@@ -6,11 +6,11 @@ The `ts207/Backtest` repository is organized around a modular cryptocurrency fut
 
 Top-level structure:
 
-- `pipelines/`: Orchestrates ingestion, cleaning, feature engineering, backtesting, and reporting. The one-command driver (`pipelines/run_all.py`) executes these stages in sequence.
-- `engine/`: Core portfolio/trade logic (including per-trade PnL and multi-symbol aggregation).
-- `strategies/`: Strategy implementations. `vol_compression_v1.py` implements a volatility compression → expansion setup. A registry maps strategy names to implementations.
-- `pipelines/_lib/`: Shared utilities for config loading, I/O, HTTP helpers, validation, and manifests.
-- Runtime outputs: `lake/`, `runs/`, and `reports/` directories generated during execution.
+- `project/pipelines/`: Orchestrates ingestion, cleaning, feature engineering, backtesting, and reporting. The one-command driver (`project/pipelines/run_all.py`) executes these stages in sequence.
+- `project/engine/`: Core portfolio/trade logic (including per-trade PnL and multi-symbol aggregation).
+- `project/strategies/`: Strategy implementations. `vol_compression_v1.py` implements a volatility compression → expansion setup. A registry maps strategy names to implementations.
+- `project/pipelines/_lib/`: Shared utilities for config loading, I/O, HTTP helpers, validation, and manifests.
+- Runtime outputs: `data/lake/`, `data/runs/`, and `data/reports/` directories generated during execution.
 - `tests/`: Unit tests for determinism and expected pipeline artifacts.
 
 Configuration is primarily controlled through `pipeline.yaml` and `fees.yaml`.
@@ -19,43 +19,43 @@ Configuration is primarily controlled through `pipeline.yaml` and `fees.yaml`.
 
 ### 1) Ingest OHLCV and funding data
 
-- `pipelines/ingest/` pulls Binance UM 15-minute OHLCV bars and funding rates.
-- Raw data lands in `lake/raw`, then canonicalized outputs are written to `lake/cleaned`.
+- `project/pipelines/ingest/` pulls Binance UM 15-minute OHLCV bars and funding rates.
+- Raw data lands in `data/lake/raw`, then canonicalized outputs are written to `data/lake/cleaned`.
 - Validation checks include timestamp monotonicity, funding bounds, and funding alignment diagnostics.
 
 ### 2) Clean 15-minute bars
 
-- `build_cleaned_15m.py` aligns bars with funding events, drops invalid rows, and records quality metrics.
+- `project/pipelines/clean/build_cleaned_15m.py` aligns bars with funding events, drops invalid rows, and records quality metrics.
 - Manifests include diagnostics like monthly missing bar percentages.
 
 ### 3) Feature engineering
 
-- `build_features_v1.py` builds features such as realized volatility, rolling high/low ranges (including 96-bar constructs), funding features, and range-based measures.
-- Features are written as Parquet under `lake/features/perp/<symbol>/15m/`.
+- `project/pipelines/features/build_features_v1.py` builds features such as realized volatility, rolling high/low ranges (including 96-bar constructs), funding features, and range-based measures.
+- Features are written as Parquet under `data/lake/features/perp/<symbol>/15m/`.
 
 ### 4) Backtest
 
-- `backtest_vol_compression_v1.py` loads cleaned bars + features and invokes the engine to simulate strategy returns.
+- `project/pipelines/backtest/backtest_vol_compression_v1.py` loads cleaned bars + features and invokes the engine to simulate strategy returns.
 - Outputs include:
-  - `runs/<run_id>/engine/strategy_returns_<strategy>.csv`
-  - `runs/<run_id>/engine/portfolio_returns.csv`
-  - `lake/trades/backtests/vol_compression_expansion_v1/<run_id>/trades_<symbol>.csv`
-  - `lake/trades/backtests/vol_compression_expansion_v1/<run_id>/equity_curve.csv`
-  - `runs/<run_id>/engine/metrics.json`
-  - `runs/<run_id>/engine/fee_sensitivity.json`
+  - `data/runs/<run_id>/engine/strategy_returns_<strategy>.csv`
+  - `data/runs/<run_id>/engine/portfolio_returns.csv`
+  - `data/lake/trades/backtests/vol_compression_expansion_v1/<run_id>/trades_<symbol>.csv`
+  - `data/lake/trades/backtests/vol_compression_expansion_v1/<run_id>/equity_curve.csv`
+  - `data/runs/<run_id>/engine/metrics.json`
+  - `data/runs/<run_id>/engine/fee_sensitivity.json`
 
 ### 5) Report generation
 
-- `make_report.py` aggregates metrics, fee sensitivity, and data quality diagnostics.
-- Produces `summary.md` and `summary.json` in `reports/vol_compression_expansion_v1/<run_id>/`.
+- `project/pipelines/report/make_report.py` aggregates metrics, fee sensitivity, and data quality diagnostics.
+- Produces `summary.md` and `summary.json` in `data/reports/vol_compression_expansion_v1/<run_id>/`.
 - Includes fallback logic when explicit trade files are unavailable.
 
 ## Examined Run: `20240101_120000`
 
 Sample report location:
 
-- `project/reports/vol_compression_expansion_v1/20240101_120000/summary.md`
-- `project/reports/vol_compression_expansion_v1/20240101_120000/summary.json`
+- `data/reports/vol_compression_expansion_v1/20240101_120000/summary.md`
+- `data/reports/vol_compression_expansion_v1/20240101_120000/summary.json`
 
 Key outcomes:
 

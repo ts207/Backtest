@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -11,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.config import load_configs
@@ -199,8 +201,8 @@ def main() -> int:
 
     try:
         for symbol in symbols:
-            raw_dir = PROJECT_ROOT / "lake" / "raw" / "binance" / "perp" / symbol / "ohlcv_15m"
-            funding_dir = PROJECT_ROOT / "lake" / "raw" / "binance" / "perp" / symbol / "funding"
+            raw_dir = DATA_ROOT / "lake" / "raw" / "binance" / "perp" / symbol / "ohlcv_15m"
+            funding_dir = DATA_ROOT / "lake" / "raw" / "binance" / "perp" / symbol / "funding"
             raw_files = list_parquet_files(raw_dir)
             funding_files = list_parquet_files(funding_dir)
 
@@ -299,8 +301,8 @@ def main() -> int:
                     }
                 )
 
-            cleaned_dir = PROJECT_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
-            funding_out_dir = PROJECT_ROOT / "lake" / "cleaned" / "perp" / symbol / "funding_15m"
+            cleaned_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
+            funding_out_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "funding_15m"
 
             missing_stats: Dict[str, Dict[str, float]] = {}
             funding_stats: Dict[str, Dict[str, float]] = {}

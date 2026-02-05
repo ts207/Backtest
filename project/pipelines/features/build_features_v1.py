@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Dict, List
@@ -10,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.config import load_configs
@@ -19,9 +21,9 @@ from pipelines._lib.validation import ensure_utc_timestamp, validate_columns
 
 DEFAULT_WINDOWS = {
     "rv": 96,
-    "rv_pct": 17280,
+    "rv_pct": 2880,
     "range": 96,
-    "range_med": 2880,
+    "range_med": 480,
 }
 
 
@@ -81,8 +83,12 @@ def _segment_rolling_percentile(series: pd.Series, segment_id: pd.Series, window
 
 def _build_features_frame(
     bars: pd.DataFrame, windows: Dict[str, int] | None = None
-) -> tuple[pd.DataFrame, pd.Series, Dict[str, float]]:
+) -> tuple[pd.DataFrame, pd.Series, Dict[str, float], Dict[str, str]]:
     windows = windows or DEFAULT_WINDOWS
+    rv_pct_window = windows["rv_pct"]
+    range_med_window = windows["range_med"]
+    rv_pct_col = f"rv_pct_{rv_pct_window}"
+    range_med_col = f"range_med_{range_med_window}"
     is_gap = bars.get("is_gap", pd.Series(False, index=bars.index))
     segment_id = _compute_segment_id(is_gap)
 
@@ -99,8 +105,8 @@ def _build_features_frame(
     high_96 = _segment_rolling(bars["high"].astype(float), segment_id, windows["range"], windows["range"], "max")
     low_96 = _segment_rolling(bars["low"].astype(float), segment_id, windows["range"], windows["range"], "min")
     range_96 = high_96 - low_96
-    range_med_2880 = _segment_rolling(range_96, segment_id, windows["range_med"], windows["range_med"], "median")
-    rv_pct_17280 = _segment_rolling_percentile(rv_96, segment_id, windows["rv_pct"])
+    range_med = _segment_rolling(range_96, segment_id, windows["range_med"], windows["range_med"], "median")
+    rv_pct = _segment_rolling_percentile(rv_96, segment_id, windows["rv_pct"])
 
     features = bars[
         ["timestamp", "open", "high", "low", "close", "funding_event_ts", "funding_rate_scaled"]
@@ -108,21 +114,25 @@ def _build_features_frame(
     features["ret_1"] = ret_1
     features["logret_1"] = logret_1
     features["rv_96"] = rv_96
-    features["rv_pct_17280"] = rv_pct_17280
+    features[rv_pct_col] = rv_pct
     features["high_96"] = high_96
     features["low_96"] = low_96
     features["range_96"] = range_96
-    features["range_med_2880"] = range_med_2880
+    features[range_med_col] = range_med
 
     nan_rates = {
         "ret_1": float(features["ret_1"].isna().mean()),
         "logret_1": float(features["logret_1"].isna().mean()),
         "rv_96": float(features["rv_96"].isna().mean()),
-        "rv_pct_17280": float(features["rv_pct_17280"].isna().mean()),
-        "range_med_2880": float(features["range_med_2880"].isna().mean()),
+        rv_pct_col: float(features[rv_pct_col].isna().mean()),
+        range_med_col: float(features[range_med_col].isna().mean()),
+    }
+    column_map = {
+        "rv_pct": rv_pct_col,
+        "range_med": range_med_col,
     }
 
-    return features, segment_id, nan_rates
+    return features, segment_id, nan_rates, column_map
 
 
 def _partition_complete(path: Path, expected_rows: int) -> bool:
@@ -177,8 +187,8 @@ def main() -> int:
 
     try:
         for symbol in symbols:
-            cleaned_dir = PROJECT_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
-            funding_dir = PROJECT_ROOT / "lake" / "cleaned" / "perp" / symbol / "funding_15m"
+            cleaned_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
+            funding_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "funding_15m"
             cleaned_files = list_parquet_files(cleaned_dir)
             funding_files = list_parquet_files(funding_dir)
             bars = read_parquet(cleaned_files)
@@ -217,7 +227,7 @@ def main() -> int:
                 logging.warning("Missing is_gap column for %s; assuming no gaps.", symbol)
                 bars["is_gap"] = False
 
-            features, segment_id, nan_rates = _build_features_frame(bars, DEFAULT_WINDOWS)
+            features, segment_id, nan_rates, column_map = _build_features_frame(bars, DEFAULT_WINDOWS)
             segment_lengths = segment_id.value_counts().sort_index()
             if segment_lengths.empty:
                 segment_stats = {"count": 0, "min": 0, "median": 0, "max": 0}
@@ -230,13 +240,13 @@ def main() -> int:
                 }
 
             drop_mask = features[
-                ["ret_1", "logret_1", "rv_96", "rv_pct_17280", "range_med_2880"]
+                ["ret_1", "logret_1", "rv_96", column_map["rv_pct"], column_map["range_med"]]
             ].isna().any(axis=1)
             pct_rows_dropped = float(drop_mask.mean()) if len(features) else 0.0
 
             features["year"] = features["timestamp"].dt.year
             features["month"] = features["timestamp"].dt.month
-            out_dir = PROJECT_ROOT / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
+            out_dir = DATA_ROOT / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
 
             partitions_written: List[str] = []
             partitions_skipped: List[str] = []

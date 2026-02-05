@@ -11,7 +11,7 @@ from engine.runner import run_engine
 
 
 class _StubStrategy:
-    required_features = ["rv_pct_17280"]
+    required_features = ["rv_pct_2880"]
 
     def generate_positions(self, bars: pd.DataFrame, features: pd.DataFrame, params: dict) -> pd.Series:
         return pd.Series([1] * len(bars), index=pd.DatetimeIndex(bars["timestamp"]))
@@ -33,7 +33,7 @@ def _write_gap_fixture(root: Path, symbol: str = "BTCUSDT") -> None:
     features = pd.DataFrame(
         {
             "timestamp": timestamps,
-            "rv_pct_17280": [5.0] * 6,
+            "rv_pct_2880": [5.0] * 6,
         }
     )
 
@@ -55,7 +55,7 @@ def test_runner_diagnostics(tmp_path: Path, monkeypatch):
         strategies=["stub"],
         params={"trade_day_timezone": "UTC", "one_trade_per_day": True},
         cost_bps=0.0,
-        project_root=tmp_path,
+        data_root=tmp_path,
     )
 
     diagnostics = result["metrics"]["diagnostics"]["strategies"]["stub"]

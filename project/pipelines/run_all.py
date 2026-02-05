@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -9,6 +10,7 @@ from typing import List, Tuple
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 
 
 def _run_id_default() -> str:
@@ -21,7 +23,7 @@ def _run_stage(
     base_args: List[str],
     run_id: str,
 ) -> bool:
-    runs_dir = PROJECT_ROOT / "runs" / run_id
+    runs_dir = DATA_ROOT / "runs" / run_id
     runs_dir.mkdir(parents=True, exist_ok=True)
     log_path = runs_dir / f"{stage}.log"
     manifest_path = runs_dir / f"{stage}.json"
@@ -189,7 +191,7 @@ def main() -> int:
         if not _run_stage(stage, script, base_args, run_id):
             return 1
 
-    report_path = PROJECT_ROOT / "reports" / "vol_compression_expansion_v1" / run_id / "summary.md"
+    report_path = DATA_ROOT / "reports" / "vol_compression_expansion_v1" / run_id / "summary.md"
     print(f"Report generated: {report_path}")
     return 0
 
