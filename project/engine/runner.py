@@ -7,11 +7,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
+import numpy as np
+
 import pandas as pd
 
 from engine.pnl import compute_pnl, compute_returns
 from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet
 from pipelines._lib.validation import ensure_utc_timestamp
+from features.funding_persistence import FP_DEF_VERSION
 from strategies.registry import get_strategy
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -24,6 +27,80 @@ class StrategyResult:
     name: str
     data: pd.DataFrame
     diagnostics: Dict[str, object]
+
+
+_CONTEXT_COLUMNS = [
+    "fp_def_version",
+    "fp_active",
+    "fp_age_bars",
+    "fp_event_id",
+    "fp_enter_ts",
+    "fp_exit_ts",
+    "fp_severity",
+    "fp_norm_due",
+]
+
+
+def _load_context_data(data_root: Path, symbol: str, timeframe: str = "15m") -> pd.DataFrame:
+    context_dir = data_root / "features" / "context" / "funding_persistence" / symbol
+    context_files = list_parquet_files(context_dir)
+    if not context_files:
+        return pd.DataFrame(columns=["timestamp", *_CONTEXT_COLUMNS])
+
+    context = read_parquet(context_files)
+    if context.empty:
+        return pd.DataFrame(columns=["timestamp", *_CONTEXT_COLUMNS])
+
+    if "timestamp" not in context.columns:
+        raise ValueError(f"Context data missing timestamp for {symbol}: {context_dir}")
+
+    context["timestamp"] = pd.to_datetime(context["timestamp"], utc=True)
+    ensure_utc_timestamp(context["timestamp"], "timestamp")
+    context = context.sort_values("timestamp").drop_duplicates(subset=["timestamp"], keep="last").reset_index(drop=True)
+    if "fp_def_version" not in context.columns:
+        context["fp_def_version"] = FP_DEF_VERSION
+
+    for col in _CONTEXT_COLUMNS:
+        if col not in context.columns:
+            context[col] = np.nan
+
+    if "fp_active" in context.columns:
+        context["fp_active"] = context["fp_active"].fillna(0).astype(int)
+    if "fp_age_bars" in context.columns:
+        context["fp_age_bars"] = context["fp_age_bars"].fillna(0).astype(int)
+    if "fp_norm_due" in context.columns:
+        context["fp_norm_due"] = context["fp_norm_due"].fillna(0).astype(int)
+    return context[["timestamp", *_CONTEXT_COLUMNS]]
+
+
+def _apply_context_defaults(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    if "fp_def_version" not in out.columns:
+        out["fp_def_version"] = FP_DEF_VERSION
+    out["fp_def_version"] = out["fp_def_version"].fillna(FP_DEF_VERSION)
+
+    for col, default in [("fp_active", 0), ("fp_age_bars", 0), ("fp_norm_due", 0), ("fp_severity", 0.0), ("fp_event_id", None), ("fp_enter_ts", pd.NaT), ("fp_exit_ts", pd.NaT)]:
+        if col not in out.columns:
+            out[col] = default
+
+    out["fp_active"] = out["fp_active"].fillna(0).astype(int)
+    out["fp_age_bars"] = out["fp_age_bars"].fillna(0).astype(int)
+    out["fp_norm_due"] = out["fp_norm_due"].fillna(0).astype(int)
+
+    inactive = out["fp_active"] == 0
+    out.loc[inactive, "fp_age_bars"] = 0
+    out.loc[inactive, "fp_event_id"] = None
+    out.loc[inactive, "fp_enter_ts"] = pd.NaT
+    out.loc[inactive, "fp_exit_ts"] = pd.NaT
+    out["fp_severity"] = out["fp_severity"].fillna(0.0).astype(float)
+    out.loc[inactive, "fp_severity"] = 0.0
+    return out
+
+
+def _join_context_features(features: pd.DataFrame, context: pd.DataFrame) -> pd.DataFrame:
+    joined = features.merge(context, on="timestamp", how="left", validate="one_to_one")
+    return _apply_context_defaults(joined)
+
 
 
 def _load_symbol_data(data_root: Path, symbol: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -43,6 +120,9 @@ def _load_symbol_data(data_root: Path, symbol: str) -> Tuple[pd.DataFrame, pd.Da
 
     features = features.sort_values("timestamp").reset_index(drop=True)
     bars = bars.sort_values("timestamp").reset_index(drop=True)
+
+    context = _load_context_data(data_root, symbol, timeframe="15m")
+    features = _join_context_features(features, context)
     return bars, features
 
 
@@ -111,6 +191,10 @@ def _strategy_returns(
             "low": low.reindex(ret.index).values,
             "high_96": high_96.values,
             "low_96": low_96.values,
+            "fp_def_version": features_aligned["fp_def_version"].values if "fp_def_version" in features_aligned.columns else FP_DEF_VERSION,
+            "fp_active": features_aligned["fp_active"].fillna(0).astype(int).values if "fp_active" in features_aligned.columns else np.zeros(len(ret), dtype=int),
+            "fp_age_bars": features_aligned["fp_age_bars"].fillna(0).astype(int).values if "fp_age_bars" in features_aligned.columns else np.zeros(len(ret), dtype=int),
+            "fp_norm_due": features_aligned["fp_norm_due"].fillna(0).astype(int).values if "fp_norm_due" in features_aligned.columns else np.zeros(len(ret), dtype=int),
         }
     )
     total_bars = int(len(ret))
