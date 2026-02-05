@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "project"))
 from engine.pnl import compute_pnl, compute_returns
 from engine.runner import _aggregate_portfolio, run_engine
 from pipelines.backtest import backtest_vol_compression_v1 as backtest_stage
+from pipelines.report import make_report as report_stage
 from strategies.vol_compression_v1 import VolCompressionV1
 
 
@@ -188,3 +189,27 @@ def test_backtest_pipeline_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert (engine_dir / "portfolio_returns.csv").exists()
     metrics = json.loads((engine_dir / "metrics.json").read_text())
     assert "portfolio" in metrics
+
+    stage_metrics = json.loads((trades_dir / "metrics.json").read_text())
+    trades = pd.read_csv(trades_dir / "trades_BTCUSDT.csv")
+    assert stage_metrics["total_trades"] == len(trades)
+    assert stage_metrics["win_rate"] == pytest.approx(float((trades["pnl"] > 0).mean()))
+    assert stage_metrics["avg_r"] == pytest.approx(float(trades["r_multiple"].mean()))
+
+    report_args = [
+        "make_report.py",
+        "--run_id",
+        run_id,
+    ]
+    monkeypatch.setattr(report_stage, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(report_stage, "load_configs", lambda paths: {"trade_day_timezone": "UTC"})
+    monkeypatch.setattr(sys, "argv", report_args)
+    assert report_stage.main() == 0
+
+    summary_md = (tmp_path / "reports" / "vol_compression_expansion_v1" / run_id / "summary.md").read_text()
+    assert "- Win rate (combined):" in summary_md
+    assert "- Ending equity (combined):" in summary_md
+
+    summary_json = json.loads((tmp_path / "reports" / "vol_compression_expansion_v1" / run_id / "summary.json").read_text())
+    assert "win_rate" in summary_json
+    assert "ending_equity" in summary_json

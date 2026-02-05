@@ -286,12 +286,24 @@ def main() -> int:
             for symbol, symbol_frame in frame.groupby("symbol", sort=True):
                 trades_by_symbol.setdefault(symbol, []).append(_extract_trades(symbol_frame))
 
+        all_symbol_trades: List[pd.DataFrame] = []
         for symbol in symbols:
             trades_frames = [frame for frame in trades_by_symbol.get(symbol, []) if not frame.empty]
             symbol_trades = pd.concat(trades_frames, ignore_index=True) if trades_frames else _empty_trades_frame()
             trades_path = trades_dir / f"trades_{symbol}.csv"
             symbol_trades.to_csv(trades_path, index=False)
+            if not symbol_trades.empty:
+                all_symbol_trades.append(symbol_trades)
             outputs.append({"path": str(trades_path), "rows": len(symbol_trades), "start_ts": None, "end_ts": None})
+
+        all_trades = pd.concat(all_symbol_trades, ignore_index=True) if all_symbol_trades else _empty_trades_frame()
+        total_trades = int(len(all_trades))
+        if total_trades:
+            win_rate = float((all_trades["pnl"] > 0).mean())
+            avg_r = float(all_trades["r_multiple"].mean())
+        else:
+            win_rate = 0.0
+            avg_r = 0.0
 
         metrics_path = trades_dir / "metrics.json"
         if portfolio.empty:
@@ -303,9 +315,9 @@ def main() -> int:
             ending_equity = float(equity_series.iloc[-1])
             max_drawdown = _compute_drawdown(equity_series)
         metrics_payload = {
-            "total_trades": int(sum(v.get("entries", 0) for v in engine_results["metrics"]["strategies"].values())),
-            "win_rate": 0.0,
-            "avg_r": 0.0,
+            "total_trades": total_trades,
+            "win_rate": win_rate,
+            "avg_r": avg_r,
             "max_drawdown": max_drawdown,
             "ending_equity": ending_equity,
         }
