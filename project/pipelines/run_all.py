@@ -58,6 +58,7 @@ def main() -> int:
     parser.add_argument("--slippage_bps", type=float, default=None)
     parser.add_argument("--cost_bps", type=float, default=None)
     parser.add_argument("--strategies", default=None)
+    parser.add_argument("--overlays", default="")
     parser.add_argument("--run_phase2_conditional", type=int, default=0)
     parser.add_argument("--phase2_event_type", default="vol_shock_relaxation", choices=["vol_shock_relaxation"])
     parser.add_argument("--phase2_max_conditions", type=int, default=20)
@@ -65,6 +66,9 @@ def main() -> int:
     parser.add_argument("--phase2_bootstrap_iters", type=int, default=1000)
     parser.add_argument("--phase2_cost_floor", type=float, default=0.01)
     parser.add_argument("--phase2_require_phase1_pass", type=int, default=1)
+    parser.add_argument("--run_phase1_aftershock", type=int, default=0)
+    parser.add_argument("--aftershock_window_start", type=int, default=0)
+    parser.add_argument("--aftershock_window_end", type=int, default=96)
     args = parser.parse_args()
 
     run_id = args.run_id or _run_id_default()
@@ -192,6 +196,27 @@ def main() -> int:
         ]
     )
 
+
+    if int(args.run_phase1_aftershock):
+        phase1_aftershock_stage = [
+            (
+                "analyze_vol_aftershock_window",
+                PROJECT_ROOT / "pipelines" / "research" / "analyze_vol_aftershock_window.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--window_start",
+                    str(args.aftershock_window_start),
+                    "--window_end",
+                    str(args.aftershock_window_end),
+                ],
+            )
+        ]
+        insert_at = next((i for i, (name, _, _) in enumerate(stages) if name == "build_context_features"), len(stages))
+        stages[insert_at:insert_at] = phase1_aftershock_stage
+
     if int(args.run_phase2_conditional):
         phase2_stages = [
             (
@@ -252,6 +277,8 @@ def main() -> int:
                 base_args.extend(["--cost_bps", str(args.cost_bps)])
             if args.strategies is not None:
                 base_args.extend(["--strategies", str(args.strategies)])
+            if args.overlays:
+                base_args.extend(["--overlays", str(args.overlays)])
 
     for stage, script, base_args in stages:
         if not _run_stage(stage, script, base_args, run_id):

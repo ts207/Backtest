@@ -348,6 +348,29 @@ def main() -> int:
                     f"({diag.get('missing_feature_pct', 0.0):.2%})"
                 )
 
+        lines.extend(["", "## Overlay Bindings", ""])
+        overlay_bindings = engine_metrics.get("overlay_bindings", {}) if isinstance(engine_metrics, dict) else {}
+        if not overlay_bindings:
+            lines.append("No overlays applied.")
+        else:
+            for strategy_name, payload in overlay_bindings.items():
+                applied = payload.get("applied_overlays", []) if isinstance(payload, dict) else []
+                lines.append(f"- **{strategy_name}** overlays: {', '.join(applied) if applied else 'none'}")
+                sym_rows = []
+                for sym_payload in payload.get("symbols", []) if isinstance(payload, dict) else []:
+                    symbol = sym_payload.get("symbol", "unknown")
+                    for stat in sym_payload.get("binding_stats", []):
+                        sym_rows.append(
+                            {
+                                "symbol": symbol,
+                                "overlay": stat.get("overlay", ""),
+                                "blocked_entries": int(stat.get("blocked_entries", 0)),
+                                "delayed_entries": int(stat.get("delayed_entries", 0)),
+                                "changed_bars": int(stat.get("changed_bars", 0)),
+                            }
+                        )
+                lines.append(_table_text(pd.DataFrame(sym_rows)) if sym_rows else "No binding stats")
+
         report_path.write_text("\n".join(lines), encoding="utf-8")
         outputs.append({"path": str(report_path), "rows": len(lines), "start_ts": None, "end_ts": None})
 
@@ -363,6 +386,7 @@ def main() -> int:
             "data_quality": cleaned_stats,
             "feature_quality": features_stats,
             "engine_diagnostics": engine_diagnostics,
+            "overlay_bindings": engine_metrics.get("overlay_bindings", {}) if isinstance(engine_metrics, dict) else {},
             "context_segmentation": {
                 "by_active": context_by_active.to_dict(orient="records") if not context_by_active.empty else [],
                 "by_age_bucket": context_by_age.to_dict(orient="records") if not context_by_age.empty else [],

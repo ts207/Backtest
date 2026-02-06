@@ -1,0 +1,62 @@
+{
+  "spec_version": "v1",
+  "name": "vol_shock_relaxation_delay30_v1",
+  "event": "vol_shock_relaxation",
+  "condition": "fractional_age<=0.33 OR session_eu_hour in [8,15]",
+  "action": "delay_30",
+  "status": "APPROVED",
+  "tuning_allowed": false,
+  "run_ids_evidence": [
+    {
+      "run_id": "baseline_2021_2022_phase2_promotion",
+      "split": "promotion",
+      "date_range": "2021-01-01..2022-12-31",
+      "universe": "BTCUSDT,ETHUSDT",
+      "config_hash": "phase2-promotion-v1"
+    },
+    {
+      "run_id": "baseline_2021_2022_survivability_a",
+      "split": "survivability_a",
+      "date_range": "2021-01-01..2022-12-31",
+      "universe": "BTCUSDT,ETHUSDT",
+      "config_hash": "survivability-a-v1"
+    },
+    {
+      "run_id": "baseline_2021_2022_survivability_b",
+      "split": "survivability_b",
+      "date_range": "2021-01-01..2022-12-31",
+      "universe": "BTCUSDT,ETHUSDT",
+      "config_hash": "survivability-b-v1"
+    }
+  ],
+  "cost_bps_validated": 6.0,
+  "objective": {
+    "target_metric": "net_total_return",
+    "evaluation_horizon": "fixed_run_horizon",
+    "costs_included": ["fees", "slippage", "funding", "overlay_costs"]
+  },
+  "constraints": {
+    "max_drawdown_pct": 30.0,
+    "tail_loss": {
+      "metric": "cvar_99_1d",
+      "max_abs_return": 0.05
+    },
+    "exposure_limits": {
+      "max_gross": 1.0,
+      "max_per_symbol": 1.0,
+      "max_time_in_market": 1.0
+    },
+    "turnover_budget": {
+      "max_bps_per_day": 25.0,
+      "max_trades_per_day": 20
+    }
+  },
+  "stability": {
+    "sign_consistency_min": 0.67,
+    "effect_ci_excludes_0": true,
+    "max_regime_flip_count": 0,
+    "time_split": "pass",
+    "regime_split": "pass"
+  },
+  "notes": "risk overlay, non-directional"
+}
