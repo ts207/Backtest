@@ -7,6 +7,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "project"))
 
+from features.funding_persistence import DEFAULT_FP_CONFIG
 from pipelines.features import build_context_features
 
 
@@ -94,3 +95,52 @@ def test_context_build_end_date_is_inclusive_day(monkeypatch, tmp_path: Path) ->
     manifest = json.loads(manifest_path.read_text())
     assert manifest["parameters"]["end_exclusive"] == "2021-01-03T00:00:00+00:00"
     assert manifest["stats"]["symbols"][symbol]["rows"] == 192
+
+
+def test_context_skip_requires_timestamp_and_version_match(monkeypatch, tmp_path: Path) -> None:
+    run_id = "ctx_skip_guard"
+    symbol = "BTCUSDT"
+    _write_cleaned_fixture(tmp_path, run_id=run_id, symbol=symbol)
+
+    output_path = tmp_path / "lake" / "runs" / run_id / "context" / "funding_persistence" / symbol / "15m.parquet"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    ts_stale = pd.date_range("2021-04-01 00:00", periods=192, freq="15min", tz="UTC")
+    stale = pd.DataFrame(
+        {
+            "timestamp": ts_stale,
+            "fp_def_version": ["stale"] * len(ts_stale),
+            "fp_active": [0] * len(ts_stale),
+            "fp_age_bars": [0] * len(ts_stale),
+            "fp_event_id": [None] * len(ts_stale),
+            "fp_enter_ts": [pd.NaT] * len(ts_stale),
+            "fp_exit_ts": [pd.NaT] * len(ts_stale),
+            "fp_severity": [0.0] * len(ts_stale),
+            "fp_norm_due": [0] * len(ts_stale),
+        }
+    )
+    stale.to_parquet(output_path, index=False)
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(build_context_features, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_context_features.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            symbol,
+            "--timeframe",
+            "15m",
+            "--start",
+            "2021-01-01",
+            "--end",
+            "2021-01-02",
+        ],
+    )
+    assert build_context_features.main() == 0
+
+    out = pd.read_parquet(output_path)
+    assert out["timestamp"].min() == pd.Timestamp("2021-01-01 00:00:00+00:00")
+    assert out["fp_def_version"].dropna().unique().tolist() == [DEFAULT_FP_CONFIG.def_version]

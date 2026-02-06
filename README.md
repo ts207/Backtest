@@ -94,12 +94,22 @@ python3 project/pipelines/run_all.py \
 
 ## Output locations
 - Raw data: `data/lake/raw/binance/perp/<symbol>/...`
-- Cleaned bars: `data/lake/cleaned/perp/<symbol>/bars_15m/...`
-- Aligned funding: `data/lake/cleaned/perp/<symbol>/funding_15m/...`
-- Features: `data/lake/features/perp/<symbol>/15m/features_v1/...`
+- Cleaned bars (run-scoped): `data/lake/runs/<run_id>/cleaned/perp/<symbol>/bars_15m/...`
+- Aligned funding (run-scoped): `data/lake/runs/<run_id>/cleaned/perp/<symbol>/funding_15m/...`
+- Features (run-scoped): `data/lake/runs/<run_id>/features/perp/<symbol>/15m/features_v1/...`
+- Context features (run-scoped): `data/lake/runs/<run_id>/context/funding_persistence/<symbol>/15m.parquet`
 - Backtest outputs: `data/lake/trades/backtests/vol_compression_expansion_v1/<run_id>/...`
 - Reports: `data/reports/vol_compression_expansion_v1/<run_id>/summary.md`
 - Manifests/logs: `data/runs/<run_id>/<stage>.json` and `.log`
+
+## Optional: run-centric report view
+Generate a cleaner report tree grouped by `run_id` under `data/reports/by_run`:
+
+```bash
+python3 project/pipelines/report/organize_reports.py --mode symlink
+```
+
+Use `--mode copy` if your environment does not support symlinks.
 
 ## Sanity gates and funding handling
 - Funding is treated as discrete 8h events. Cleaned funding stores `funding_event_ts` and `funding_rate_scaled` aligned to each 15m bar.

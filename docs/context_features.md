@@ -48,4 +48,4 @@ python3 project/pipelines/features/build_context_features.py \
 
 Default output root:
 
-`data/features/context/funding_persistence/<symbol>/15m.parquet`
+`data/lake/runs/<run_id>/context/funding_persistence/<symbol>/15m.parquet`

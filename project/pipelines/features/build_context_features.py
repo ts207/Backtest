@@ -35,6 +35,29 @@ def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
     }
 
 
+def _can_reuse_existing_context(existing: pd.DataFrame, expected: pd.DataFrame, fp_def_version: str) -> bool:
+    required_cols = {"timestamp", "fp_def_version", "fp_active", "fp_event_id"}
+    if existing.empty or not required_cols.issubset(set(existing.columns)):
+        return False
+
+    existing_ts = pd.to_datetime(existing["timestamp"], utc=True, errors="coerce")
+    expected_ts = pd.to_datetime(expected["timestamp"], utc=True, errors="coerce")
+    if existing_ts.isna().any() or expected_ts.isna().any():
+        return False
+    if existing_ts.duplicated().any() or expected_ts.duplicated().any():
+        return False
+
+    existing_ts = existing_ts.reset_index(drop=True)
+    expected_ts = expected_ts.reset_index(drop=True)
+    if len(existing_ts) != len(expected_ts):
+        return False
+    if not existing_ts.equals(expected_ts):
+        return False
+
+    versions = existing["fp_def_version"].dropna().astype(str).unique().tolist()
+    return len(versions) == 1 and versions[0] == fp_def_version
+
+
 def _end_exclusive(raw_end: str) -> pd.Timestamp:
     ts = pd.Timestamp(raw_end, tz="UTC")
     has_time_component = any(token in raw_end for token in ("T", " ", ":"))
@@ -140,7 +163,7 @@ def main() -> int:
             output_file = str(out_path)
             if out_path.exists() and not args.force:
                 existing = read_parquet([out_path])
-                if len(existing) == len(fp):
+                if _can_reuse_existing_context(existing, fp, DEFAULT_FP_CONFIG.def_version):
                     logging.info("Skipping existing context file for %s: %s", symbol, out_path)
                     outputs.append(
                         {
@@ -149,8 +172,8 @@ def main() -> int:
                             "timeframe": args.timeframe,
                             "fp_def_version": DEFAULT_FP_CONFIG.def_version,
                             "rows": int(len(existing)),
-                            "active_bars": int(fp["fp_active"].sum()),
-                            "event_count": int(fp["fp_event_id"].dropna().nunique()),
+                            "active_bars": int(existing["fp_active"].sum()),
+                            "event_count": int(existing["fp_event_id"].dropna().nunique()),
                             "storage_format": out_path.suffix,
                         }
                     )
@@ -160,8 +183,8 @@ def main() -> int:
                         "timeframe": args.timeframe,
                         "output_file": output_file,
                         "rows": int(len(existing)),
-                        "active_bars": int(fp["fp_active"].sum()),
-                        "event_count": int(fp["fp_event_id"].dropna().nunique()),
+                        "active_bars": int(existing["fp_active"].sum()),
+                        "event_count": int(existing["fp_event_id"].dropna().nunique()),
                         "fp_def_version": DEFAULT_FP_CONFIG.def_version,
                     }
                     continue
