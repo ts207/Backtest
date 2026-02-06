@@ -21,7 +21,13 @@ from features.vol_shock_relaxation import (
     calibrate_shock_threshold,
     detect_vol_shock_relaxation_events,
 )
-from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet
+from pipelines._lib.io_utils import (
+    choose_partition_dir,
+    ensure_dir,
+    list_parquet_files,
+    read_parquet,
+    run_scoped_lake_path,
+)
 
 
 KEY_METRICS = [
@@ -362,10 +368,14 @@ def main() -> int:
     threshold_rows: List[pd.DataFrame] = []
 
     for symbol in symbols:
-        features_dir = DATA_ROOT / "lake" / "features" / "perp" / symbol / args.timeframe / "features_v1"
-        feats = read_parquet(list_parquet_files(features_dir))
+        feature_candidates = [
+            run_scoped_lake_path(DATA_ROOT, args.run_id, "features", "perp", symbol, args.timeframe, "features_v1"),
+            DATA_ROOT / "lake" / "features" / "perp" / symbol / args.timeframe / "features_v1",
+        ]
+        features_dir = choose_partition_dir(feature_candidates)
+        feats = read_parquet(list_parquet_files(features_dir)) if features_dir else pd.DataFrame()
         if feats.empty:
-            raise ValueError(f"No features found for {symbol} in {features_dir}")
+            raise ValueError(f"No features found for {symbol} in {feature_candidates[0]}")
 
         cal_df, cal_meta = calibrate_shock_threshold(
             feats,

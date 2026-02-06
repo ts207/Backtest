@@ -301,9 +301,11 @@ def main() -> int:
                 trades_by_symbol.setdefault(symbol, []).append(_extract_trades(symbol_frame))
 
         all_symbol_trades: List[pd.DataFrame] = []
+        symbol_entry_counts: Dict[str, int] = {}
         for symbol in symbols:
             trades_frames = [frame for frame in trades_by_symbol.get(symbol, []) if not frame.empty]
             symbol_trades = pd.concat(trades_frames, ignore_index=True) if trades_frames else _empty_trades_frame()
+            symbol_entry_counts[symbol] = int(len(symbol_trades))
             trades_path = trades_dir / f"trades_{symbol}.csv"
             symbol_trades.to_csv(trades_path, index=False)
             if not symbol_trades.empty:
@@ -398,7 +400,7 @@ def main() -> int:
         fee_path.write_text(json.dumps(fee_sensitivity, indent=2, sort_keys=True), encoding="utf-8")
         outputs.append({"path": str(fee_path), "rows": len(fee_sensitivity), "start_ts": None, "end_ts": None})
 
-        stats["symbols"] = {symbol: {"entries": 0} for symbol in symbols}
+        stats["symbols"] = {symbol: {"entries": int(symbol_entry_counts.get(symbol, 0))} for symbol in symbols}
         finalize_manifest(manifest, "success", stats=stats)
         return 0
     except Exception as exc:

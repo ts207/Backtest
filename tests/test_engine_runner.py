@@ -15,17 +15,17 @@ from pipelines.report import make_report as report_stage
 from strategies.vol_compression_v1 import VolCompressionV1
 
 
-def _write_fixture(root: Path, symbol: str = "BTCUSDT") -> None:
-    timestamps = pd.date_range("2024-01-01 00:00", periods=10, freq="15min", tz="UTC")
+def _write_fixture(root: Path, symbol: str = "BTCUSDT", periods: int = 10, run_id: str | None = None) -> None:
+    timestamps = pd.date_range("2024-01-01 00:00", periods=periods, freq="15min", tz="UTC")
     bars = pd.DataFrame(
         {
             "timestamp": timestamps,
-            "open": [100.0] * 10,
-            "high": [101.0, 102.0, 124.0, 103.0, 102.0, 101.0, 102.0, 101.0, 102.0, 101.0],
-            "low": [99.0] * 10,
-            "close": [100.5, 101.5, 102.0, 101.0, 100.0, 100.2, 100.1, 100.3, 100.4, 100.5],
-            "is_gap": [False] * 10,
-            "gap_len": [0] * 10,
+            "open": [100.0] * periods,
+            "high": [101.0 + (i % 3) for i in range(periods)],
+            "low": [99.0] * periods,
+            "close": [100.0 + (i * 0.1) for i in range(periods)],
+            "is_gap": [False] * periods,
+            "gap_len": [0] * periods,
         }
     )
     features = pd.DataFrame(
@@ -37,16 +37,20 @@ def _write_fixture(root: Path, symbol: str = "BTCUSDT") -> None:
             "close": bars["close"],
             "funding_event_ts": pd.NaT,
             "funding_rate_scaled": 0.0,
-            "rv_pct_2880": [5.0] * 10,
-            "high_96": [100.0] * 10,
-            "low_96": [90.0] * 10,
-            "range_96": [10.0] * 10,
-            "range_med_480": [20.0] * 10,
+            "rv_pct_2880": [5.0] * periods,
+            "high_96": [100.0] * periods,
+            "low_96": [90.0] * periods,
+            "range_96": [10.0] * periods,
+            "range_med_480": [20.0] * periods,
         }
     )
 
-    features_dir = root / "lake" / "features" / "perp" / symbol / "15m" / "features_v1" / "year=2024" / "month=01"
-    bars_dir = root / "lake" / "cleaned" / "perp" / symbol / "bars_15m" / "year=2024" / "month=01"
+    if run_id:
+        lake_root = root / "lake" / "runs" / run_id
+    else:
+        lake_root = root / "lake"
+    features_dir = lake_root / "features" / "perp" / symbol / "15m" / "features_v1" / "year=2024" / "month=01"
+    bars_dir = lake_root / "cleaned" / "perp" / symbol / "bars_15m" / "year=2024" / "month=01"
     features_dir.mkdir(parents=True, exist_ok=True)
     bars_dir.mkdir(parents=True, exist_ok=True)
     features.to_parquet(features_dir / f"features_{symbol}_v1_2024-01.parquet", index=False)
@@ -153,6 +157,22 @@ def test_run_engine_determinism(tmp_path: Path) -> None:
     assert result_1["portfolio"].equals(result_2["portfolio"])
 
 
+def test_run_engine_prefers_run_scoped_inputs(tmp_path: Path) -> None:
+    _write_fixture(tmp_path, periods=10)
+    _write_fixture(tmp_path, periods=6, run_id="run_scoped")
+
+    result = run_engine(
+        run_id="run_scoped",
+        symbols=["BTCUSDT"],
+        strategies=["vol_compression_v1"],
+        params={"trade_day_timezone": "UTC", "one_trade_per_day": True},
+        cost_bps=6.0,
+        data_root=tmp_path,
+    )
+    frame = result["strategy_frames"]["vol_compression_v1"]
+    assert len(frame) == 6
+
+
 def test_backtest_pipeline_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_fixture(tmp_path)
     monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
@@ -196,6 +216,8 @@ def test_backtest_pipeline_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert stage_metrics["total_trades"] == len(trades)
     assert stage_metrics["win_rate"] == pytest.approx(float((trades["pnl"] > 0).mean()))
     assert stage_metrics["avg_r"] == pytest.approx(float(trades["r_multiple"].mean()))
+    stage_manifest = json.loads((tmp_path / "runs" / run_id / "backtest_vol_compression_v1.json").read_text())
+    assert stage_manifest["stats"]["symbols"]["BTCUSDT"]["entries"] == len(trades)
 
     report_args = [
         "make_report.py",

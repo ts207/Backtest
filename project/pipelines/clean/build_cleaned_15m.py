@@ -16,7 +16,7 @@ DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.config import load_configs
-from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet, write_parquet
+from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet, run_scoped_lake_path, write_parquet
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.sanity import (
     assert_funding_event_grid,
@@ -301,8 +301,8 @@ def main() -> int:
                     }
                 )
 
-            cleaned_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
-            funding_out_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "funding_15m"
+            cleaned_dir = run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", "perp", symbol, "bars_15m")
+            funding_out_dir = run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", "perp", symbol, "funding_15m")
 
             missing_stats: Dict[str, Dict[str, float]] = {}
             funding_stats: Dict[str, Dict[str, float]] = {}

@@ -193,8 +193,7 @@ def main() -> int:
     )
 
     if int(args.run_phase2_conditional):
-        stages.insert(
-            3,
+        phase2_stages = [
             (
                 "analyze_vol_shock_relaxation",
                 PROJECT_ROOT / "pipelines" / "research" / "analyze_vol_shock_relaxation.py",
@@ -207,9 +206,6 @@ def main() -> int:
                     "15m",
                 ],
             ),
-        )
-        stages.insert(
-            4,
             (
                 "phase2_conditional_hypotheses",
                 PROJECT_ROOT / "pipelines" / "research" / "phase2_conditional_hypotheses.py",
@@ -232,7 +228,9 @@ def main() -> int:
                     str(int(args.phase2_require_phase1_pass)),
                 ],
             ),
-        )
+        ]
+        insert_at = next((i for i, (name, _, _) in enumerate(stages) if name == "build_context_features"), len(stages))
+        stages[insert_at:insert_at] = phase2_stages
 
     stages_with_config = {
         "build_cleaned_15m",
