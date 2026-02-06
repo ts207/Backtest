@@ -45,6 +45,7 @@ def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
     }
 
 
+
 def _expected_15m_index(start: pd.Timestamp, end_exclusive: pd.Timestamp) -> pd.DatetimeIndex:
     if end_exclusive <= start:
         return pd.DatetimeIndex([], tz=timezone.utc)
