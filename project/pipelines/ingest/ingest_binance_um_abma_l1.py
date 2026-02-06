@@ -178,13 +178,14 @@ def _download_partition(
     req_start: datetime,
     req_end_exclusive: datetime,
     *,
+    daily_only: bool,
     max_retries: int,
     backoff_sec: float,
 ) -> list[Path]:
     covered_start = max(month_start, req_start)
     covered_end_exclusive = min(month_end_exclusive, req_end_exclusive)
     req_days = _iter_days(covered_start, covered_end_exclusive - timedelta(days=1))
-    use_monthly = covered_start == month_start and covered_end_exclusive == month_end_exclusive
+    use_monthly = not daily_only and covered_start == month_start and covered_end_exclusive == month_end_exclusive
 
     monthly_url = join_url(base, "monthly", stream, symbol, f"{symbol}-{stream}-{month.year}-{month.month:02d}.zip")
     daily_urls = [
@@ -242,6 +243,7 @@ def main() -> int:
     parser.add_argument("--start", required=True, help="YYYY-MM-DD UTC")
     parser.add_argument("--end", required=True, help="YYYY-MM-DD UTC")
     parser.add_argument("--out_root", default="")
+    parser.add_argument("--daily_only", type=int, default=0)
     parser.add_argument("--max_retries", type=int, default=5)
     parser.add_argument("--retry_backoff_sec", type=float, default=2.0)
     parser.add_argument("--log_path", default=None)
@@ -277,6 +279,7 @@ def main() -> int:
         "end": end.isoformat(),
         "archive_base": ARCHIVE_BASE,
         "out_root": str(out_root),
+        "daily_only": int(args.daily_only),
     }
     manifest = start_manifest("ingest_binance_um_abma_l1", run_id, params, inputs, outputs)
     stats: Dict[str, object] = {"symbols": {}}
@@ -302,6 +305,7 @@ def main() -> int:
                     month_end_exclusive,
                     start,
                     end + timedelta(days=1),
+                    daily_only=bool(args.daily_only),
                     max_retries=args.max_retries,
                     backoff_sec=args.retry_backoff_sec,
                 )
@@ -315,6 +319,7 @@ def main() -> int:
                     month_end_exclusive,
                     start,
                     end + timedelta(days=1),
+                    daily_only=bool(args.daily_only),
                     max_retries=args.max_retries,
                     backoff_sec=args.retry_backoff_sec,
                 )
