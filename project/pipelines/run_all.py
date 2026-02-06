@@ -58,6 +58,13 @@ def main() -> int:
     parser.add_argument("--slippage_bps", type=float, default=None)
     parser.add_argument("--cost_bps", type=float, default=None)
     parser.add_argument("--strategies", default=None)
+    parser.add_argument("--run_phase2_conditional", type=int, default=0)
+    parser.add_argument("--phase2_event_type", default="vol_shock_relaxation", choices=["vol_shock_relaxation"])
+    parser.add_argument("--phase2_max_conditions", type=int, default=20)
+    parser.add_argument("--phase2_max_actions", type=int, default=9)
+    parser.add_argument("--phase2_bootstrap_iters", type=int, default=1000)
+    parser.add_argument("--phase2_cost_floor", type=float, default=0.01)
+    parser.add_argument("--phase2_require_phase1_pass", type=int, default=1)
     args = parser.parse_args()
 
     run_id = args.run_id or _run_id_default()
@@ -184,6 +191,46 @@ def main() -> int:
             ),
         ]
     )
+
+    if int(args.run_phase2_conditional):
+        phase2_stages = [
+            (
+                "analyze_vol_shock_relaxation",
+                PROJECT_ROOT / "pipelines" / "research" / "analyze_vol_shock_relaxation.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--timeframe",
+                    "15m",
+                ],
+            ),
+            (
+                "phase2_conditional_hypotheses",
+                PROJECT_ROOT / "pipelines" / "research" / "phase2_conditional_hypotheses.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--event_type",
+                    args.phase2_event_type,
+                    "--symbols",
+                    symbols,
+                    "--max_conditions",
+                    str(args.phase2_max_conditions),
+                    "--max_actions",
+                    str(args.phase2_max_actions),
+                    "--bootstrap_iters",
+                    str(args.phase2_bootstrap_iters),
+                    "--cost_floor",
+                    str(args.phase2_cost_floor),
+                    "--require_phase1_pass",
+                    str(int(args.phase2_require_phase1_pass)),
+                ],
+            ),
+        ]
+        insert_at = next((i for i, (name, _, _) in enumerate(stages) if name == "build_context_features"), len(stages))
+        stages[insert_at:insert_at] = phase2_stages
 
     stages_with_config = {
         "build_cleaned_15m",

@@ -15,8 +15,19 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from features.vol_shock_relaxation import DEFAULT_VSR_CONFIG, VolShockRelaxationConfig, detect_vol_shock_relaxation_events
-from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet
+from features.vol_shock_relaxation import (
+    DEFAULT_VSR_CONFIG,
+    VolShockRelaxationConfig,
+    calibrate_shock_threshold,
+    detect_vol_shock_relaxation_events,
+)
+from pipelines._lib.io_utils import (
+    choose_partition_dir,
+    ensure_dir,
+    list_parquet_files,
+    read_parquet,
+    run_scoped_lake_path,
+)
 
 
 KEY_METRICS = [
@@ -42,6 +53,18 @@ def _table_text(df: pd.DataFrame) -> str:
         return df.to_markdown(index=False)
     except ImportError:
         return df.to_string(index=False)
+
+
+def _parse_quantiles(raw: str) -> List[float]:
+    vals = []
+    for tok in [x.strip() for x in raw.split(",") if x.strip()]:
+        q = float(tok)
+        if 0.0 < q < 1.0:
+            vals.append(q)
+    uniq = sorted(set(vals))
+    if not uniq:
+        raise ValueError("No valid quantiles supplied")
+    return uniq
 
 
 def _bootstrap_mean_ci(values: np.ndarray, n_boot: int, seed: int, alpha: float = 0.05) -> Tuple[float, float, float]:
@@ -322,6 +345,8 @@ def main() -> int:
     parser.add_argument("--bootstrap_iters", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--phase_tolerance_bars", type=int, default=16)
+    parser.add_argument("--shock_quantiles", default="0.95,0.97,0.98,0.99,0.995")
+    parser.add_argument("--min_events", type=int, default=50)
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
 
@@ -336,22 +361,45 @@ def main() -> int:
     ensure_dir(out_dir)
 
     cfg = DEFAULT_VSR_CONFIG
+    shock_quantiles = _parse_quantiles(args.shock_quantiles)
     all_events = []
     all_controls = []
     all_hazards = []
-    thresholds = []
+    threshold_rows: List[pd.DataFrame] = []
 
     for symbol in symbols:
-        features_dir = DATA_ROOT / "lake" / "features" / "perp" / symbol / args.timeframe / "features_v1"
-        feats = read_parquet(list_parquet_files(features_dir))
+        feature_candidates = [
+            run_scoped_lake_path(DATA_ROOT, args.run_id, "features", "perp", symbol, args.timeframe, "features_v1"),
+            DATA_ROOT / "lake" / "features" / "perp" / symbol / args.timeframe / "features_v1",
+        ]
+        features_dir = choose_partition_dir(feature_candidates)
+        feats = read_parquet(list_parquet_files(features_dir)) if features_dir else pd.DataFrame()
         if feats.empty:
-            raise ValueError(f"No features found for {symbol} in {features_dir}")
+            raise ValueError(f"No features found for {symbol} in {feature_candidates[0]}")
 
-        events, core, meta = detect_vol_shock_relaxation_events(feats, symbol=symbol, config=cfg)
+        cal_df, cal_meta = calibrate_shock_threshold(
+            feats,
+            symbol=symbol,
+            config=cfg,
+            quantiles=shock_quantiles,
+            min_events=args.min_events,
+        )
+        if not cal_df.empty:
+            cal_df = cal_df.copy()
+            cal_df["selected_quantile"] = cal_meta.get("selected_quantile")
+            cal_df["selected_t_shock"] = cal_meta.get("selected_t_shock")
+            cal_df["selected_event_count"] = cal_meta.get("selected_event_count")
+            threshold_rows.append(cal_df)
+
+        events, core, meta = detect_vol_shock_relaxation_events(
+            feats,
+            symbol=symbol,
+            config=cfg,
+            shock_threshold_override=cal_meta.get("selected_t_shock"),
+        )
         if core.empty:
             continue
         core = _tag_regimes(core)
-        thresholds.append({"symbol": symbol, **meta})
         if events.empty:
             continue
 
@@ -396,7 +444,7 @@ def main() -> int:
     events_df = pd.concat(all_events, ignore_index=True) if all_events else pd.DataFrame()
     controls_df = pd.concat(all_controls, ignore_index=True) if all_controls else pd.DataFrame()
     hazards_df = pd.concat(all_hazards, ignore_index=True) if all_hazards else pd.DataFrame()
-    thresholds_df = pd.DataFrame(thresholds)
+    thresholds_df = pd.concat(threshold_rows, ignore_index=True) if threshold_rows else pd.DataFrame()
 
     sanity_df = _sanity_table(events_df, cfg)
     delta_df = _delta_by_split(events_df, controls_df, n_boot=args.bootstrap_iters, seed=args.seed)
@@ -429,6 +477,12 @@ def main() -> int:
                 break
     phase_pass = (not phase_df.empty) and bool((phase_df["status"] == "pass").all())
     sign_pass = sign_df.empty or bool((~sign_df["sign_flip"]).all())
+    non_degenerate_count = (
+        (not sanity_df.empty)
+        and ("non_degenerate_count" in sanity_df.columns)
+        and bool(sanity_df["non_degenerate_count"].fillna(False).all())
+    )
+    phase1_structure_pass = bool(phase_pass and sign_pass and non_degenerate_count)
     decision = "promote" if (stable_ci and phase_pass and sign_pass) else "freeze"
 
     # Outputs
@@ -458,7 +512,14 @@ def main() -> int:
         "timeframe": args.timeframe,
         "vsr_def_version": cfg.def_version,
         "decision": decision,
-        "gates": {"stable_ci": stable_ci, "phase_pass": phase_pass, "sign_pass": sign_pass},
+        "phase1_structure_pass": phase1_structure_pass,
+        "gates": {
+            "stable_ci": stable_ci,
+            "phase_pass": phase_pass,
+            "sign_pass": sign_pass,
+            "non_degenerate_count": non_degenerate_count,
+            "phase1_structure_pass": phase1_structure_pass,
+        },
         "event_count": int(len(events_df)),
         "files": {k: str(v) for k, v in files.items()},
     }

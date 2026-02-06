@@ -12,7 +12,13 @@ import numpy as np
 import pandas as pd
 
 from engine.pnl import compute_pnl, compute_returns
-from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet
+from pipelines._lib.io_utils import (
+    choose_partition_dir,
+    ensure_dir,
+    list_parquet_files,
+    read_parquet,
+    run_scoped_lake_path,
+)
 from pipelines._lib.validation import ensure_utc_timestamp
 from features.funding_persistence import FP_DEF_VERSION
 from strategies.registry import get_strategy
@@ -41,8 +47,14 @@ _CONTEXT_COLUMNS = [
 ]
 
 
-def _load_context_data(data_root: Path, symbol: str, timeframe: str = "15m") -> pd.DataFrame:
-    context_dir = data_root / "features" / "context" / "funding_persistence" / symbol
+def _load_context_data(data_root: Path, symbol: str, run_id: str, timeframe: str = "15m") -> pd.DataFrame:
+    context_candidates = [
+        run_scoped_lake_path(data_root, run_id, "context", "funding_persistence", symbol),
+        data_root / "features" / "context" / "funding_persistence" / symbol,
+    ]
+    context_dir = choose_partition_dir(context_candidates)
+    if context_dir is None:
+        context_dir = context_candidates[0]
     context_files = list_parquet_files(context_dir)
     if not context_files:
         return pd.DataFrame(columns=["timestamp", *_CONTEXT_COLUMNS])
@@ -103,11 +115,19 @@ def _join_context_features(features: pd.DataFrame, context: pd.DataFrame) -> pd.
 
 
 
-def _load_symbol_data(data_root: Path, symbol: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    features_dir = data_root / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
-    bars_dir = data_root / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
-    feature_files = list_parquet_files(features_dir)
-    bars_files = list_parquet_files(bars_dir)
+def _load_symbol_data(data_root: Path, symbol: str, run_id: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    feature_candidates = [
+        run_scoped_lake_path(data_root, run_id, "features", "perp", symbol, "15m", "features_v1"),
+        data_root / "lake" / "features" / "perp" / symbol / "15m" / "features_v1",
+    ]
+    bars_candidates = [
+        run_scoped_lake_path(data_root, run_id, "cleaned", "perp", symbol, "bars_15m"),
+        data_root / "lake" / "cleaned" / "perp" / symbol / "bars_15m",
+    ]
+    features_dir = choose_partition_dir(feature_candidates)
+    bars_dir = choose_partition_dir(bars_candidates)
+    feature_files = list_parquet_files(features_dir) if features_dir else []
+    bars_files = list_parquet_files(bars_dir) if bars_dir else []
     features = read_parquet(feature_files)
     bars = read_parquet(bars_files)
     if features.empty or bars.empty:
@@ -121,7 +141,7 @@ def _load_symbol_data(data_root: Path, symbol: str) -> Tuple[pd.DataFrame, pd.Da
     features = features.sort_values("timestamp").reset_index(drop=True)
     bars = bars.sort_values("timestamp").reset_index(drop=True)
 
-    context = _load_context_data(data_root, symbol, timeframe="15m")
+    context = _load_context_data(data_root, symbol, run_id=run_id, timeframe="15m")
     features = _join_context_features(features, context)
     return bars, features
 
@@ -274,7 +294,7 @@ def run_engine(
     for strategy_name in strategies:
         symbol_results: List[StrategyResult] = []
         for symbol in symbols:
-            bars, features = _load_symbol_data(data_root, symbol)
+            bars, features = _load_symbol_data(data_root, symbol, run_id=run_id)
             result = _strategy_returns(symbol, bars, features, strategy_name, params, cost_bps)
             symbol_results.append(result)
 

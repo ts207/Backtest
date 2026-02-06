@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import sys
+from datetime import timedelta, timezone
 from pathlib import Path
 from typing import Dict, List
 
@@ -15,7 +16,14 @@ DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.config import load_configs
-from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet, write_parquet
+from pipelines._lib.io_utils import (
+    choose_partition_dir,
+    ensure_dir,
+    list_parquet_files,
+    read_parquet,
+    run_scoped_lake_path,
+    write_parquet,
+)
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.validation import ensure_utc_timestamp, validate_columns
 
@@ -35,6 +43,17 @@ def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
         "start_ts": df["timestamp"].min().isoformat(),
         "end_ts": df["timestamp"].max().isoformat(),
     }
+
+
+def _expected_15m_index(start: pd.Timestamp, end_exclusive: pd.Timestamp) -> pd.DatetimeIndex:
+    if end_exclusive <= start:
+        return pd.DatetimeIndex([], tz=timezone.utc)
+    return pd.date_range(
+        start=start,
+        end=end_exclusive - timedelta(minutes=15),
+        freq="15min",
+        tz=timezone.utc,
+    )
 
 
 def _rolling_percentile(series: pd.Series, window: int) -> pd.Series:
@@ -135,7 +154,7 @@ def _build_features_frame(
     return features, segment_id, nan_rates, column_map
 
 
-def _partition_complete(path: Path, expected_rows: int) -> bool:
+def _partition_complete(path: Path, expected_ts: pd.DatetimeIndex) -> bool:
     if not path.exists():
         csv_path = path.with_suffix(".csv")
         if csv_path.exists():
@@ -143,10 +162,19 @@ def _partition_complete(path: Path, expected_rows: int) -> bool:
         else:
             return False
     try:
-        if expected_rows == 0:
+        if len(expected_ts) == 0:
             return True
         data = read_parquet([path])
-        return len(data) >= expected_rows
+        if data.empty:
+            return False
+        if "timestamp" not in data.columns:
+            return False
+        ts = pd.to_datetime(data["timestamp"], utc=True, format="mixed")
+        if ts.isna().any():
+            return False
+        if ts.duplicated().any():
+            return False
+        return set(ts) == set(expected_ts)
     except Exception:
         return False
 
@@ -187,10 +215,18 @@ def main() -> int:
 
     try:
         for symbol in symbols:
-            cleaned_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
-            funding_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "funding_15m"
-            cleaned_files = list_parquet_files(cleaned_dir)
-            funding_files = list_parquet_files(funding_dir)
+            cleaned_candidates = [
+                run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", "perp", symbol, "bars_15m"),
+                DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_15m",
+            ]
+            funding_candidates = [
+                run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", "perp", symbol, "funding_15m"),
+                DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "funding_15m",
+            ]
+            cleaned_dir = choose_partition_dir(cleaned_candidates)
+            funding_dir = choose_partition_dir(funding_candidates)
+            cleaned_files = list_parquet_files(cleaned_dir) if cleaned_dir else []
+            funding_files = list_parquet_files(funding_dir) if funding_dir else []
             bars = read_parquet(cleaned_files)
             funding = read_parquet(funding_files)
             if bars.empty:
@@ -201,9 +237,9 @@ def main() -> int:
             ensure_utc_timestamp(bars["timestamp"], "timestamp")
             bars = bars.sort_values("timestamp").reset_index(drop=True)
 
-            inputs.append({"path": str(cleaned_dir), **_collect_stats(bars)})
+            inputs.append({"path": str(cleaned_dir) if cleaned_dir else str(cleaned_candidates[0]), **_collect_stats(bars)})
             if not funding.empty:
-                inputs.append({"path": str(funding_dir), **_collect_stats(funding)})
+                inputs.append({"path": str(funding_dir) if funding_dir else str(funding_candidates[0]), **_collect_stats(funding)})
 
             if funding.empty:
                 if not args.allow_missing_funding:
@@ -246,7 +282,7 @@ def main() -> int:
 
             features["year"] = features["timestamp"].dt.year
             features["month"] = features["timestamp"].dt.month
-            out_dir = DATA_ROOT / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
+            out_dir = run_scoped_lake_path(DATA_ROOT, run_id, "features", "perp", symbol, "15m", "features_v1")
 
             partitions_written: List[str] = []
             partitions_skipped: List[str] = []
@@ -254,8 +290,11 @@ def main() -> int:
             for (year, month), group in features.groupby(["year", "month"], sort=True):
                 group_out = group.drop(columns=["year", "month"]).reset_index(drop=True)
                 out_path = out_dir / f"year={year}" / f"month={month:02d}" / f"features_{symbol}_v1_{year}-{month:02d}.parquet"
-                expected_rows = len(group_out)
-                if not args.force and _partition_complete(out_path, expected_rows):
+                expected_ts = _expected_15m_index(
+                    group_out["timestamp"].min(),
+                    group_out["timestamp"].max() + timedelta(minutes=15),
+                )
+                if not args.force and _partition_complete(out_path, expected_ts):
                     partitions_skipped.append(str(out_path))
                     continue
                 ensure_dir(out_path.parent)

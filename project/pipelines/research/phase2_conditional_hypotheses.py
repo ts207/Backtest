@@ -16,7 +16,40 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from pipelines._lib.io_utils import ensure_dir
+from pipelines._lib.io_utils import (
+    choose_partition_dir,
+    ensure_dir,
+    list_parquet_files,
+    read_parquet,
+    run_scoped_lake_path,
+)
+
+
+PRIMARY_OUTPUT_COLUMNS = [
+    "condition",
+    "condition_desc",
+    "action",
+    "action_family",
+    "sample_size",
+    "baseline_mode",
+    "delta_adverse_mean",
+    "delta_adverse_ci_low",
+    "delta_adverse_ci_high",
+    "delta_opportunity_mean",
+    "delta_opportunity_ci_low",
+    "delta_opportunity_ci_high",
+    "delta_exposure_mean",
+    "gate_a_ci_separated",
+    "gate_b_time_stable",
+    "gate_b_year_signs",
+    "gate_c_regime_stable",
+    "gate_d_friction_floor",
+    "gate_f_exposure_guard",
+    "gate_e_simplicity",
+    "gate_pass",
+    "gate_all",
+    "fail_reasons",
+]
 
 
 def _table_text(df: pd.DataFrame) -> str:
@@ -103,6 +136,29 @@ def _build_conditions(events: pd.DataFrame) -> List[ConditionSpec]:
             ConditionSpec("near_half_life", "rv_decay_half_life <= 30", lambda d: d["rv_decay_half_life"].fillna(10**9) <= 30),
         ]
     )
+    if {"t_rv_peak", "duration_bars"}.issubset(events.columns):
+        conds.extend(
+            [
+                ConditionSpec(
+                    "fractional_age_0_33",
+                    "t_rv_peak / duration_bars <= 0.33",
+                    lambda d: (d["t_rv_peak"].fillna(10**9) / d["duration_bars"].replace(0, np.nan)).fillna(10**9) <= 0.33,
+                ),
+                ConditionSpec(
+                    "fractional_age_34_66",
+                    "t_rv_peak / duration_bars in (0.33, 0.66]",
+                    lambda d: (
+                        (d["t_rv_peak"].fillna(10**9) / d["duration_bars"].replace(0, np.nan)).fillna(10**9) > 0.33
+                    )
+                    & ((d["t_rv_peak"].fillna(10**9) / d["duration_bars"].replace(0, np.nan)).fillna(10**9) <= 0.66),
+                ),
+                ConditionSpec(
+                    "fractional_age_67_100",
+                    "t_rv_peak / duration_bars > 0.66",
+                    lambda d: (d["t_rv_peak"].fillna(10**9) / d["duration_bars"].replace(0, np.nan)).fillna(10**9) > 0.66,
+                ),
+            ]
+        )
 
     # de-dup by name preserving order
     seen = set()
@@ -117,45 +173,189 @@ def _build_conditions(events: pd.DataFrame) -> List[ConditionSpec]:
 
 def _build_actions() -> List[ActionSpec]:
     return [
+        ActionSpec("no_action", "baseline", {}),
         ActionSpec("entry_gate_skip", "entry_gating", {"k": 0.0}),
         ActionSpec("risk_throttle_0.5", "risk_throttle", {"k": 0.5}),
         ActionSpec("risk_throttle_0", "risk_throttle", {"k": 0.0}),
+        ActionSpec("delay_0", "timing", {"delay_bars": 0}),
         ActionSpec("delay_8", "timing", {"delay_bars": 8}),
         ActionSpec("delay_30", "timing", {"delay_bars": 30}),
         ActionSpec("reenable_at_half_life", "timing", {"landmark": "rv_decay_half_life"}),
     ]
 
 
+def _attach_forward_opportunity(
+    events: pd.DataFrame,
+    controls: pd.DataFrame,
+    run_id: str,
+    symbols: List[str],
+    timeframe: str,
+    horizon_bars: int,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    if events.empty:
+        return events, controls
+
+    rows = []
+    for symbol in symbols:
+        bars_candidates = [
+            run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", "perp", symbol, f"bars_{timeframe}"),
+            DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / f"bars_{timeframe}",
+        ]
+        bars_dir = choose_partition_dir(bars_candidates)
+        bars = read_parquet(list_parquet_files(bars_dir)) if bars_dir else pd.DataFrame()
+        if bars.empty:
+            continue
+        bars["timestamp"] = pd.to_datetime(bars["timestamp"], utc=True, errors="coerce")
+        bars = bars.sort_values("timestamp").reset_index(drop=True)
+        close = bars["close"].astype(float)
+        fwd_abs_return = (close.shift(-horizon_bars) / close - 1.0).abs()
+        rows.append(
+            pd.DataFrame(
+                {
+                    "symbol": symbol,
+                    "bar_idx": np.arange(len(bars), dtype=int),
+                    "timestamp": bars["timestamp"],
+                    "forward_abs_return_h": fwd_abs_return,
+                }
+            )
+        )
+
+    if not rows:
+        events = events.copy()
+        events["forward_abs_return_h"] = np.nan
+        events["forward_abs_return_h_ctrl"] = np.nan
+        events["opportunity_value_excess"] = np.nan
+        return events, controls
+
+    fwd = pd.concat(rows, ignore_index=True)
+    fwd_ts = fwd.rename(columns={"timestamp": "enter_ts"})
+
+    out_events = events.copy()
+    out_events = out_events.merge(
+        fwd_ts[["symbol", "enter_ts", "forward_abs_return_h"]],
+        on=["symbol", "enter_ts"],
+        how="left",
+    )
+    if "enter_idx" in out_events.columns:
+        out_events = out_events.merge(
+            fwd[["symbol", "bar_idx", "forward_abs_return_h"]].rename(columns={"bar_idx": "enter_idx", "forward_abs_return_h": "forward_abs_return_h_idx"}),
+            on=["symbol", "enter_idx"],
+            how="left",
+        )
+        out_events["forward_abs_return_h"] = out_events["forward_abs_return_h"].where(
+            out_events["forward_abs_return_h"].notna(),
+            out_events["forward_abs_return_h_idx"],
+        )
+        out_events = out_events.drop(columns=["forward_abs_return_h_idx"])
+
+    out_controls = controls.copy()
+    if not out_controls.empty and "event_id" in out_controls.columns and "control_idx" in out_controls.columns:
+        event_to_symbol = out_events[["event_id", "symbol"]].drop_duplicates()
+        out_controls = out_controls.merge(event_to_symbol, on="event_id", how="left")
+        out_controls = out_controls.merge(
+            fwd[["symbol", "bar_idx", "forward_abs_return_h"]].rename(columns={"bar_idx": "control_idx", "forward_abs_return_h": "forward_abs_return_h_ctrl_row"}),
+            on=["symbol", "control_idx"],
+            how="left",
+        )
+        ctrl_mean = out_controls.groupby("event_id", as_index=False)["forward_abs_return_h_ctrl_row"].mean()
+        out_events = out_events.merge(
+            ctrl_mean.rename(columns={"forward_abs_return_h_ctrl_row": "forward_abs_return_h_ctrl"}),
+            on="event_id",
+            how="left",
+        )
+    else:
+        out_events["forward_abs_return_h_ctrl"] = np.nan
+
+    out_events["opportunity_value_excess"] = out_events["forward_abs_return_h"] - out_events["forward_abs_return_h_ctrl"]
+    out_events["opportunity_value_excess"] = out_events["opportunity_value_excess"].where(
+        out_events["opportunity_value_excess"].notna(),
+        out_events["forward_abs_return_h"],
+    )
+    return out_events, out_controls
+
+
+def _prepare_baseline(events: pd.DataFrame, controls: pd.DataFrame) -> pd.DataFrame:
+    out = events.copy()
+    out["baseline_mode"] = "event_proxy_only"
+
+    sec = out["secondary_shock_within_h"].fillna(0).astype(float)
+    rng = out["range_pct_96"].fillna(0).astype(float).clip(lower=0.0)
+    opp = out["relaxed_within_96"].fillna(0).astype(float)
+    out["adverse_proxy"] = 0.5 * sec + 0.5 * rng
+    out["opportunity_proxy"] = opp
+
+    if controls.empty or "event_id" not in controls.columns or "event_id" not in out.columns:
+        out["adverse_proxy_ctrl"] = np.nan
+        out["opportunity_proxy_ctrl"] = np.nan
+        out["adverse_proxy_excess"] = out["adverse_proxy"]
+        out["opportunity_proxy_excess"] = out["opportunity_proxy"]
+        return out
+
+    numeric_ctrl = controls.groupby("event_id", as_index=False).mean(numeric_only=True)
+    ctrl_cols = [c for c in ["secondary_shock_within_h", "range_pct_96", "relaxed_within_96"] if c in numeric_ctrl.columns]
+    if not ctrl_cols:
+        out["adverse_proxy_ctrl"] = np.nan
+        out["opportunity_proxy_ctrl"] = np.nan
+        out["adverse_proxy_excess"] = out["adverse_proxy"]
+        out["opportunity_proxy_excess"] = out["opportunity_proxy"]
+        return out
+
+    rename_map = {c: f"{c}_ctrl" for c in ctrl_cols}
+    merged = out.merge(numeric_ctrl[["event_id"] + ctrl_cols].rename(columns=rename_map), on="event_id", how="left")
+
+    sec_ctrl = merged.get("secondary_shock_within_h_ctrl", pd.Series(np.nan, index=merged.index)).fillna(0).astype(float)
+    rng_ctrl = merged.get("range_pct_96_ctrl", pd.Series(np.nan, index=merged.index)).fillna(0).astype(float).clip(lower=0.0)
+    opp_ctrl = merged.get("relaxed_within_96_ctrl", pd.Series(np.nan, index=merged.index)).fillna(0).astype(float)
+
+    merged["adverse_proxy_ctrl"] = 0.5 * sec_ctrl + 0.5 * rng_ctrl
+    merged["opportunity_proxy_ctrl"] = opp_ctrl
+    merged["adverse_proxy_excess"] = (merged["adverse_proxy"] - merged["adverse_proxy_ctrl"]).clip(lower=0.0)
+    merged["opportunity_proxy_excess"] = (merged["opportunity_proxy"] - merged["opportunity_proxy_ctrl"]).clip(lower=0.0)
+    merged["baseline_mode"] = "matched_controls_excess"
+    return merged
+
+
 def _apply_action_proxy(sub: pd.DataFrame, action: ActionSpec) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     # Returns per-event contributions for: adverse_delta, opportunity_delta, exposure_delta
     # Negative adverse_delta is improvement (risk reduction).
-    sec = sub["secondary_shock_within_h"].fillna(0).astype(float).to_numpy()
-    rng = sub["range_pct_96"].fillna(0).astype(float).to_numpy()
-    adverse = 0.5 * sec + 0.5 * np.clip(rng, 0.0, None)
-    opp = sub["relaxed_within_96"].fillna(0).astype(float).to_numpy()
+    if "adverse_proxy_excess" in sub.columns:
+        adverse = sub["adverse_proxy_excess"].fillna(0).astype(float).to_numpy()
+    else:
+        sec = sub["secondary_shock_within_h"].fillna(0).astype(float).to_numpy()
+        rng = sub["range_pct_96"].fillna(0).astype(float).to_numpy()
+        adverse = 0.5 * sec + 0.5 * np.clip(rng, 0.0, None)
+
+    if "opportunity_value_excess" in sub.columns:
+        opp_value = sub["opportunity_value_excess"].fillna(0).astype(float).to_numpy()
+    elif "opportunity_proxy_excess" in sub.columns:
+        opp_value = sub["opportunity_proxy_excess"].fillna(0).astype(float).to_numpy()
+    else:
+        opp_value = sub["relaxed_within_96"].fillna(0).astype(float).to_numpy()
+
+    if action.name in {"no_action", "delay_0"}:
+        return np.zeros(len(sub), dtype=float), np.zeros(len(sub), dtype=float), np.zeros(len(sub), dtype=float)
 
     if action.family in {"entry_gating", "risk_throttle"}:
         k = float(action.params.get("k", 1.0))
-        adverse_delta = -(1.0 - k) * adverse
-        opportunity_delta = -(1.0 - k) * opp
         exposure_delta = np.full(len(sub), -(1.0 - k), dtype=float)
+        adverse_delta = -(1.0 - k) * adverse
+        opportunity_delta = exposure_delta * opp_value
         return adverse_delta, opportunity_delta, exposure_delta
 
     if action.name.startswith("delay_"):
         d = int(action.params.get("delay_bars", 0))
         t_sec = sub["time_to_secondary_shock"].fillna(10**9).astype(float).to_numpy()
-        t_relax = sub["time_to_relax"].fillna(10**9).astype(float).to_numpy()
         adverse_delta = -(t_sec <= d).astype(float) * adverse
-        opportunity_delta = -(t_relax <= d).astype(float) * opp
         exposure_delta = -np.full(len(sub), min(1.0, d / 96.0), dtype=float)
+        opportunity_delta = exposure_delta * opp_value
         return adverse_delta, opportunity_delta, exposure_delta
 
     if action.name == "reenable_at_half_life":
         t_half = sub["rv_decay_half_life"].fillna(10**9).astype(float).to_numpy()
         t_sec = sub["time_to_secondary_shock"].fillna(10**9).astype(float).to_numpy()
         adverse_delta = -(t_sec <= t_half).astype(float) * adverse
-        opportunity_delta = -(t_half <= sub["time_to_relax"].fillna(10**9).astype(float).to_numpy()).astype(float) * opp * 0.25
         exposure_delta = -np.clip(t_half / 96.0, 0.0, 1.0)
+        opportunity_delta = exposure_delta * opp_value
         return adverse_delta, opportunity_delta, exposure_delta
 
     raise ValueError(f"Unsupported action: {action.name}")
@@ -171,14 +371,14 @@ def _gate_year_stability(sub: pd.DataFrame, effect_col: str, min_ratio: float = 
     non_zero = [s for s in signs if s != 0]
     if not non_zero:
         return False, "all_zero"
-    dominant = max(non_zero.count(1), non_zero.count(-1)) / len(non_zero)
-    no_catastrophic = not (1 in non_zero and -1 in non_zero and len(non_zero) >= 3)
-    return bool(dominant >= min_ratio and no_catastrophic), ",".join(str(s) for s in signs)
+    improvement_ratio = non_zero.count(-1) / len(non_zero)
+    catastrophic_reversal = (non_zero.count(1) > 0) and (improvement_ratio < min_ratio)
+    return bool(improvement_ratio >= min_ratio and not catastrophic_reversal), ",".join(str(s) for s in signs)
 
 
 def _gate_regime_stability(sub: pd.DataFrame, effect_col: str, condition_name: str) -> bool:
     # If condition itself is on split variable, skip that split.
-    checks = []
+    checks: List[pd.Series] = []
     if not condition_name.startswith("symbol_") and "symbol" in sub.columns:
         checks.append(sub.groupby("symbol")[effect_col].mean())
     if not condition_name.startswith("vol_regime_") and "vol_regime" in sub.columns:
@@ -187,8 +387,8 @@ def _gate_regime_stability(sub: pd.DataFrame, effect_col: str, condition_name: s
         nz = [v for v in s.tolist() if abs(v) > 1e-12]
         if not nz:
             return False
-        signs = set(1 if v > 0 else -1 for v in nz)
-        if len(signs) > 1:
+        # Improvement should stay non-positive (adverse reduction) across splits.
+        if any(v > 0 for v in nz):
             return False
     return True
 
@@ -200,6 +400,9 @@ def _evaluate_candidate(
     bootstrap_iters: int,
     seed: int,
     cost_floor: float,
+    tail_material_threshold: float,
+    opportunity_tight_eps: float,
+    simplicity_gate: bool,
 ) -> Dict[str, object]:
     adverse_delta_vec, opp_delta_vec, exposure_delta_vec = _apply_action_proxy(sub, action)
 
@@ -215,8 +418,31 @@ def _evaluate_candidate(
     gate_b, year_signs = _gate_year_stability(tmp, "adverse_effect")
     gate_c = _gate_regime_stability(tmp, "adverse_effect", condition_name=condition.name)
 
-    material_tail = bool(np.isfinite(mean_adv) and abs(mean_adv) >= 0.02)
-    gate_d = bool(np.isfinite(mean_adv) and abs(mean_adv) >= cost_floor) or material_tail
+    risk_reduction = float(-mean_adv) if np.isfinite(mean_adv) else np.nan
+    material_tail = bool(np.isfinite(risk_reduction) and risk_reduction >= tail_material_threshold)
+    gate_d = bool(np.isfinite(risk_reduction) and risk_reduction >= cost_floor) or material_tail
+    opportunity_ci_tight_overlap = bool(
+        np.isfinite(ci_low_opp)
+        and np.isfinite(ci_high_opp)
+        and (ci_low_opp <= 0.0 <= ci_high_opp)
+        and (max(abs(ci_low_opp), abs(ci_high_opp)) <= opportunity_tight_eps)
+    )
+    gate_f = not (np.isfinite(mean_exp) and mean_exp <= -0.9 and not opportunity_ci_tight_overlap)
+    gate_e = bool(simplicity_gate)
+
+    fail_reasons = []
+    if not gate_a:
+        fail_reasons.append("gate_a_ci")
+    if not gate_b:
+        fail_reasons.append("gate_b_time")
+    if not gate_c:
+        fail_reasons.append("gate_c_regime")
+    if not gate_d:
+        fail_reasons.append("gate_d_friction")
+    if not gate_f:
+        fail_reasons.append("gate_f_exposure_guard")
+    if not gate_e:
+        fail_reasons.append("gate_e_simplicity")
 
     return {
         "condition": condition.name,
@@ -224,6 +450,7 @@ def _evaluate_candidate(
         "action": action.name,
         "action_family": action.family,
         "sample_size": int(len(sub)),
+        "baseline_mode": str(sub["baseline_mode"].iloc[0]) if "baseline_mode" in sub.columns and not sub.empty else "event_proxy_only",
         "delta_adverse_mean": mean_adv,
         "delta_adverse_ci_low": ci_low_adv,
         "delta_adverse_ci_high": ci_high_adv,
@@ -236,7 +463,11 @@ def _evaluate_candidate(
         "gate_b_year_signs": year_signs,
         "gate_c_regime_stable": gate_c,
         "gate_d_friction_floor": gate_d,
-        "gate_all": bool(gate_a and gate_b and gate_c and gate_d),
+        "gate_f_exposure_guard": gate_f,
+        "gate_e_simplicity": gate_e,
+        "gate_pass": bool(gate_a and gate_b and gate_c and gate_d and gate_f and gate_e),
+        "gate_all": bool(gate_a and gate_b and gate_c and gate_d and gate_f and gate_e),
+        "fail_reasons": ",".join(fail_reasons) if fail_reasons else "",
     }
 
 
@@ -250,6 +481,11 @@ def main() -> int:
     parser.add_argument("--bootstrap_iters", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--cost_floor", type=float, default=0.01)
+    parser.add_argument("--material_tail_threshold", type=float, default=0.02)
+    parser.add_argument("--opportunity_horizon_bars", type=int, default=20)
+    parser.add_argument("--opportunity_tight_eps", type=float, default=0.005)
+    parser.add_argument("--min_sample_size", type=int, default=20)
+    parser.add_argument("--require_phase1_pass", type=int, default=1)
     parser.add_argument("--out_dir", default=None)
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
@@ -285,50 +521,83 @@ def main() -> int:
             events[c] = np.nan
 
     controls = pd.read_csv(controls_path) if controls_path.exists() else pd.DataFrame()
+    events, controls = _attach_forward_opportunity(
+        events=events,
+        controls=controls,
+        run_id=args.run_id,
+        symbols=symbols,
+        timeframe="15m",
+        horizon_bars=args.opportunity_horizon_bars,
+    )
+    events = _prepare_baseline(events, controls)
 
-    conditions = _build_conditions(events)
-    actions = _build_actions()
-    if len(conditions) > args.max_conditions:
-        conditions = conditions[: args.max_conditions]
-    if len(actions) > args.max_actions:
-        actions = actions[: args.max_actions]
+    phase1_summary_path = phase1_dir / "vol_shock_relaxation_summary.json"
+    phase1_pass = True
+    phase1_structure_pass = True
+    phase1_decision = "unknown"
+    if args.require_phase1_pass:
+        if not phase1_summary_path.exists():
+            phase1_pass = False
+            phase1_structure_pass = False
+            phase1_decision = "missing_summary"
+        else:
+            try:
+                phase1_payload = json.loads(phase1_summary_path.read_text(encoding="utf-8"))
+                phase1_decision = str(phase1_payload.get("decision", "unknown"))
+                gates = phase1_payload.get("gates", {}) if isinstance(phase1_payload, dict) else {}
+                if "phase1_structure_pass" in phase1_payload:
+                    phase1_structure_pass = bool(phase1_payload.get("phase1_structure_pass"))
+                else:
+                    phase1_structure_pass = bool(
+                        gates.get("phase_pass", False)
+                        and gates.get("sign_pass", False)
+                        and gates.get("non_degenerate_count", False)
+                    )
+                phase1_pass = phase1_structure_pass
+            except json.JSONDecodeError:
+                phase1_pass = False
+                phase1_structure_pass = False
+                phase1_decision = "invalid_summary"
+
+    all_conditions = _build_conditions(events)
+    all_actions = _build_actions()
+    conditions = all_conditions[: args.max_conditions]
+    actions = all_actions[: args.max_actions]
+
+    condition_cap_pass = bool(len(all_conditions) <= args.max_conditions)
+    action_cap_pass = bool(len(all_actions) <= args.max_actions)
+    simplicity_pass = bool(condition_cap_pass and action_cap_pass)
 
     rows = []
-    for i, cond in enumerate(conditions):
-        mask = cond.mask_fn(events)
-        sub = events[mask].copy()
-        if len(sub) < 20:
-            continue
-        for j, action in enumerate(actions):
-            res = _evaluate_candidate(
-                sub,
-                condition=cond,
-                action=action,
-                bootstrap_iters=args.bootstrap_iters,
-                seed=args.seed + i * 1000 + j * 50,
-                cost_floor=args.cost_floor,
-            )
-            rows.append(res)
+    if phase1_pass:
+        for i, cond in enumerate(conditions):
+            mask = cond.mask_fn(events)
+            sub = events[mask].copy()
+            if len(sub) < args.min_sample_size:
+                continue
+            for j, action in enumerate(actions):
+                res = _evaluate_candidate(
+                    sub,
+                    condition=cond,
+                    action=action,
+                    bootstrap_iters=args.bootstrap_iters,
+                    seed=args.seed + i * 1000 + j * 50,
+                    cost_floor=args.cost_floor,
+                    tail_material_threshold=args.material_tail_threshold,
+                    opportunity_tight_eps=args.opportunity_tight_eps,
+                    simplicity_gate=simplicity_pass,
+                )
+                rows.append(res)
 
     candidates = pd.DataFrame(rows)
     if candidates.empty:
-        candidates = pd.DataFrame(
-            columns=[
-                "condition",
-                "action",
-                "sample_size",
-                "delta_adverse_mean",
-                "delta_adverse_ci_low",
-                "delta_adverse_ci_high",
-                "gate_all",
-            ]
-        )
+        candidates = pd.DataFrame(columns=PRIMARY_OUTPUT_COLUMNS)
 
     promoted = candidates[candidates.get("gate_all", False)].copy() if not candidates.empty else pd.DataFrame()
     if not promoted.empty:
         promoted = promoted.sort_values(["delta_adverse_mean", "delta_opportunity_mean"], ascending=[True, False]).head(2)
 
-    summary_decision = "promote" if not promoted.empty else "freeze"
+    summary_decision = "promote" if (phase1_pass and not promoted.empty) else "freeze"
 
     out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "phase2" / args.run_id / args.event_type
     ensure_dir(out_dir)
@@ -343,6 +612,9 @@ def main() -> int:
         "run_id": args.run_id,
         "event_type": args.event_type,
         "decision": summary_decision,
+        "phase1_pass": bool(phase1_pass),
+        "phase1_structure_pass": bool(phase1_structure_pass),
+        "phase1_decision": phase1_decision,
         "promoted_count": int(len(promoted)) if isinstance(promoted, pd.DataFrame) else 0,
         "candidates": promoted.to_dict(orient="records") if isinstance(promoted, pd.DataFrame) and not promoted.empty else [],
     }
@@ -351,14 +623,24 @@ def main() -> int:
     manifest_payload = {
         "run_id": args.run_id,
         "event_type": args.event_type,
+        "phase1_pass": bool(phase1_pass),
+        "phase1_structure_pass": bool(phase1_structure_pass),
+        "phase1_decision": phase1_decision,
+        "conditions_generated": int(len(all_conditions)),
+        "actions_generated": int(len(all_actions)),
         "conditions_evaluated": int(len(conditions)),
         "actions_evaluated": int(len(actions)),
         "candidates_evaluated": int(len(candidates)),
         "caps": {
             "max_conditions": int(args.max_conditions),
             "max_actions": int(args.max_actions),
-            "condition_cap_pass": bool(len(conditions) <= args.max_conditions),
-            "action_cap_pass": bool(len(actions) <= args.max_actions),
+            "condition_cap_pass": condition_cap_pass,
+            "action_cap_pass": action_cap_pass,
+            "simplicity_gate_pass": simplicity_pass,
+        },
+        "opportunity": {
+            "horizon_bars": int(args.opportunity_horizon_bars),
+            "tight_ci_eps": float(args.opportunity_tight_eps),
         },
     }
     manifest_path.write_text(json.dumps(manifest_payload, indent=2), encoding="utf-8")
@@ -371,17 +653,25 @@ def main() -> int:
         f"Run ID: `{args.run_id}`",
         f"Event type: `{args.event_type}`",
         f"Decision: **{summary_decision.upper()}**",
+        f"Phase 1 pass required: `{bool(args.require_phase1_pass)}`",
+        f"Phase 1 status: `{phase1_decision}`",
+        f"Phase 1 structure pass: `{bool(phase1_structure_pass)}`",
         "",
         "## Counts",
-        f"- Conditions evaluated: {len(conditions)} (cap={args.max_conditions})",
-        f"- Actions evaluated: {len(actions)} (cap={args.max_actions})",
+        f"- Conditions generated: {len(all_conditions)} (cap={args.max_conditions})",
+        f"- Conditions evaluated: {len(conditions)}",
+        f"- Actions generated: {len(all_actions)} (cap={args.max_actions})",
+        f"- Actions evaluated: {len(actions)}",
         f"- Candidate rows evaluated: {len(candidates)}",
+        f"- Simplicity gate pass: {simplicity_pass}",
         "",
         "## Top candidates",
         _table_text(candidates.sort_values("delta_adverse_mean").head(3)) if not candidates.empty else "No candidates",
         "",
         "## Explicit failures",
-        _table_text(fail_rows.head(10)) if not fail_rows.empty else "No failures",
+        _table_text(fail_rows[["condition", "action", "sample_size", "fail_reasons"]].head(10))
+        if not fail_rows.empty
+        else "No failures",
         "",
         "## Promoted",
         _table_text(promoted) if isinstance(promoted, pd.DataFrame) and not promoted.empty else "None",
