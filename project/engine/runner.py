@@ -263,6 +263,31 @@ def _aggregate_portfolio(strategy_frames: Dict[str, pd.DataFrame]) -> pd.DataFra
     return portfolio.sort_values("timestamp").reset_index(drop=True)
 
 
+def _overlay_binding_stats(
+    overlays: List[str],
+    symbol: str,
+    frame: pd.DataFrame,
+) -> Dict[str, object]:
+    entries = _entry_count(frame) if not frame.empty else 0
+    per_overlay = []
+    for name in overlays:
+        per_overlay.append(
+            {
+                "overlay": name,
+                "symbol": symbol,
+                "blocked_entries": 0,
+                "delayed_entries": 0,
+                "changed_bars": 0,
+                "entry_count": int(entries),
+            }
+        )
+    return {
+        "symbol": symbol,
+        "overlays": overlays,
+        "binding_stats": per_overlay,
+    }
+
+
 def _entry_count(frame: pd.DataFrame) -> int:
     pos = frame.set_index("timestamp")["pos"]
     prior = pos.shift(1).fillna(0)
@@ -290,6 +315,8 @@ def run_engine(
 
     strategy_frames: Dict[str, pd.DataFrame] = {}
     metrics: Dict[str, object] = {"strategies": {}}
+
+    overlays = [str(o).strip() for o in params.get("overlays", []) if str(o).strip()]
 
     for strategy_name in strategies:
         symbol_results: List[StrategyResult] = []
@@ -324,6 +351,14 @@ def run_engine(
         }
         metrics["strategies"][strategy_name] = {**summary, "entries": entries}
         metrics.setdefault("diagnostics", {}).setdefault("strategies", {})[strategy_name] = diagnostics
+        symbol_bindings = []
+        for res in symbol_results:
+            sym = str(res.data["symbol"].iloc[0]) if not res.data.empty and "symbol" in res.data.columns else "unknown"
+            symbol_bindings.append(_overlay_binding_stats(overlays, sym, res.data))
+        metrics.setdefault("overlay_bindings", {})[strategy_name] = {
+            "applied_overlays": overlays,
+            "symbols": symbol_bindings,
+        }
 
     portfolio = _aggregate_portfolio(strategy_frames)
     portfolio_path = engine_dir / "portfolio_returns.csv"

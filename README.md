@@ -83,6 +83,48 @@ Phase 2 outputs:
 - `data/reports/phase2/<run_id>/<event_type>/phase2_manifests.json`
 - `data/reports/phase2/<run_id>/<event_type>/promoted_candidates.json` (max 1-2 candidates)
 
+### Return-maximization objective and constraints
+When the research objective is **maximize return**, the repository uses a constrained objective:
+
+- Primary target metric is pinned per APPROVED overlay spec (`objective.target_metric`) and should normally be `net_total_return` after fees, slippage, funding, and overlay costs.
+- Hard constraints are required for APPROVED overlays and must include:
+  - `constraints.max_drawdown_pct`
+  - `constraints.tail_loss`
+  - `constraints.exposure_limits`
+  - `constraints.turnover_budget`
+- Evidence records for APPROVED overlays must be structured objects per run with:
+  - `run_id`, `split`, `date_range`, `universe`, `config_hash`
+- Stability requirements are mandatory and falsifiable for APPROVED overlays. Each spec must include:
+  - `stability.sign_consistency_min`
+  - `stability.effect_ci_excludes_0`
+  - `stability.max_regime_flip_count`
+
+This enforces: maximize constrained net return, not unconstrained PnL on noise.
+
+### Phase gating under return objective
+- **Phase 1**: structure-only mechanism discovery (no action tuning loops).
+- **Phase 2**: first PnL-allowed stage for a small fixed set of falsifiable actions with pre-registered costs and constraints.
+- **Phase 3**: limited parameter selection with walk-forward / nested-CV only after Phase 2 pass, then lock.
+
+### Overlay promotion criteria
+- `DRAFT` specs are listable but non-applicable (`apply_overlay` blocks non-APPROVED statuses).
+- `APPROVED` specs must carry validated cost, evidence run IDs, objective definition, constraint stats, and stability declarations.
+
+
+
+### Overlay promotion checker
+Run the promotion contract checker to evaluate a pinned overlay spec against referenced run artifacts:
+
+```bash
+python3 project/pipelines/research/check_overlay_promotion.py   --overlay vol_shock_relaxation_delay30_v1
+```
+
+This emits:
+- `data/reports/overlay_promotion/<overlay>/promotion_verdict.json`
+- `data/reports/overlay_promotion/<overlay>/promotion_verdict.md`
+
+Verdicts are `PASS_PROMOTION` or `FAIL_PROMOTION` with machine-readable reasons.
+
 ### Optional one-command run with Phase 2
 ```bash
 python3 project/pipelines/run_all.py \

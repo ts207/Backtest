@@ -1,0 +1,35 @@
+{
+  "spec_version": "v1",
+  "name": "vol_aftershock_window_rerisk_placeholder_v1",
+  "event": "vol_aftershock_window",
+  "condition": "true",
+  "action": "PLACEHOLDER_NOOP",
+  "status": "DRAFT",
+  "tuning_allowed": false,
+  "run_ids_evidence": [],
+  "cost_bps_validated": null,
+  "objective": {
+    "target_metric": "net_total_return",
+    "evaluation_horizon": "fixed_run_horizon",
+    "costs_included": [
+      "fees",
+      "slippage",
+      "funding",
+      "overlay_costs"
+    ]
+  },
+  "constraints": {
+    "max_drawdown_pct": null,
+    "tail_loss": null,
+    "exposure_limits": null,
+    "turnover_budget": null
+  },
+  "stability": {
+    "sign_consistency_min": null,
+    "effect_ci_excludes_0": null,
+    "max_regime_flip_count": null,
+    "time_split": "pending",
+    "regime_split": "pending"
+  },
+  "notes": "Placeholder overlay for aftershock/re-risk window. Not applicable until Phase-1 confirms a regime-stable edge and an explicit Phase-2 action exists."
+}

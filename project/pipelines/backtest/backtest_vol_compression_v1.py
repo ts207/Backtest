@@ -20,6 +20,7 @@ from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from engine.pnl import compute_pnl
 from engine.runner import run_engine
+from strategies.overlay_registry import apply_overlay
 
 INITIAL_EQUITY = 1_000_000.0
 BARS_PER_YEAR_15M = 365 * 24 * 4
@@ -219,6 +220,7 @@ def main() -> int:
     parser.add_argument("--slippage_bps", type=float, default=None)
     parser.add_argument("--cost_bps", type=float, default=None)
     parser.add_argument("--strategies", default=None)
+    parser.add_argument("--overlays", default="")
     parser.add_argument("--force", type=int, default=0)
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--log_path", default=None)
@@ -249,6 +251,7 @@ def main() -> int:
         else ["vol_compression_v1"]
     )
 
+    overlays = [o.strip() for o in str(args.overlays).split(",") if o.strip()]
     params = {
         "fee_bps_per_side": fee_bps,
         "slippage_bps_per_fill": slippage_bps,
@@ -257,6 +260,7 @@ def main() -> int:
         "force": int(args.force),
         "cost_bps": cost_bps,
         "strategies": strategies,
+        "overlays": overlays,
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
@@ -271,14 +275,18 @@ def main() -> int:
             finalize_manifest(manifest, "success", stats={"skipped": True})
             return 0
 
+        strategy_params = {
+            "trade_day_timezone": trade_day_timezone,
+            "one_trade_per_day": True,
+        }
+        for overlay_name in overlays:
+            strategy_params = apply_overlay(overlay_name, strategy_params)
+
         engine_results = run_engine(
             run_id=run_id,
             symbols=symbols,
             strategies=strategies,
-            params={
-                "trade_day_timezone": trade_day_timezone,
-                "one_trade_per_day": True,
-            },
+            params=strategy_params,
             cost_bps=cost_bps,
             data_root=DATA_ROOT,
         )
