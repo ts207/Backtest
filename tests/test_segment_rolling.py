@@ -31,7 +31,7 @@ def test_segment_rolling_resets_after_gap():
     bars.loc[gap_idx, ["open", "high", "low", "close", "volume"]] = np.nan
     bars.loc[gap_idx, "is_gap"] = True
 
-    features, _, _ = _build_features_frame(
+    features, _, _, _ = _build_features_frame(
         bars,
         windows={"rv": 5, "rv_pct": 10, "range": 5, "range_med": 10},
     )

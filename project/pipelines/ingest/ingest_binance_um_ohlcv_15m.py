@@ -66,6 +66,17 @@ def _expected_bars(start: datetime, end_exclusive: datetime) -> int:
     return int((end_exclusive - start).total_seconds() // (15 * 60))
 
 
+def _expected_15m_index(start: datetime, end_exclusive: datetime) -> pd.DatetimeIndex:
+    if end_exclusive <= start:
+        return pd.DatetimeIndex([], tz=timezone.utc)
+    return pd.date_range(
+        start=start,
+        end=end_exclusive - timedelta(minutes=15),
+        freq="15min",
+        tz=timezone.utc,
+    )
+
+
 def _read_ohlcv_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame:
     columns = [
         "open_time",
@@ -100,7 +111,7 @@ def _read_ohlcv_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame:
     return df
 
 
-def _partition_complete(path: Path, expected_rows: int) -> bool:
+def _partition_complete(path: Path, expected_ts: pd.DatetimeIndex) -> bool:
     if not path.exists():
         csv_path = path.with_suffix(".csv")
         if csv_path.exists():
@@ -108,10 +119,19 @@ def _partition_complete(path: Path, expected_rows: int) -> bool:
         else:
             return False
     try:
-        if expected_rows == 0:
+        if len(expected_ts) == 0:
             return True
         data = read_parquet([path])
-        return len(data) >= expected_rows
+        if data.empty:
+            return False
+        if "timestamp" not in data.columns:
+            return False
+        ts = pd.to_datetime(data["timestamp"], utc=True, format="mixed")
+        if ts.isna().any():
+            return False
+        if ts.duplicated().any():
+            return False
+        return set(ts) == set(expected_ts)
     except Exception:
         return False
 
@@ -173,7 +193,8 @@ def main() -> int:
                 month_end = _next_month(month_start)
                 range_start = max(effective_start, month_start)
                 range_end_exclusive = min(effective_end + timedelta(days=1), month_end)
-                expected_rows = _expected_bars(range_start, range_end_exclusive)
+                expected_ts = _expected_15m_index(range_start, range_end_exclusive)
+                expected_rows = len(expected_ts)
                 if expected_rows == 0:
                     continue
 
@@ -186,7 +207,7 @@ def main() -> int:
                 )
                 out_path = out_dir / f"ohlcv_{symbol}_15m_{month_start.year}-{month_start.month:02d}.parquet"
 
-                if not args.force and _partition_complete(out_path, expected_rows):
+                if not args.force and _partition_complete(out_path, expected_ts):
                     partitions_skipped.append(str(out_path))
                     continue
 

@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import sys
+from datetime import timedelta, timezone
 from pathlib import Path
 from typing import Dict, List
 
@@ -35,6 +36,18 @@ def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
         "start_ts": df["timestamp"].min().isoformat(),
         "end_ts": df["timestamp"].max().isoformat(),
     }
+
+
+
+def _expected_15m_index(start: pd.Timestamp, end_exclusive: pd.Timestamp) -> pd.DatetimeIndex:
+    if end_exclusive <= start:
+        return pd.DatetimeIndex([], tz=timezone.utc)
+    return pd.date_range(
+        start=start,
+        end=end_exclusive - timedelta(minutes=15),
+        freq="15min",
+        tz=timezone.utc,
+    )
 
 
 def _rolling_percentile(series: pd.Series, window: int) -> pd.Series:
@@ -135,7 +148,7 @@ def _build_features_frame(
     return features, segment_id, nan_rates, column_map
 
 
-def _partition_complete(path: Path, expected_rows: int) -> bool:
+def _partition_complete(path: Path, expected_ts: pd.DatetimeIndex) -> bool:
     if not path.exists():
         csv_path = path.with_suffix(".csv")
         if csv_path.exists():
@@ -143,10 +156,19 @@ def _partition_complete(path: Path, expected_rows: int) -> bool:
         else:
             return False
     try:
-        if expected_rows == 0:
+        if len(expected_ts) == 0:
             return True
         data = read_parquet([path])
-        return len(data) >= expected_rows
+        if data.empty:
+            return False
+        if "timestamp" not in data.columns:
+            return False
+        ts = pd.to_datetime(data["timestamp"], utc=True, format="mixed")
+        if ts.isna().any():
+            return False
+        if ts.duplicated().any():
+            return False
+        return set(ts) == set(expected_ts)
     except Exception:
         return False
 
@@ -254,8 +276,11 @@ def main() -> int:
             for (year, month), group in features.groupby(["year", "month"], sort=True):
                 group_out = group.drop(columns=["year", "month"]).reset_index(drop=True)
                 out_path = out_dir / f"year={year}" / f"month={month:02d}" / f"features_{symbol}_v1_{year}-{month:02d}.parquet"
-                expected_rows = len(group_out)
-                if not args.force and _partition_complete(out_path, expected_rows):
+                expected_ts = _expected_15m_index(
+                    group_out["timestamp"].min(),
+                    group_out["timestamp"].max() + timedelta(minutes=15),
+                )
+                if not args.force and _partition_complete(out_path, expected_ts):
                     partitions_skipped.append(str(out_path))
                     continue
                 ensure_dir(out_path.parent)
