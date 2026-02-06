@@ -69,7 +69,12 @@ def main() -> int:
         "fp_def_version": DEFAULT_FP_CONFIG.def_version,
     }
     manifest = start_manifest("build_context_features", args.run_id, params, inputs, outputs)
-    stats: Dict[str, object] = {"symbols": {}}
+    stats: Dict[str, object] = {
+        "fp_def_version": DEFAULT_FP_CONFIG.def_version,
+        "timeframe": args.timeframe,
+        "output_files": [],
+        "symbols": {},
+    }
 
     try:
         for symbol in symbols:
@@ -83,26 +88,83 @@ def main() -> int:
             if bars.empty:
                 raise ValueError(f"No bars in requested range for {symbol}")
 
+            if "funding_rate_scaled" not in bars.columns:
+                funding_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / f"funding_{args.timeframe}"
+                funding = read_parquet(list_parquet_files(funding_dir))
+                if funding.empty:
+                    raise ValueError(f"No cleaned funding found for {symbol} at timeframe={args.timeframe}")
+                funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
+                funding = funding.sort_values("timestamp").drop_duplicates(subset=["timestamp"], keep="last")
+                funding = funding[(funding["timestamp"] >= start) & (funding["timestamp"] <= end)].copy()
+                if funding.empty:
+                    raise ValueError(f"No funding rows in requested range for {symbol}")
+                bars = bars.merge(
+                    funding[["timestamp", "funding_rate_scaled"]],
+                    on="timestamp",
+                    how="left",
+                )
+                if bars["funding_rate_scaled"].isna().all():
+                    raise ValueError(f"Unable to align funding_rate_scaled onto bars for {symbol}")
+
             inputs.append({"path": str(bars_dir), **_collect_stats(bars)})
             fp = build_funding_persistence_state(bars, symbol=symbol, config=DEFAULT_FP_CONFIG)
 
             out_path = output_root / symbol / f"{args.timeframe}.parquet"
+            output_file = str(out_path)
             if out_path.exists() and not args.force:
                 existing = read_parquet([out_path])
                 if len(existing) == len(fp):
                     logging.info("Skipping existing context file for %s: %s", symbol, out_path)
-                    outputs.append({"path": str(out_path), "rows": int(len(existing)), "storage_format": out_path.suffix})
+                    outputs.append(
+                        {
+                            "path": output_file,
+                            "symbol": symbol,
+                            "timeframe": args.timeframe,
+                            "fp_def_version": DEFAULT_FP_CONFIG.def_version,
+                            "rows": int(len(existing)),
+                            "active_bars": int(fp["fp_active"].sum()),
+                            "event_count": int(fp["fp_event_id"].dropna().nunique()),
+                            "storage_format": out_path.suffix,
+                        }
+                    )
+                    stats["output_files"].append(output_file)
+                    stats["symbols"][symbol] = {
+                        "symbol": symbol,
+                        "timeframe": args.timeframe,
+                        "output_file": output_file,
+                        "rows": int(len(existing)),
+                        "active_bars": int(fp["fp_active"].sum()),
+                        "event_count": int(fp["fp_event_id"].dropna().nunique()),
+                        "fp_def_version": DEFAULT_FP_CONFIG.def_version,
+                    }
                     continue
 
             written_path, storage = write_parquet(fp, out_path)
-            outputs.append({"path": str(written_path), "rows": int(len(fp)), "storage_format": storage})
+            output_file = str(written_path)
+            outputs.append(
+                {
+                    "path": output_file,
+                    "symbol": symbol,
+                    "timeframe": args.timeframe,
+                    "fp_def_version": DEFAULT_FP_CONFIG.def_version,
+                    "rows": int(len(fp)),
+                    "active_bars": int(fp["fp_active"].sum()),
+                    "event_count": int(fp["fp_event_id"].dropna().nunique()),
+                    "storage_format": storage,
+                }
+            )
+            stats["output_files"].append(output_file)
             stats["symbols"][symbol] = {
+                "symbol": symbol,
+                "timeframe": args.timeframe,
+                "output_file": output_file,
                 "rows": int(len(fp)),
                 "active_bars": int(fp["fp_active"].sum()),
                 "event_count": int(fp["fp_event_id"].dropna().nunique()),
                 "fp_def_version": DEFAULT_FP_CONFIG.def_version,
             }
 
+        stats["output_files"] = sorted(set(stats["output_files"]))
         finalize_manifest(manifest, "success", stats=stats)
         return 0
     except Exception as exc:

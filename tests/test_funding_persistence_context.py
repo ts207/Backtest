@@ -43,10 +43,12 @@ def test_deoverlap_and_monotonic_age() -> None:
 
 def test_no_signal_guard_columns() -> None:
     out = build_funding_persistence_state(_sample_frame(), symbol="BTCUSDT")
-    bad_tokens = {"signal", "side", "alpha", "entry"}
+    forbidden_exact = {"signal", "side", "direction", "alpha", "entry", "short", "long"}
+    forbidden_tokens = {"signal", "side", "direction", "alpha", "entry", "short", "long"}
     for col in out.columns:
         lowered = col.lower()
-        assert not any(token in lowered for token in bad_tokens)
+        assert lowered not in forbidden_exact
+        assert not any(token in lowered for token in forbidden_tokens)
 
 
 def test_join_safety_and_defaults() -> None:

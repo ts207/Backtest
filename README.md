@@ -49,6 +49,49 @@ python3 project/pipelines/backtest/backtest_vol_compression_v1.py --run_id 20260
 python3 project/pipelines/report/make_report.py --run_id 20260101_120000
 ```
 
+## Research lifecycle (Phase 1 -> Phase 2)
+Phase 1 verifies structural event truth (event-level, de-overlapped). Phase 2 tests conditional edge hypotheses with hard simplicity caps before any strategy optimization.
+
+### Phase 1 (vol shock -> relaxation)
+```bash
+python3 project/pipelines/research/analyze_vol_shock_relaxation.py \
+  --run_id 20260101_120000 \
+  --symbols BTCUSDT,ETHUSDT \
+  --timeframe 15m
+```
+
+### Phase 2 (Conditional Edge Hypothesis)
+```bash
+python3 project/pipelines/research/phase2_conditional_hypotheses.py \
+  --run_id 20260101_120000 \
+  --event_type vol_shock_relaxation \
+  --symbols BTCUSDT,ETHUSDT \
+  --max_conditions 20 \
+  --max_actions 9
+```
+
+Phase 2 gates:
+- Gate A: CI separation on adverse-risk reduction
+- Gate B: no sign flip over time (>= 80% yearly sign stability)
+- Gate C: sign stability across symbol/vol splits within condition
+- Gate D: friction floor plausibility
+- Gate E: simplicity cap (condition/action hard caps)
+
+Phase 2 outputs:
+- `data/reports/phase2/<run_id>/<event_type>/phase2_candidates.csv`
+- `data/reports/phase2/<run_id>/<event_type>/phase2_summary.md`
+- `data/reports/phase2/<run_id>/<event_type>/phase2_manifests.json`
+- `data/reports/phase2/<run_id>/<event_type>/promoted_candidates.json` (max 1-2 candidates)
+
+### Optional one-command run with Phase 2
+```bash
+python3 project/pipelines/run_all.py \
+  --symbols BTCUSDT,ETHUSDT \
+  --start 2020-06-01 \
+  --end 2025-07-10 \
+  --run_phase2_conditional 1
+```
+
 ## Output locations
 - Raw data: `data/lake/raw/binance/perp/<symbol>/...`
 - Cleaned bars: `data/lake/cleaned/perp/<symbol>/bars_15m/...`
