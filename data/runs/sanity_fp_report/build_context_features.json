@@ -1,0 +1,49 @@
+{
+  "error": null,
+  "finished_at": "2026-02-06T02:02:16.891843+00:00",
+  "inputs": [
+    {
+      "end_ts": "2021-01-15T00:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/cleaned/perp/BTCUSDT/bars_15m",
+      "rows": 1345,
+      "start_ts": "2021-01-01T00:00:00+00:00"
+    },
+    {
+      "end_ts": "2021-01-15T00:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/cleaned/perp/ETHUSDT/bars_15m",
+      "rows": 1345,
+      "start_ts": "2021-01-01T00:00:00+00:00"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "/home/tstuv/backtest/Backtest/data/features/context/funding_persistence/BTCUSDT/15m.parquet",
+      "rows": 1345,
+      "storage_format": ".parquet"
+    },
+    {
+      "path": "/home/tstuv/backtest/Backtest/data/features/context/funding_persistence/ETHUSDT/15m.parquet",
+      "rows": 1345,
+      "storage_format": ".parquet"
+    }
+  ],
+  "parameters": {
+    "end": "2021-01-15T00:00:00+00:00",
+    "force": 0,
+    "fp_def_version": "v1",
+    "out_dir": "/home/tstuv/backtest/Backtest/data/features/context/funding_persistence",
+    "start": "2021-01-01T00:00:00+00:00",
+    "symbols": [
+      "BTCUSDT",
+      "ETHUSDT"
+    ],
+    "timeframe": "15m"
+  },
+  "run_id": "sanity_fp_report",
+  "stage": "build_context_features",
+  "started_at": "2026-02-06T02:02:16.783731+00:00",
+  "stats": {
+    "symbols": {}
+  },
+  "status": "success"
+}

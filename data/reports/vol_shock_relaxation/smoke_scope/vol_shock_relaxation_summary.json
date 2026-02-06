@@ -1,0 +1,26 @@
+{
+  "run_id": "smoke_scope",
+  "timeframe": "15m",
+  "vsr_def_version": "v1",
+  "decision": "freeze",
+  "phase1_structure_pass": false,
+  "gates": {
+    "stable_ci": false,
+    "phase_pass": false,
+    "sign_pass": true,
+    "non_degenerate_count": false,
+    "phase1_structure_pass": false
+  },
+  "event_count": 0,
+  "files": {
+    "events": "/home/tstuv/backtest/Backtest/data/reports/vol_shock_relaxation/smoke_scope/vol_shock_relaxation_events.csv",
+    "controls": "/home/tstuv/backtest/Backtest/data/reports/vol_shock_relaxation/smoke_scope/vol_shock_relaxation_controls.csv",
+    "hazards": "/home/tstuv/backtest/Backtest/data/reports/vol_shock_relaxation/smoke_scope/vol_shock_relaxation_hazards.csv",
+    "hazard_auc": "/home/tstuv/backtest/Backtest/data/reports/vol_shock_relaxation/smoke_scope/vol_shock_relaxation_hazard_auc.csv",
+    "deltas": "/home/tstuv/backtest/Backtest/data/reports/vol_shock_relaxation/smoke_scope/vol_shock_relaxation_matched_deltas.csv",
+    "phase": "/home/tstuv/backtest/Backtest/data/reports/vol_shock_relaxation/smoke_scope/vol_shock_relaxation_phase_stability.csv",
+    "sanity": "/home/tstuv/backtest/Backtest/data/reports/vol_shock_relaxation/smoke_scope/vol_shock_relaxation_sanity.csv",
+    "sign": "/home/tstuv/backtest/Backtest/data/reports/vol_shock_relaxation/smoke_scope/vol_shock_relaxation_sign_stability.csv",
+    "thresholds": "/home/tstuv/backtest/Backtest/data/reports/vol_shock_relaxation/smoke_scope/vol_shock_relaxation_thresholds.csv"
+  }
+}

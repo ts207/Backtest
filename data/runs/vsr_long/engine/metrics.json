@@ -1,0 +1,29 @@
+{
+  "diagnostics": {
+    "strategies": {
+      "vol_compression_v1": {
+        "forced_flat_bars": 0,
+        "forced_flat_pct": 0.0,
+        "missing_feature_bars": 22998,
+        "missing_feature_columns": [],
+        "missing_feature_pct": 0.16408390410958903,
+        "nan_return_bars": 20,
+        "nan_return_pct": 0.00014269406392694063,
+        "total_bars": 140160
+      }
+    }
+  },
+  "portfolio": {
+    "mean_pnl": 2.737988124795921e-06,
+    "std_pnl": 0.0009920253516463107,
+    "total_pnl": 0.19187820778569814
+  },
+  "strategies": {
+    "vol_compression_v1": {
+      "entries": 128,
+      "mean_pnl": 2.737988124795921e-06,
+      "std_pnl": 0.0009920253516463107,
+      "total_pnl": 0.19187820778569814
+    }
+  }
+}

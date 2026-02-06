@@ -1,0 +1,42 @@
+{
+  "error": null,
+  "finished_at": "2026-02-06T02:02:18.978825+00:00",
+  "inputs": [
+    {
+      "end_ts": null,
+      "path": "/home/tstuv/backtest/Backtest/data/lake/trades/backtests/vol_compression_expansion_v1/sanity_fp_report/metrics.json",
+      "rows": 1,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/home/tstuv/backtest/Backtest/data/lake/trades/backtests/vol_compression_expansion_v1/sanity_fp_report",
+      "rows": 0,
+      "start_ts": null
+    }
+  ],
+  "outputs": [
+    {
+      "end_ts": null,
+      "path": "/home/tstuv/backtest/Backtest/data/reports/vol_compression_expansion_v1/sanity_fp_report/summary.md",
+      "rows": 87,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/home/tstuv/backtest/Backtest/data/reports/vol_compression_expansion_v1/sanity_fp_report/summary.json",
+      "rows": 1,
+      "start_ts": null
+    }
+  ],
+  "parameters": {
+    "out_dir": null,
+    "run_id": "sanity_fp_report",
+    "trade_day_timezone": "UTC"
+  },
+  "run_id": "sanity_fp_report",
+  "stage": "make_report",
+  "started_at": "2026-02-06T02:02:18.915018+00:00",
+  "stats": {},
+  "status": "success"
+}

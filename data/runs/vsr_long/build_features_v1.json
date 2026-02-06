@@ -1,0 +1,477 @@
+{
+  "error": null,
+  "finished_at": "2026-02-06T02:11:31.628565+00:00",
+  "inputs": [
+    {
+      "end_ts": "2022-12-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/cleaned/perp/BTCUSDT/bars_15m",
+      "rows": 70080,
+      "start_ts": "2021-01-01T00:00:00+00:00"
+    },
+    {
+      "end_ts": "2022-12-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/cleaned/perp/BTCUSDT/funding_15m",
+      "rows": 70080,
+      "start_ts": "2021-01-01T00:00:00+00:00"
+    },
+    {
+      "end_ts": "2022-12-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/cleaned/perp/ETHUSDT/bars_15m",
+      "rows": 70080,
+      "start_ts": "2021-01-01T00:00:00+00:00"
+    },
+    {
+      "end_ts": "2022-12-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/cleaned/perp/ETHUSDT/funding_15m",
+      "rows": 70080,
+      "start_ts": "2021-01-01T00:00:00+00:00"
+    }
+  ],
+  "outputs": [
+    {
+      "end_ts": "2021-01-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=01/features_BTCUSDT_v1_2021-01.parquet",
+      "rows": 2976,
+      "start_ts": "2021-01-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-02-28T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=02/features_BTCUSDT_v1_2021-02.parquet",
+      "rows": 2688,
+      "start_ts": "2021-02-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-03-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=03/features_BTCUSDT_v1_2021-03.parquet",
+      "rows": 2976,
+      "start_ts": "2021-03-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-04-30T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=04/features_BTCUSDT_v1_2021-04.parquet",
+      "rows": 2880,
+      "start_ts": "2021-04-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-05-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=05/features_BTCUSDT_v1_2021-05.parquet",
+      "rows": 2976,
+      "start_ts": "2021-05-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-06-30T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=06/features_BTCUSDT_v1_2021-06.parquet",
+      "rows": 2880,
+      "start_ts": "2021-06-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-07-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=07/features_BTCUSDT_v1_2021-07.parquet",
+      "rows": 2976,
+      "start_ts": "2021-07-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-08-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=08/features_BTCUSDT_v1_2021-08.parquet",
+      "rows": 2976,
+      "start_ts": "2021-08-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-09-30T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=09/features_BTCUSDT_v1_2021-09.parquet",
+      "rows": 2880,
+      "start_ts": "2021-09-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-10-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=10/features_BTCUSDT_v1_2021-10.parquet",
+      "rows": 2976,
+      "start_ts": "2021-10-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-11-30T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=11/features_BTCUSDT_v1_2021-11.parquet",
+      "rows": 2880,
+      "start_ts": "2021-11-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-12-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=12/features_BTCUSDT_v1_2021-12.parquet",
+      "rows": 2976,
+      "start_ts": "2021-12-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-01-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=01/features_BTCUSDT_v1_2022-01.parquet",
+      "rows": 2976,
+      "start_ts": "2022-01-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-02-28T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=02/features_BTCUSDT_v1_2022-02.parquet",
+      "rows": 2688,
+      "start_ts": "2022-02-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-03-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=03/features_BTCUSDT_v1_2022-03.parquet",
+      "rows": 2976,
+      "start_ts": "2022-03-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-04-30T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=04/features_BTCUSDT_v1_2022-04.parquet",
+      "rows": 2880,
+      "start_ts": "2022-04-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-05-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=05/features_BTCUSDT_v1_2022-05.parquet",
+      "rows": 2976,
+      "start_ts": "2022-05-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-06-30T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=06/features_BTCUSDT_v1_2022-06.parquet",
+      "rows": 2880,
+      "start_ts": "2022-06-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-07-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=07/features_BTCUSDT_v1_2022-07.parquet",
+      "rows": 2976,
+      "start_ts": "2022-07-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-08-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=08/features_BTCUSDT_v1_2022-08.parquet",
+      "rows": 2976,
+      "start_ts": "2022-08-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-09-30T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=09/features_BTCUSDT_v1_2022-09.parquet",
+      "rows": 2880,
+      "start_ts": "2022-09-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-10-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=10/features_BTCUSDT_v1_2022-10.parquet",
+      "rows": 2976,
+      "start_ts": "2022-10-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-11-30T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=11/features_BTCUSDT_v1_2022-11.parquet",
+      "rows": 2880,
+      "start_ts": "2022-11-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-12-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=12/features_BTCUSDT_v1_2022-12.parquet",
+      "rows": 2976,
+      "start_ts": "2022-12-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-01-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=01/features_ETHUSDT_v1_2021-01.parquet",
+      "rows": 2976,
+      "start_ts": "2021-01-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-02-28T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=02/features_ETHUSDT_v1_2021-02.parquet",
+      "rows": 2688,
+      "start_ts": "2021-02-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-03-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=03/features_ETHUSDT_v1_2021-03.parquet",
+      "rows": 2976,
+      "start_ts": "2021-03-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-04-30T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=04/features_ETHUSDT_v1_2021-04.parquet",
+      "rows": 2880,
+      "start_ts": "2021-04-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-05-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=05/features_ETHUSDT_v1_2021-05.parquet",
+      "rows": 2976,
+      "start_ts": "2021-05-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-06-30T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=06/features_ETHUSDT_v1_2021-06.parquet",
+      "rows": 2880,
+      "start_ts": "2021-06-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-07-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=07/features_ETHUSDT_v1_2021-07.parquet",
+      "rows": 2976,
+      "start_ts": "2021-07-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-08-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=08/features_ETHUSDT_v1_2021-08.parquet",
+      "rows": 2976,
+      "start_ts": "2021-08-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-09-30T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=09/features_ETHUSDT_v1_2021-09.parquet",
+      "rows": 2880,
+      "start_ts": "2021-09-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-10-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=10/features_ETHUSDT_v1_2021-10.parquet",
+      "rows": 2976,
+      "start_ts": "2021-10-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-11-30T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=11/features_ETHUSDT_v1_2021-11.parquet",
+      "rows": 2880,
+      "start_ts": "2021-11-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2021-12-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=12/features_ETHUSDT_v1_2021-12.parquet",
+      "rows": 2976,
+      "start_ts": "2021-12-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-01-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=01/features_ETHUSDT_v1_2022-01.parquet",
+      "rows": 2976,
+      "start_ts": "2022-01-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-02-28T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=02/features_ETHUSDT_v1_2022-02.parquet",
+      "rows": 2688,
+      "start_ts": "2022-02-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-03-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=03/features_ETHUSDT_v1_2022-03.parquet",
+      "rows": 2976,
+      "start_ts": "2022-03-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-04-30T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=04/features_ETHUSDT_v1_2022-04.parquet",
+      "rows": 2880,
+      "start_ts": "2022-04-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-05-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=05/features_ETHUSDT_v1_2022-05.parquet",
+      "rows": 2976,
+      "start_ts": "2022-05-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-06-30T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=06/features_ETHUSDT_v1_2022-06.parquet",
+      "rows": 2880,
+      "start_ts": "2022-06-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-07-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=07/features_ETHUSDT_v1_2022-07.parquet",
+      "rows": 2976,
+      "start_ts": "2022-07-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-08-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=08/features_ETHUSDT_v1_2022-08.parquet",
+      "rows": 2976,
+      "start_ts": "2022-08-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-09-30T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=09/features_ETHUSDT_v1_2022-09.parquet",
+      "rows": 2880,
+      "start_ts": "2022-09-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-10-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=10/features_ETHUSDT_v1_2022-10.parquet",
+      "rows": 2976,
+      "start_ts": "2022-10-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-11-30T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=11/features_ETHUSDT_v1_2022-11.parquet",
+      "rows": 2880,
+      "start_ts": "2022-11-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2022-12-31T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=12/features_ETHUSDT_v1_2022-12.parquet",
+      "rows": 2976,
+      "start_ts": "2022-12-01T00:00:00+00:00",
+      "storage": "parquet"
+    }
+  ],
+  "parameters": {
+    "allow_missing_funding": 0,
+    "force": 0,
+    "symbols": [
+      "BTCUSDT",
+      "ETHUSDT"
+    ],
+    "trade_day_timezone": "UTC"
+  },
+  "run_id": "vsr_long",
+  "stage": "build_features_v1",
+  "started_at": "2026-02-06T02:11:29.931768+00:00",
+  "stats": {
+    "symbols": {
+      "BTCUSDT": {
+        "coverage_end": "2022-12-31T23:45:00+00:00",
+        "coverage_start": "2021-01-01T00:00:00+00:00",
+        "nan_rates": {
+          "logret_1": 0.00014269406392694063,
+          "range_med_480": 0.03284817351598174,
+          "ret_1": 0.00014269406392694063,
+          "rv_96": 0.005565068493150685,
+          "rv_pct_2880": 0.16408390410958903
+        },
+        "partitions_skipped": [],
+        "partitions_written": [
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=01/features_BTCUSDT_v1_2021-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=02/features_BTCUSDT_v1_2021-02.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=03/features_BTCUSDT_v1_2021-03.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=04/features_BTCUSDT_v1_2021-04.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=05/features_BTCUSDT_v1_2021-05.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=06/features_BTCUSDT_v1_2021-06.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=07/features_BTCUSDT_v1_2021-07.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=08/features_BTCUSDT_v1_2021-08.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=09/features_BTCUSDT_v1_2021-09.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=10/features_BTCUSDT_v1_2021-10.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=11/features_BTCUSDT_v1_2021-11.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=12/features_BTCUSDT_v1_2021-12.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=01/features_BTCUSDT_v1_2022-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=02/features_BTCUSDT_v1_2022-02.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=03/features_BTCUSDT_v1_2022-03.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=04/features_BTCUSDT_v1_2022-04.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=05/features_BTCUSDT_v1_2022-05.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=06/features_BTCUSDT_v1_2022-06.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=07/features_BTCUSDT_v1_2022-07.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=08/features_BTCUSDT_v1_2022-08.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=09/features_BTCUSDT_v1_2022-09.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=10/features_BTCUSDT_v1_2022-10.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=11/features_BTCUSDT_v1_2022-11.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2022/month=12/features_BTCUSDT_v1_2022-12.parquet"
+        ],
+        "pct_rows_dropped": 0.16408390410958903,
+        "rows_written": 70080,
+        "segment_stats": {
+          "count": 4,
+          "max": 40882,
+          "median": 13312.0,
+          "min": 2568
+        }
+      },
+      "ETHUSDT": {
+        "coverage_end": "2022-12-31T23:45:00+00:00",
+        "coverage_start": "2021-01-01T00:00:00+00:00",
+        "nan_rates": {
+          "logret_1": 0.00014269406392694063,
+          "range_med_480": 0.03284817351598174,
+          "ret_1": 0.00014269406392694063,
+          "rv_96": 0.005565068493150685,
+          "rv_pct_2880": 0.16408390410958903
+        },
+        "partitions_skipped": [],
+        "partitions_written": [
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=01/features_ETHUSDT_v1_2021-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=02/features_ETHUSDT_v1_2021-02.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=03/features_ETHUSDT_v1_2021-03.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=04/features_ETHUSDT_v1_2021-04.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=05/features_ETHUSDT_v1_2021-05.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=06/features_ETHUSDT_v1_2021-06.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=07/features_ETHUSDT_v1_2021-07.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=08/features_ETHUSDT_v1_2021-08.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=09/features_ETHUSDT_v1_2021-09.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=10/features_ETHUSDT_v1_2021-10.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=11/features_ETHUSDT_v1_2021-11.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=12/features_ETHUSDT_v1_2021-12.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=01/features_ETHUSDT_v1_2022-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=02/features_ETHUSDT_v1_2022-02.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=03/features_ETHUSDT_v1_2022-03.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=04/features_ETHUSDT_v1_2022-04.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=05/features_ETHUSDT_v1_2022-05.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=06/features_ETHUSDT_v1_2022-06.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=07/features_ETHUSDT_v1_2022-07.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=08/features_ETHUSDT_v1_2022-08.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=09/features_ETHUSDT_v1_2022-09.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=10/features_ETHUSDT_v1_2022-10.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=11/features_ETHUSDT_v1_2022-11.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2022/month=12/features_ETHUSDT_v1_2022-12.parquet"
+        ],
+        "pct_rows_dropped": 0.16408390410958903,
+        "rows_written": 70080,
+        "segment_stats": {
+          "count": 4,
+          "max": 40882,
+          "median": 13312.0,
+          "min": 2568
+        }
+      }
+    }
+  },
+  "status": "success"
+}

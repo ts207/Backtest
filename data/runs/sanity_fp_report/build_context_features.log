@@ -1,0 +1,2 @@
+2026-02-05 21:02:16,843 INFO Skipping existing context file for BTCUSDT: /home/tstuv/backtest/Backtest/data/features/context/funding_persistence/BTCUSDT/15m.parquet
+2026-02-05 21:02:16,891 INFO Skipping existing context file for ETHUSDT: /home/tstuv/backtest/Backtest/data/features/context/funding_persistence/ETHUSDT/15m.parquet

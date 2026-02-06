@@ -1,0 +1,77 @@
+{
+  "error": null,
+  "finished_at": "2026-02-06T02:02:18.470888+00:00",
+  "inputs": [],
+  "outputs": [
+    {
+      "end_ts": null,
+      "path": "/home/tstuv/backtest/Backtest/data/runs/sanity_fp_report/engine/strategy_returns_vol_compression_v1.csv",
+      "rows": 2880,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/home/tstuv/backtest/Backtest/data/runs/sanity_fp_report/engine/portfolio_returns.csv",
+      "rows": 1440,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/home/tstuv/backtest/Backtest/data/lake/trades/backtests/vol_compression_expansion_v1/sanity_fp_report/trades_BTCUSDT.csv",
+      "rows": 0,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/home/tstuv/backtest/Backtest/data/lake/trades/backtests/vol_compression_expansion_v1/sanity_fp_report/trades_ETHUSDT.csv",
+      "rows": 0,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/home/tstuv/backtest/Backtest/data/lake/trades/backtests/vol_compression_expansion_v1/sanity_fp_report/metrics.json",
+      "rows": 1,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/home/tstuv/backtest/Backtest/data/lake/trades/backtests/vol_compression_expansion_v1/sanity_fp_report/equity_curve.csv",
+      "rows": 1440,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/home/tstuv/backtest/Backtest/data/lake/trades/backtests/vol_compression_expansion_v1/sanity_fp_report/fee_sensitivity.json",
+      "rows": 5,
+      "start_ts": null
+    }
+  ],
+  "parameters": {
+    "cost_bps": 6.0,
+    "fee_bps_per_side": 4.0,
+    "force": 0,
+    "slippage_bps_per_fill": 2.0,
+    "strategies": [
+      "vol_compression_v1"
+    ],
+    "symbols": [
+      "BTCUSDT",
+      "ETHUSDT"
+    ],
+    "trade_day_timezone": "UTC"
+  },
+  "run_id": "sanity_fp_report",
+  "stage": "backtest_vol_compression_v1",
+  "started_at": "2026-02-06T02:02:17.369327+00:00",
+  "stats": {
+    "symbols": {
+      "BTCUSDT": {
+        "entries": 0
+      },
+      "ETHUSDT": {
+        "entries": 0
+      }
+    }
+  },
+  "status": "success"
+}

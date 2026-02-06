@@ -1,0 +1,257 @@
+{
+  "avg_r": 0.0,
+  "context_segmentation": {
+    "by_active": [
+      {
+        "bars": 2035,
+        "fp_active": 0,
+        "mean_pnl": 0.0,
+        "total_pnl": 0.0
+      },
+      {
+        "bars": 845,
+        "fp_active": 1,
+        "mean_pnl": 0.0,
+        "total_pnl": 0.0
+      }
+    ],
+    "by_age_bucket": [
+      {
+        "bars": 2035,
+        "fp_age_bucket": "inactive",
+        "mean_pnl": 0.0,
+        "total_pnl": 0.0
+      },
+      {
+        "bars": 120,
+        "fp_age_bucket": "0-8",
+        "mean_pnl": 0.0,
+        "total_pnl": 0.0
+      },
+      {
+        "bars": 315,
+        "fp_age_bucket": "9-30",
+        "mean_pnl": 0.0,
+        "total_pnl": 0.0
+      },
+      {
+        "bars": 378,
+        "fp_age_bucket": "31-96",
+        "mean_pnl": 0.0,
+        "total_pnl": 0.0
+      },
+      {
+        "bars": 32,
+        "fp_age_bucket": ">96",
+        "mean_pnl": 0.0,
+        "total_pnl": 0.0
+      }
+    ]
+  },
+  "data_quality": {
+    "symbols": {
+      "BTCUSDT": {
+        "bad_bar_count": {
+          "2021-01": {
+            "bad_bar_count": 0
+          }
+        },
+        "bad_bar_count_total": 0,
+        "effective_end": "2021-01-15T00:00:00+00:00",
+        "effective_start": "2021-01-01T00:00:00+00:00",
+        "funding_missing_pct": 0.0,
+        "funding_rate_scaled_max": 0.00236482,
+        "funding_rate_scaled_min": 0.0001,
+        "funding_rate_scaled_std": 0.0005395974772011541,
+        "funding_scale_used": 1.0,
+        "funding_timestamp_rounded_count": 0,
+        "gap_stats": {
+          "gap_count": 0,
+          "max_gap_len": 0,
+          "pct_missing_ohlcv": 0.0
+        },
+        "partitions_skipped": [
+          "/home/tstuv/backtest/Backtest/data/lake/cleaned/perp/BTCUSDT/bars_15m/year=2021/month=01/bars_BTCUSDT_15m_2021-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/cleaned/perp/BTCUSDT/funding_15m/year=2021/month=01/funding15m_BTCUSDT_2021-01.parquet"
+        ],
+        "partitions_written": [],
+        "pct_bars_with_funding_event": 1.0,
+        "pct_missing_funding_event": {
+          "2021-01": {
+            "funding_event_count": 45,
+            "funding_event_expected": 45,
+            "funding_rate_scaled_std": 0.0005395974772011541,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
+          }
+        },
+        "pct_missing_ohlcv": {
+          "2021-01": {
+            "pct_missing_ohlcv": 0.0
+          }
+        }
+      },
+      "ETHUSDT": {
+        "bad_bar_count": {
+          "2021-01": {
+            "bad_bar_count": 0
+          }
+        },
+        "bad_bar_count_total": 0,
+        "effective_end": "2021-01-15T00:00:00+00:00",
+        "effective_start": "2021-01-01T00:00:00+00:00",
+        "funding_missing_pct": 0.0,
+        "funding_rate_scaled_max": 0.00375,
+        "funding_rate_scaled_min": 0.0001,
+        "funding_rate_scaled_std": 0.00084950404805912,
+        "funding_scale_used": 1.0,
+        "funding_timestamp_rounded_count": 0,
+        "gap_stats": {
+          "gap_count": 0,
+          "max_gap_len": 0,
+          "pct_missing_ohlcv": 0.0
+        },
+        "partitions_skipped": [
+          "/home/tstuv/backtest/Backtest/data/lake/cleaned/perp/ETHUSDT/bars_15m/year=2021/month=01/bars_ETHUSDT_15m_2021-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/cleaned/perp/ETHUSDT/funding_15m/year=2021/month=01/funding15m_ETHUSDT_2021-01.parquet"
+        ],
+        "partitions_written": [],
+        "pct_bars_with_funding_event": 1.0,
+        "pct_missing_funding_event": {
+          "2021-01": {
+            "funding_event_count": 45,
+            "funding_event_expected": 45,
+            "funding_rate_scaled_std": 0.00084950404805912,
+            "pct_funding_event_coverage": 1.0,
+            "pct_missing_funding_event": 0.0
+          }
+        },
+        "pct_missing_ohlcv": {
+          "2021-01": {
+            "pct_missing_ohlcv": 0.0
+          }
+        }
+      }
+    }
+  },
+  "ending_equity": 1000000.0,
+  "engine_diagnostics": {
+    "strategies": {
+      "vol_compression_v1": {
+        "forced_flat_bars": 0,
+        "forced_flat_pct": 0.0,
+        "missing_feature_bars": 2880,
+        "missing_feature_columns": [],
+        "missing_feature_pct": 1.0,
+        "nan_return_bars": 2,
+        "nan_return_pct": 0.0006944444444444445,
+        "total_bars": 2880
+      }
+    }
+  },
+  "feature_quality": {
+    "symbols": {
+      "BTCUSDT": {
+        "coverage_end": "2021-01-15T23:45:00+00:00",
+        "coverage_start": "2021-01-01T00:00:00+00:00",
+        "nan_rates": {
+          "logret_1": 0.0006944444444444445,
+          "range_med_480": 0.39861111111111114,
+          "ret_1": 0.0006944444444444445,
+          "rv_96": 0.06666666666666667,
+          "rv_pct_2880": 1.0
+        },
+        "partitions_skipped": [],
+        "partitions_written": [
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1/year=2021/month=01/features_BTCUSDT_v1_2021-01.parquet"
+        ],
+        "pct_rows_dropped": 1.0,
+        "rows_written": 1440,
+        "segment_stats": {
+          "count": 1,
+          "max": 1440,
+          "median": 1440.0,
+          "min": 1440
+        }
+      },
+      "ETHUSDT": {
+        "coverage_end": "2021-01-15T23:45:00+00:00",
+        "coverage_start": "2021-01-01T00:00:00+00:00",
+        "nan_rates": {
+          "logret_1": 0.0006944444444444445,
+          "range_med_480": 0.39861111111111114,
+          "ret_1": 0.0006944444444444445,
+          "rv_96": 0.06666666666666667,
+          "rv_pct_2880": 1.0
+        },
+        "partitions_skipped": [],
+        "partitions_written": [
+          "/home/tstuv/backtest/Backtest/data/lake/features/perp/ETHUSDT/15m/features_v1/year=2021/month=01/features_ETHUSDT_v1_2021-01.parquet"
+        ],
+        "pct_rows_dropped": 1.0,
+        "rows_written": 1440,
+        "segment_stats": {
+          "count": 1,
+          "max": 1440,
+          "median": 1440.0,
+          "min": 1440
+        }
+      }
+    }
+  },
+  "fee_sensitivity": [
+    {
+      "avg_r": 0.0,
+      "fee_bps_per_side": 0,
+      "max_drawdown": 0.0,
+      "net_return": 0.0,
+      "trades": 0
+    },
+    {
+      "avg_r": 0.0,
+      "fee_bps_per_side": 10,
+      "max_drawdown": 0.0,
+      "net_return": 0.0,
+      "trades": 0
+    },
+    {
+      "avg_r": 0.0,
+      "fee_bps_per_side": 2,
+      "max_drawdown": 0.0,
+      "net_return": 0.0,
+      "trades": 0
+    },
+    {
+      "avg_r": 0.0,
+      "fee_bps_per_side": 5,
+      "max_drawdown": 0.0,
+      "net_return": 0.0,
+      "trades": 0
+    },
+    {
+      "avg_r": 0.0,
+      "fee_bps_per_side": 6.0,
+      "max_drawdown": 0.0,
+      "net_return": 0.0,
+      "trades": 0
+    }
+  ],
+  "max_drawdown": 0.0,
+  "per_symbol": [
+    {
+      "avg_r": 0.0,
+      "index": 0,
+      "symbol": "BTCUSDT",
+      "total_trades": 0
+    },
+    {
+      "avg_r": 0.0,
+      "index": 1,
+      "symbol": "ETHUSDT",
+      "total_trades": 0
+    }
+  ],
+  "run_id": "sanity_fp_report",
+  "total_trades": 0,
+  "win_rate": 0.0
+}

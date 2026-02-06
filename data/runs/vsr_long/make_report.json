@@ -1,0 +1,42 @@
+{
+  "error": null,
+  "finished_at": "2026-02-06T02:12:15.579325+00:00",
+  "inputs": [
+    {
+      "end_ts": null,
+      "path": "/home/tstuv/backtest/Backtest/data/lake/trades/backtests/vol_compression_expansion_v1/vsr_long/metrics.json",
+      "rows": 1,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/home/tstuv/backtest/Backtest/data/lake/trades/backtests/vol_compression_expansion_v1/vsr_long",
+      "rows": 128,
+      "start_ts": null
+    }
+  ],
+  "outputs": [
+    {
+      "end_ts": null,
+      "path": "/home/tstuv/backtest/Backtest/data/reports/vol_compression_expansion_v1/vsr_long/summary.md",
+      "rows": 271,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/home/tstuv/backtest/Backtest/data/reports/vol_compression_expansion_v1/vsr_long/summary.json",
+      "rows": 1,
+      "start_ts": null
+    }
+  ],
+  "parameters": {
+    "out_dir": null,
+    "run_id": "vsr_long",
+    "trade_day_timezone": "UTC"
+  },
+  "run_id": "vsr_long",
+  "stage": "make_report",
+  "started_at": "2026-02-06T02:12:14.831517+00:00",
+  "stats": {},
+  "status": "success"
+}

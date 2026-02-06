@@ -1,0 +1,5 @@
+symbol,outcome,auc_hazard,auc_hazard_control,auc_hazard_delta
+BTCUSDT,range_expansion,1.0,2.2,-1.2
+BTCUSDT,secondary_shock,1.0,0.0,1.0
+ETHUSDT,range_expansion,1.0,1.9166666666666665,-0.9166666666666666
+ETHUSDT,secondary_shock,1.0,0.0,1.0

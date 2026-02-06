@@ -1,0 +1,989 @@
+{
+  "error": null,
+  "finished_at": "2026-02-06T02:36:26.680100+00:00",
+  "inputs": [],
+  "outputs": [
+    {
+      "end_ts": "2020-01-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=01/funding_BTCUSDT_2020-01.parquet",
+      "rows": 93,
+      "start_ts": "2020-01-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-02-29T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=02/funding_BTCUSDT_2020-02.parquet",
+      "rows": 87,
+      "start_ts": "2020-02-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-03-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=03/funding_BTCUSDT_2020-03.parquet",
+      "rows": 93,
+      "start_ts": "2020-03-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-04-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=04/funding_BTCUSDT_2020-04.parquet",
+      "rows": 90,
+      "start_ts": "2020-04-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-05-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=05/funding_BTCUSDT_2020-05.parquet",
+      "rows": 93,
+      "start_ts": "2020-05-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-06-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=06/funding_BTCUSDT_2020-06.parquet",
+      "rows": 90,
+      "start_ts": "2020-06-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-07-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=07/funding_BTCUSDT_2020-07.parquet",
+      "rows": 93,
+      "start_ts": "2020-07-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-08-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=08/funding_BTCUSDT_2020-08.parquet",
+      "rows": 93,
+      "start_ts": "2020-08-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-09-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=09/funding_BTCUSDT_2020-09.parquet",
+      "rows": 90,
+      "start_ts": "2020-09-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-10-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=10/funding_BTCUSDT_2020-10.parquet",
+      "rows": 93,
+      "start_ts": "2020-10-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-11-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=11/funding_BTCUSDT_2020-11.parquet",
+      "rows": 90,
+      "start_ts": "2020-11-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-12-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=12/funding_BTCUSDT_2020-12.parquet",
+      "rows": 93,
+      "start_ts": "2020-12-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-01-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=01/funding_BTCUSDT_2023-01.parquet",
+      "rows": 93,
+      "start_ts": "2023-01-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-02-28T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=02/funding_BTCUSDT_2023-02.parquet",
+      "rows": 84,
+      "start_ts": "2023-02-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-03-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=03/funding_BTCUSDT_2023-03.parquet",
+      "rows": 93,
+      "start_ts": "2023-03-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-04-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=04/funding_BTCUSDT_2023-04.parquet",
+      "rows": 90,
+      "start_ts": "2023-04-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-05-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=05/funding_BTCUSDT_2023-05.parquet",
+      "rows": 93,
+      "start_ts": "2023-05-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-06-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=06/funding_BTCUSDT_2023-06.parquet",
+      "rows": 90,
+      "start_ts": "2023-06-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-07-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=07/funding_BTCUSDT_2023-07.parquet",
+      "rows": 93,
+      "start_ts": "2023-07-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-08-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=08/funding_BTCUSDT_2023-08.parquet",
+      "rows": 93,
+      "start_ts": "2023-08-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-09-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=09/funding_BTCUSDT_2023-09.parquet",
+      "rows": 90,
+      "start_ts": "2023-09-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-10-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=10/funding_BTCUSDT_2023-10.parquet",
+      "rows": 93,
+      "start_ts": "2023-10-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-11-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=11/funding_BTCUSDT_2023-11.parquet",
+      "rows": 90,
+      "start_ts": "2023-11-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-12-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=12/funding_BTCUSDT_2023-12.parquet",
+      "rows": 93,
+      "start_ts": "2023-12-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-01-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=01/funding_BTCUSDT_2024-01.parquet",
+      "rows": 93,
+      "start_ts": "2024-01-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-02-29T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=02/funding_BTCUSDT_2024-02.parquet",
+      "rows": 87,
+      "start_ts": "2024-02-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-03-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=03/funding_BTCUSDT_2024-03.parquet",
+      "rows": 93,
+      "start_ts": "2024-03-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-04-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=04/funding_BTCUSDT_2024-04.parquet",
+      "rows": 90,
+      "start_ts": "2024-04-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-05-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=05/funding_BTCUSDT_2024-05.parquet",
+      "rows": 93,
+      "start_ts": "2024-05-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-06-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=06/funding_BTCUSDT_2024-06.parquet",
+      "rows": 90,
+      "start_ts": "2024-06-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-07-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=07/funding_BTCUSDT_2024-07.parquet",
+      "rows": 93,
+      "start_ts": "2024-07-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-08-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=08/funding_BTCUSDT_2024-08.parquet",
+      "rows": 93,
+      "start_ts": "2024-08-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-09-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=09/funding_BTCUSDT_2024-09.parquet",
+      "rows": 90,
+      "start_ts": "2024-09-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-10-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=10/funding_BTCUSDT_2024-10.parquet",
+      "rows": 93,
+      "start_ts": "2024-10-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-11-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=11/funding_BTCUSDT_2024-11.parquet",
+      "rows": 90,
+      "start_ts": "2024-11-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-12-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=12/funding_BTCUSDT_2024-12.parquet",
+      "rows": 93,
+      "start_ts": "2024-12-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-01-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=01/funding_BTCUSDT_2025-01.parquet",
+      "rows": 93,
+      "start_ts": "2025-01-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-02-28T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=02/funding_BTCUSDT_2025-02.parquet",
+      "rows": 84,
+      "start_ts": "2025-02-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-03-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=03/funding_BTCUSDT_2025-03.parquet",
+      "rows": 93,
+      "start_ts": "2025-03-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-04-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=04/funding_BTCUSDT_2025-04.parquet",
+      "rows": 90,
+      "start_ts": "2025-04-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-05-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=05/funding_BTCUSDT_2025-05.parquet",
+      "rows": 93,
+      "start_ts": "2025-05-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-06-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=06/funding_BTCUSDT_2025-06.parquet",
+      "rows": 90,
+      "start_ts": "2025-06-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-07-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=07/funding_BTCUSDT_2025-07.parquet",
+      "rows": 93,
+      "start_ts": "2025-07-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-08-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=08/funding_BTCUSDT_2025-08.parquet",
+      "rows": 93,
+      "start_ts": "2025-08-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-09-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=09/funding_BTCUSDT_2025-09.parquet",
+      "rows": 90,
+      "start_ts": "2025-09-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-10-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=10/funding_BTCUSDT_2025-10.parquet",
+      "rows": 93,
+      "start_ts": "2025-10-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-11-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=11/funding_BTCUSDT_2025-11.parquet",
+      "rows": 90,
+      "start_ts": "2025-11-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-12-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=12/funding_BTCUSDT_2025-12.parquet",
+      "rows": 93,
+      "start_ts": "2025-12-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-01-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=01/funding_ETHUSDT_2020-01.parquet",
+      "rows": 93,
+      "start_ts": "2020-01-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-02-29T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=02/funding_ETHUSDT_2020-02.parquet",
+      "rows": 87,
+      "start_ts": "2020-02-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-03-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=03/funding_ETHUSDT_2020-03.parquet",
+      "rows": 93,
+      "start_ts": "2020-03-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-04-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=04/funding_ETHUSDT_2020-04.parquet",
+      "rows": 90,
+      "start_ts": "2020-04-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-05-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=05/funding_ETHUSDT_2020-05.parquet",
+      "rows": 93,
+      "start_ts": "2020-05-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-06-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=06/funding_ETHUSDT_2020-06.parquet",
+      "rows": 90,
+      "start_ts": "2020-06-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-07-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=07/funding_ETHUSDT_2020-07.parquet",
+      "rows": 93,
+      "start_ts": "2020-07-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-08-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=08/funding_ETHUSDT_2020-08.parquet",
+      "rows": 93,
+      "start_ts": "2020-08-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-09-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=09/funding_ETHUSDT_2020-09.parquet",
+      "rows": 90,
+      "start_ts": "2020-09-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-10-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=10/funding_ETHUSDT_2020-10.parquet",
+      "rows": 93,
+      "start_ts": "2020-10-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-11-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=11/funding_ETHUSDT_2020-11.parquet",
+      "rows": 90,
+      "start_ts": "2020-11-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2020-12-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=12/funding_ETHUSDT_2020-12.parquet",
+      "rows": 93,
+      "start_ts": "2020-12-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-01-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=01/funding_ETHUSDT_2023-01.parquet",
+      "rows": 93,
+      "start_ts": "2023-01-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-02-28T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=02/funding_ETHUSDT_2023-02.parquet",
+      "rows": 84,
+      "start_ts": "2023-02-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-03-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=03/funding_ETHUSDT_2023-03.parquet",
+      "rows": 93,
+      "start_ts": "2023-03-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-04-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=04/funding_ETHUSDT_2023-04.parquet",
+      "rows": 90,
+      "start_ts": "2023-04-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-05-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=05/funding_ETHUSDT_2023-05.parquet",
+      "rows": 93,
+      "start_ts": "2023-05-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-06-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=06/funding_ETHUSDT_2023-06.parquet",
+      "rows": 90,
+      "start_ts": "2023-06-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-07-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=07/funding_ETHUSDT_2023-07.parquet",
+      "rows": 93,
+      "start_ts": "2023-07-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-08-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=08/funding_ETHUSDT_2023-08.parquet",
+      "rows": 93,
+      "start_ts": "2023-08-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-09-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=09/funding_ETHUSDT_2023-09.parquet",
+      "rows": 90,
+      "start_ts": "2023-09-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-10-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=10/funding_ETHUSDT_2023-10.parquet",
+      "rows": 93,
+      "start_ts": "2023-10-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-11-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=11/funding_ETHUSDT_2023-11.parquet",
+      "rows": 90,
+      "start_ts": "2023-11-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2023-12-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=12/funding_ETHUSDT_2023-12.parquet",
+      "rows": 93,
+      "start_ts": "2023-12-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-01-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=01/funding_ETHUSDT_2024-01.parquet",
+      "rows": 93,
+      "start_ts": "2024-01-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-02-29T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=02/funding_ETHUSDT_2024-02.parquet",
+      "rows": 87,
+      "start_ts": "2024-02-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-03-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=03/funding_ETHUSDT_2024-03.parquet",
+      "rows": 93,
+      "start_ts": "2024-03-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-04-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=04/funding_ETHUSDT_2024-04.parquet",
+      "rows": 90,
+      "start_ts": "2024-04-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-05-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=05/funding_ETHUSDT_2024-05.parquet",
+      "rows": 93,
+      "start_ts": "2024-05-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-06-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=06/funding_ETHUSDT_2024-06.parquet",
+      "rows": 90,
+      "start_ts": "2024-06-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-07-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=07/funding_ETHUSDT_2024-07.parquet",
+      "rows": 93,
+      "start_ts": "2024-07-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-08-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=08/funding_ETHUSDT_2024-08.parquet",
+      "rows": 93,
+      "start_ts": "2024-08-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-09-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=09/funding_ETHUSDT_2024-09.parquet",
+      "rows": 90,
+      "start_ts": "2024-09-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-10-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=10/funding_ETHUSDT_2024-10.parquet",
+      "rows": 93,
+      "start_ts": "2024-10-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-11-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=11/funding_ETHUSDT_2024-11.parquet",
+      "rows": 90,
+      "start_ts": "2024-11-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2024-12-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=12/funding_ETHUSDT_2024-12.parquet",
+      "rows": 93,
+      "start_ts": "2024-12-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-01-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=01/funding_ETHUSDT_2025-01.parquet",
+      "rows": 93,
+      "start_ts": "2025-01-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-02-28T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=02/funding_ETHUSDT_2025-02.parquet",
+      "rows": 84,
+      "start_ts": "2025-02-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-03-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=03/funding_ETHUSDT_2025-03.parquet",
+      "rows": 93,
+      "start_ts": "2025-03-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-04-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=04/funding_ETHUSDT_2025-04.parquet",
+      "rows": 90,
+      "start_ts": "2025-04-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-05-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=05/funding_ETHUSDT_2025-05.parquet",
+      "rows": 93,
+      "start_ts": "2025-05-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-06-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=06/funding_ETHUSDT_2025-06.parquet",
+      "rows": 90,
+      "start_ts": "2025-06-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-07-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=07/funding_ETHUSDT_2025-07.parquet",
+      "rows": 93,
+      "start_ts": "2025-07-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-08-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=08/funding_ETHUSDT_2025-08.parquet",
+      "rows": 93,
+      "start_ts": "2025-08-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-09-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=09/funding_ETHUSDT_2025-09.parquet",
+      "rows": 90,
+      "start_ts": "2025-09-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-10-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=10/funding_ETHUSDT_2025-10.parquet",
+      "rows": 93,
+      "start_ts": "2025-10-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-11-30T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=11/funding_ETHUSDT_2025-11.parquet",
+      "rows": 90,
+      "start_ts": "2025-11-01T00:00:00+00:00",
+      "storage": "parquet"
+    },
+    {
+      "end_ts": "2025-12-31T16:00:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=12/funding_ETHUSDT_2025-12.parquet",
+      "rows": 93,
+      "start_ts": "2025-12-01T00:00:00+00:00",
+      "storage": "parquet"
+    }
+  ],
+  "parameters": {
+    "api_base_url": "https://fapi.binance.com",
+    "api_limit": 1000,
+    "api_sleep_sec": 0.2,
+    "effective_end": "2025-12-31T00:00:00+00:00",
+    "effective_start": "2020-01-01T00:00:00+00:00",
+    "force": 0,
+    "max_retries": 5,
+    "out_root": "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp",
+    "requested_end": "2025-12-31",
+    "requested_start": "2020-01-01",
+    "retry_backoff_sec": 2.0,
+    "symbols": [
+      "BTCUSDT",
+      "ETHUSDT"
+    ],
+    "use_api_fallback": 1
+  },
+  "run_id": "run_2020_2025",
+  "stage": "ingest_binance_um_funding",
+  "started_at": "2026-02-06T02:35:42.278695+00:00",
+  "stats": {
+    "symbols": {
+      "BTCUSDT": {
+        "api_calls": 0,
+        "api_coverage_end": null,
+        "api_coverage_start": null,
+        "archive_files_downloaded": [
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2020-01.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2020-02.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2020-03.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2020-04.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2020-05.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2020-06.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2020-07.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2020-08.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2020-09.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2020-10.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2020-11.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2020-12.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2023-01.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2023-02.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2023-03.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2023-04.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2023-05.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2023-06.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2023-07.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2023-08.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2023-09.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2023-10.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2023-11.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2023-12.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2024-01.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2024-02.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2024-03.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2024-04.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2024-05.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2024-06.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2024-07.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2024-08.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2024-09.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2024-10.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2024-11.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2024-12.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2025-01.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2025-02.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2025-03.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2025-04.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2025-05.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2025-06.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2025-07.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2025-08.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2025-09.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2025-10.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2025-11.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2025-12.zip"
+        ],
+        "coverage_end": "2025-12-31T16:00:00+00:00",
+        "coverage_start": "2020-01-01T00:00:00+00:00",
+        "effective_end": "2025-12-31T00:00:00+00:00",
+        "effective_start": "2020-01-01T00:00:00+00:00",
+        "expected_count": 6576,
+        "got_count": 6576,
+        "missing_archive_files": [],
+        "missing_count": 0,
+        "missing_timestamps_preview": [],
+        "partitions_skipped": [
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2021/month=01/funding_BTCUSDT_2021-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2021/month=02/funding_BTCUSDT_2021-02.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2021/month=03/funding_BTCUSDT_2021-03.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2021/month=04/funding_BTCUSDT_2021-04.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2021/month=05/funding_BTCUSDT_2021-05.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2021/month=06/funding_BTCUSDT_2021-06.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2021/month=07/funding_BTCUSDT_2021-07.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2021/month=08/funding_BTCUSDT_2021-08.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2021/month=09/funding_BTCUSDT_2021-09.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2021/month=10/funding_BTCUSDT_2021-10.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2021/month=11/funding_BTCUSDT_2021-11.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2021/month=12/funding_BTCUSDT_2021-12.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2022/month=01/funding_BTCUSDT_2022-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2022/month=02/funding_BTCUSDT_2022-02.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2022/month=03/funding_BTCUSDT_2022-03.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2022/month=04/funding_BTCUSDT_2022-04.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2022/month=05/funding_BTCUSDT_2022-05.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2022/month=06/funding_BTCUSDT_2022-06.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2022/month=07/funding_BTCUSDT_2022-07.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2022/month=08/funding_BTCUSDT_2022-08.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2022/month=09/funding_BTCUSDT_2022-09.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2022/month=10/funding_BTCUSDT_2022-10.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2022/month=11/funding_BTCUSDT_2022-11.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2022/month=12/funding_BTCUSDT_2022-12.parquet"
+        ],
+        "partitions_written": [
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=01/funding_BTCUSDT_2020-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=02/funding_BTCUSDT_2020-02.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=03/funding_BTCUSDT_2020-03.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=04/funding_BTCUSDT_2020-04.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=05/funding_BTCUSDT_2020-05.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=06/funding_BTCUSDT_2020-06.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=07/funding_BTCUSDT_2020-07.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=08/funding_BTCUSDT_2020-08.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=09/funding_BTCUSDT_2020-09.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=10/funding_BTCUSDT_2020-10.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=11/funding_BTCUSDT_2020-11.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2020/month=12/funding_BTCUSDT_2020-12.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=01/funding_BTCUSDT_2023-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=02/funding_BTCUSDT_2023-02.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=03/funding_BTCUSDT_2023-03.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=04/funding_BTCUSDT_2023-04.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=05/funding_BTCUSDT_2023-05.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=06/funding_BTCUSDT_2023-06.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=07/funding_BTCUSDT_2023-07.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=08/funding_BTCUSDT_2023-08.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=09/funding_BTCUSDT_2023-09.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=10/funding_BTCUSDT_2023-10.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=11/funding_BTCUSDT_2023-11.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2023/month=12/funding_BTCUSDT_2023-12.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=01/funding_BTCUSDT_2024-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=02/funding_BTCUSDT_2024-02.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=03/funding_BTCUSDT_2024-03.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=04/funding_BTCUSDT_2024-04.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=05/funding_BTCUSDT_2024-05.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=06/funding_BTCUSDT_2024-06.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=07/funding_BTCUSDT_2024-07.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=08/funding_BTCUSDT_2024-08.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=09/funding_BTCUSDT_2024-09.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=10/funding_BTCUSDT_2024-10.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=11/funding_BTCUSDT_2024-11.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2024/month=12/funding_BTCUSDT_2024-12.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=01/funding_BTCUSDT_2025-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=02/funding_BTCUSDT_2025-02.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=03/funding_BTCUSDT_2025-03.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=04/funding_BTCUSDT_2025-04.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=05/funding_BTCUSDT_2025-05.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=06/funding_BTCUSDT_2025-06.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=07/funding_BTCUSDT_2025-07.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=08/funding_BTCUSDT_2025-08.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=09/funding_BTCUSDT_2025-09.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=10/funding_BTCUSDT_2025-10.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=11/funding_BTCUSDT_2025-11.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/funding/year=2025/month=12/funding_BTCUSDT_2025-12.parquet"
+        ],
+        "requested_end": "2025-12-31",
+        "requested_start": "2020-01-01"
+      },
+      "ETHUSDT": {
+        "api_calls": 0,
+        "api_coverage_end": null,
+        "api_coverage_start": null,
+        "archive_files_downloaded": [
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2020-01.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2020-02.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2020-03.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2020-04.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2020-05.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2020-06.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2020-07.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2020-08.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2020-09.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2020-10.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2020-11.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2020-12.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2023-01.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2023-02.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2023-03.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2023-04.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2023-05.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2023-06.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2023-07.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2023-08.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2023-09.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2023-10.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2023-11.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2023-12.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2024-01.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2024-02.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2024-03.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2024-04.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2024-05.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2024-06.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2024-07.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2024-08.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2024-09.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2024-10.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2024-11.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2024-12.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2025-01.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2025-02.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2025-03.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2025-04.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2025-05.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2025-06.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2025-07.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2025-08.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2025-09.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2025-10.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2025-11.zip",
+          "https://data.binance.vision/data/futures/um/monthly/fundingRate/ETHUSDT/ETHUSDT-fundingRate-2025-12.zip"
+        ],
+        "coverage_end": "2025-12-31T16:00:00+00:00",
+        "coverage_start": "2020-01-01T00:00:00+00:00",
+        "effective_end": "2025-12-31T00:00:00+00:00",
+        "effective_start": "2020-01-01T00:00:00+00:00",
+        "expected_count": 6576,
+        "got_count": 6576,
+        "missing_archive_files": [],
+        "missing_count": 0,
+        "missing_timestamps_preview": [],
+        "partitions_skipped": [
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2021/month=01/funding_ETHUSDT_2021-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2021/month=02/funding_ETHUSDT_2021-02.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2021/month=03/funding_ETHUSDT_2021-03.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2021/month=04/funding_ETHUSDT_2021-04.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2021/month=05/funding_ETHUSDT_2021-05.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2021/month=06/funding_ETHUSDT_2021-06.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2021/month=07/funding_ETHUSDT_2021-07.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2021/month=08/funding_ETHUSDT_2021-08.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2021/month=09/funding_ETHUSDT_2021-09.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2021/month=10/funding_ETHUSDT_2021-10.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2021/month=11/funding_ETHUSDT_2021-11.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2021/month=12/funding_ETHUSDT_2021-12.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2022/month=01/funding_ETHUSDT_2022-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2022/month=02/funding_ETHUSDT_2022-02.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2022/month=03/funding_ETHUSDT_2022-03.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2022/month=04/funding_ETHUSDT_2022-04.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2022/month=05/funding_ETHUSDT_2022-05.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2022/month=06/funding_ETHUSDT_2022-06.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2022/month=07/funding_ETHUSDT_2022-07.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2022/month=08/funding_ETHUSDT_2022-08.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2022/month=09/funding_ETHUSDT_2022-09.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2022/month=10/funding_ETHUSDT_2022-10.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2022/month=11/funding_ETHUSDT_2022-11.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2022/month=12/funding_ETHUSDT_2022-12.parquet"
+        ],
+        "partitions_written": [
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=01/funding_ETHUSDT_2020-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=02/funding_ETHUSDT_2020-02.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=03/funding_ETHUSDT_2020-03.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=04/funding_ETHUSDT_2020-04.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=05/funding_ETHUSDT_2020-05.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=06/funding_ETHUSDT_2020-06.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=07/funding_ETHUSDT_2020-07.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=08/funding_ETHUSDT_2020-08.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=09/funding_ETHUSDT_2020-09.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=10/funding_ETHUSDT_2020-10.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=11/funding_ETHUSDT_2020-11.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2020/month=12/funding_ETHUSDT_2020-12.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=01/funding_ETHUSDT_2023-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=02/funding_ETHUSDT_2023-02.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=03/funding_ETHUSDT_2023-03.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=04/funding_ETHUSDT_2023-04.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=05/funding_ETHUSDT_2023-05.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=06/funding_ETHUSDT_2023-06.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=07/funding_ETHUSDT_2023-07.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=08/funding_ETHUSDT_2023-08.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=09/funding_ETHUSDT_2023-09.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=10/funding_ETHUSDT_2023-10.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=11/funding_ETHUSDT_2023-11.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2023/month=12/funding_ETHUSDT_2023-12.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=01/funding_ETHUSDT_2024-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=02/funding_ETHUSDT_2024-02.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=03/funding_ETHUSDT_2024-03.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=04/funding_ETHUSDT_2024-04.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=05/funding_ETHUSDT_2024-05.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=06/funding_ETHUSDT_2024-06.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=07/funding_ETHUSDT_2024-07.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=08/funding_ETHUSDT_2024-08.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=09/funding_ETHUSDT_2024-09.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=10/funding_ETHUSDT_2024-10.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=11/funding_ETHUSDT_2024-11.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2024/month=12/funding_ETHUSDT_2024-12.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=01/funding_ETHUSDT_2025-01.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=02/funding_ETHUSDT_2025-02.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=03/funding_ETHUSDT_2025-03.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=04/funding_ETHUSDT_2025-04.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=05/funding_ETHUSDT_2025-05.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=06/funding_ETHUSDT_2025-06.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=07/funding_ETHUSDT_2025-07.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=08/funding_ETHUSDT_2025-08.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=09/funding_ETHUSDT_2025-09.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=10/funding_ETHUSDT_2025-10.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=11/funding_ETHUSDT_2025-11.parquet",
+          "/home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/funding/year=2025/month=12/funding_ETHUSDT_2025-12.parquet"
+        ],
+        "requested_end": "2025-12-31",
+        "requested_start": "2020-01-01"
+      }
+    }
+  },
+  "status": "success"
+}

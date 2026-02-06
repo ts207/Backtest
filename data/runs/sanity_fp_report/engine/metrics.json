@@ -1,0 +1,29 @@
+{
+  "diagnostics": {
+    "strategies": {
+      "vol_compression_v1": {
+        "forced_flat_bars": 0,
+        "forced_flat_pct": 0.0,
+        "missing_feature_bars": 2880,
+        "missing_feature_columns": [],
+        "missing_feature_pct": 1.0,
+        "nan_return_bars": 2,
+        "nan_return_pct": 0.0006944444444444445,
+        "total_bars": 2880
+      }
+    }
+  },
+  "portfolio": {
+    "mean_pnl": 0.0,
+    "std_pnl": 0.0,
+    "total_pnl": 0.0
+  },
+  "strategies": {
+    "vol_compression_v1": {
+      "entries": 0,
+      "mean_pnl": 0.0,
+      "std_pnl": 0.0,
+      "total_pnl": 0.0
+    }
+  }
+}

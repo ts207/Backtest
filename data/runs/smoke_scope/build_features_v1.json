@@ -1,0 +1,66 @@
+{
+  "error": null,
+  "finished_at": "2026-02-06T02:59:17.001616+00:00",
+  "inputs": [
+    {
+      "end_ts": "2021-01-03T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/runs/smoke_scope/cleaned/perp/BTCUSDT/bars_15m",
+      "rows": 288,
+      "start_ts": "2021-01-01T00:00:00+00:00"
+    },
+    {
+      "end_ts": "2021-01-03T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/runs/smoke_scope/cleaned/perp/BTCUSDT/funding_15m",
+      "rows": 288,
+      "start_ts": "2021-01-01T00:00:00+00:00"
+    }
+  ],
+  "outputs": [
+    {
+      "end_ts": "2021-01-03T23:45:00+00:00",
+      "path": "/home/tstuv/backtest/Backtest/data/lake/runs/smoke_scope/features/perp/BTCUSDT/15m/features_v1/year=2021/month=01/features_BTCUSDT_v1_2021-01.parquet",
+      "rows": 288,
+      "start_ts": "2021-01-01T00:00:00+00:00",
+      "storage": "parquet"
+    }
+  ],
+  "parameters": {
+    "allow_missing_funding": 0,
+    "force": 0,
+    "symbols": [
+      "BTCUSDT"
+    ],
+    "trade_day_timezone": "UTC"
+  },
+  "run_id": "smoke_scope",
+  "stage": "build_features_v1",
+  "started_at": "2026-02-06T02:59:16.963350+00:00",
+  "stats": {
+    "symbols": {
+      "BTCUSDT": {
+        "coverage_end": "2021-01-03T23:45:00+00:00",
+        "coverage_start": "2021-01-01T00:00:00+00:00",
+        "nan_rates": {
+          "logret_1": 0.003472222222222222,
+          "range_med_480": 1.0,
+          "ret_1": 0.003472222222222222,
+          "rv_96": 0.3333333333333333,
+          "rv_pct_2880": 1.0
+        },
+        "partitions_skipped": [],
+        "partitions_written": [
+          "/home/tstuv/backtest/Backtest/data/lake/runs/smoke_scope/features/perp/BTCUSDT/15m/features_v1/year=2021/month=01/features_BTCUSDT_v1_2021-01.parquet"
+        ],
+        "pct_rows_dropped": 1.0,
+        "rows_written": 288,
+        "segment_stats": {
+          "count": 1,
+          "max": 288,
+          "median": 288.0,
+          "min": 288
+        }
+      }
+    }
+  },
+  "status": "success"
+}

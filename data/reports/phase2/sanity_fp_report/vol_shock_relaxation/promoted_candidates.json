@@ -1,0 +1,9 @@
+{
+  "run_id": "sanity_fp_report",
+  "event_type": "vol_shock_relaxation",
+  "decision": "freeze",
+  "phase1_pass": false,
+  "phase1_decision": "freeze",
+  "promoted_count": 0,
+  "candidates": []
+}
