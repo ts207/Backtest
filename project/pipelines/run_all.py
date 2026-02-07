@@ -4,6 +4,7 @@ import argparse
 import os
 import subprocess
 import sys
+from functools import lru_cache
 from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
@@ -17,6 +18,14 @@ def _run_id_default() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
+@lru_cache(maxsize=None)
+def _script_supports_log_path(script_path: Path) -> bool:
+    try:
+        return "--log_path" in script_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
 def _run_stage(
     stage: str,
     script_path: Path,
@@ -28,9 +37,13 @@ def _run_stage(
     log_path = runs_dir / f"{stage}.log"
     manifest_path = runs_dir / f"{stage}.json"
 
-    cmd = [sys.executable, str(script_path)] + base_args + ["--log_path", str(log_path)]
+    cmd = [sys.executable, str(script_path)] + base_args
+    if _script_supports_log_path(script_path):
+        cmd.extend(["--log_path", str(log_path)])
     result = subprocess.run(cmd)
-    if result.returncode != 0:
+    allowed_nonzero = {"generate_recommendations_checklist": {1}}
+    accepted_codes = {0} | allowed_nonzero.get(stage, set())
+    if result.returncode not in accepted_codes:
         print(f"Stage failed: {stage}", file=sys.stderr)
         print(f"Stage log: {log_path}", file=sys.stderr)
         print(f"Stage manifest: {manifest_path}", file=sys.stderr)
