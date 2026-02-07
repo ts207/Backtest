@@ -7,6 +7,9 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "project"))
+
+from pipelines.research.phase2_conditional_hypotheses import ActionSpec, ConditionSpec, _evaluate_candidate
 
 
 def _write_phase1_fixture(tmp_path: Path, run_id: str) -> None:
@@ -147,3 +150,69 @@ def test_phase2_simplicity_gate_blocks_when_caps_exceeded(tmp_path: Path) -> Non
     candidates = pd.read_csv(out_dir / "phase2_candidates.csv")
     if not candidates.empty:
         assert (candidates["gate_e_simplicity"] == False).all()  # noqa: E712
+
+
+def _candidate_subframe(opportunity_value_excess: float = 0.03) -> pd.DataFrame:
+    n = 64
+    return pd.DataFrame(
+        {
+            "year": [2022] * (n // 2) + [2023] * (n // 2),
+            "symbol": ["BTCUSDT"] * n,
+            "vol_regime": ["high"] * n,
+            "baseline_mode": ["matched_controls_excess"] * n,
+            "adverse_proxy_excess": [0.02] * n,
+            "opportunity_value_excess": [opportunity_value_excess] * n,
+            "forward_abs_return_h": [opportunity_value_excess] * n,
+            "time_to_secondary_shock": [12.0] * n,
+            "rv_decay_half_life": [20.0] * n,
+        }
+    )
+
+
+def test_phase2_blocks_full_exposure_cut_when_opportunity_cost_not_near_zero() -> None:
+    sub = _candidate_subframe(opportunity_value_excess=0.03)
+    condition = ConditionSpec("all", "all", lambda d: pd.Series(True, index=d.index))
+    action = ActionSpec("risk_throttle_0", "risk_throttle", {"k": 0.0})
+
+    result = _evaluate_candidate(
+        sub=sub,
+        condition=condition,
+        action=action,
+        bootstrap_iters=200,
+        seed=7,
+        cost_floor=0.0,
+        tail_material_threshold=0.0,
+        opportunity_tight_eps=0.0001,
+        opportunity_near_zero_eps=0.001,
+        net_benefit_floor=0.0,
+        simplicity_gate=True,
+    )
+
+    assert result["delta_exposure_mean"] <= -0.9
+    assert result["opportunity_cost_mean"] > 0.001
+    assert result["gate_f_exposure_guard"] is False
+    assert "gate_f_exposure_guard" in result["fail_reasons"]
+
+
+def test_phase2_net_benefit_gate_blocks_negative_economics() -> None:
+    sub = _candidate_subframe(opportunity_value_excess=0.03)
+    condition = ConditionSpec("all", "all", lambda d: pd.Series(True, index=d.index))
+    action = ActionSpec("delay_8", "timing", {"delay_bars": 8})
+
+    result = _evaluate_candidate(
+        sub=sub,
+        condition=condition,
+        action=action,
+        bootstrap_iters=200,
+        seed=11,
+        cost_floor=0.0,
+        tail_material_threshold=0.0,
+        opportunity_tight_eps=0.005,
+        opportunity_near_zero_eps=0.001,
+        net_benefit_floor=0.0,
+        simplicity_gate=True,
+    )
+
+    assert result["net_benefit_mean"] < 0.0
+    assert result["gate_g_net_benefit"] is False
+    assert "gate_g_net_benefit" in result["fail_reasons"]
