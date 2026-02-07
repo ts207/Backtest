@@ -69,6 +69,7 @@ def main() -> int:
     parser.add_argument("--run_phase1_aftershock", type=int, default=0)
     parser.add_argument("--aftershock_window_start", type=int, default=0)
     parser.add_argument("--aftershock_window_end", type=int, default=96)
+    parser.add_argument("--run_recommendations_checklist", type=int, default=1)
     args = parser.parse_args()
 
     run_id = args.run_id or _run_id_default()
@@ -196,6 +197,14 @@ def main() -> int:
         ]
     )
 
+    if int(args.run_recommendations_checklist):
+        stages.append(
+            (
+                "generate_recommendations_checklist",
+                PROJECT_ROOT / "pipelines" / "research" / "generate_recommendations_checklist.py",
+                ["--run_id", run_id],
+            )
+        )
 
     if int(args.run_phase1_aftershock):
         phase1_aftershock_stage = [

@@ -46,3 +46,61 @@ def test_run_all_includes_phase2_chain_when_enabled(monkeypatch) -> None:
     assert "--max_conditions" in phase2_args
     assert "--max_actions" in phase2_args
     assert "--require_phase1_pass" in phase2_args
+
+
+def test_run_all_includes_recommendations_checklist_by_default(monkeypatch) -> None:
+    captured = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append(stage)
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_checklist",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+        ],
+    )
+
+    assert run_all.main() == 0
+    assert "generate_recommendations_checklist" in captured
+
+
+def test_run_all_can_disable_recommendations_checklist(monkeypatch) -> None:
+    captured = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append(stage)
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_no_checklist",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_recommendations_checklist",
+            "0",
+        ],
+    )
+
+    assert run_all.main() == 0
+    assert "generate_recommendations_checklist" not in captured
