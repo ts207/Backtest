@@ -68,6 +68,10 @@ def test_funding_api_fallback_is_persisted(monkeypatch, tmp_path: Path) -> None:
 
     saved = read_parquet(files)
     saved["timestamp"] = pd.to_datetime(saved["timestamp"], utc=True)
+    assert {"timestamp", "funding_rate", "symbol", "source"}.issubset(set(saved.columns))
+    assert isinstance(saved["timestamp"].dtype, pd.DatetimeTZDtype)
+    assert pd.api.types.is_numeric_dtype(saved["funding_rate"])
+
     assert len(saved) == 3
     assert set(saved["source"].astype(str)) == {"api"}
     assert set(saved["timestamp"]) == set(
@@ -82,6 +86,8 @@ def test_funding_api_fallback_is_persisted(monkeypatch, tmp_path: Path) -> None:
 
     manifest = json.loads((tmp_path / "runs" / "funding_api_fallback" / "ingest_binance_um_funding.json").read_text())
     stats = manifest["stats"]["symbols"]["BTCUSDT"]
+    for key in ["requested_start", "requested_end", "effective_start", "effective_end", "partitions_written", "partitions_skipped"]:
+        assert key in stats
     assert stats["got_count"] == 3
     assert stats["missing_count"] == 0
     assert stats["api_calls"] == 1

@@ -5,6 +5,11 @@
 - Install dependencies: `python3 -m pip install -r requirements.txt`
 - Optional: create a virtual environment in `.venv` before installing
 
+## Dependency compatibility policy
+- CI/local validation target is `python3 -m pytest -q` and should remain green before/after dependency upgrades.
+- For pandas upgrades, warning-sensitive paths are guarded by `tests/test_warning_hardening.py`.
+- If a dependency bump introduces deprecation/future warnings in touched modules, treat that as a blocking issue and harden the path before merging.
+
 ## Data root
 By default, all data, runs, and reports live under `data/` at the repo root.
 To change this location, set `BACKTEST_DATA_ROOT` to an absolute path before running.

@@ -445,9 +445,12 @@ def main() -> int:
                     api_coverage_start = api_data["timestamp"].min().isoformat()
                     api_coverage_end = api_data["timestamp"].max().isoformat()
 
-            combined = pd.concat([archive_data, api_data], ignore_index=True)
-            if not combined.empty:
+            frames_to_merge = [f for f in (archive_data, api_data) if not f.empty]
+            if frames_to_merge:
+                combined = pd.concat(frames_to_merge, ignore_index=True)
                 combined = combined.sort_values("timestamp").drop_duplicates(subset=["timestamp"], keep="first")
+            else:
+                combined = pd.DataFrame(columns=["timestamp", "funding_rate", "symbol", "source"])
 
             # Persist final per-month coverage (archive + API fallback) for downstream stages.
             for spec in month_specs:
