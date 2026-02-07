@@ -331,11 +331,13 @@ def main() -> int:
 
         metrics_path = trades_dir / "metrics.json"
         if portfolio.empty:
+            net_total_return = 0.0
             ending_equity = INITIAL_EQUITY
             max_drawdown = 0.0
             sharpe_annualized = 0.0
         else:
             cumulative_return = portfolio["portfolio_pnl"].cumsum()
+            net_total_return = float(cumulative_return.iloc[-1])
             equity_series = INITIAL_EQUITY * (1.0 + cumulative_return)
             ending_equity = float(equity_series.iloc[-1])
             max_drawdown = _compute_drawdown(equity_series)
@@ -344,6 +346,7 @@ def main() -> int:
             "total_trades": total_trades,
             "win_rate": win_rate,
             "avg_r": avg_r,
+            "net_total_return": net_total_return,
             "max_drawdown": max_drawdown,
             "ending_equity": ending_equity,
             "sharpe_annualized": sharpe_annualized,

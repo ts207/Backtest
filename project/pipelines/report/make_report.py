@@ -209,6 +209,10 @@ def main() -> int:
         metrics_win_rate = float(metrics.get("win_rate", 0.0) or 0.0)
         ending_equity = float(metrics.get("ending_equity", 0.0) or 0.0)
         metrics_sharpe = float(metrics.get("sharpe_annualized", 0.0) or 0.0)
+        metrics_net_total_return = metrics.get("net_total_return")
+        if metrics_net_total_return is None:
+            metrics_net_total_return = (ending_equity / 1_000_000.0) - 1.0 if ending_equity else 0.0
+        metrics_net_total_return = float(metrics_net_total_return)
 
         if trades.empty and not fallback_per_symbol.empty:
             per_symbol_trades = fallback_per_symbol
@@ -254,6 +258,7 @@ def main() -> int:
             f"- Total trades (combined): {total_trades}",
             f"- Win rate (combined): {metrics_win_rate:.2%}",
             f"- Avg R (combined): {avg_r_total:.2f}",
+            f"- Net total return (combined): {metrics_net_total_return:.2%}",
             f"- Ending equity (combined): {ending_equity:,.2f}",
             f"- Max drawdown (combined): {drawdown_display}",
             f"- Sharpe (annualized): {metrics_sharpe:.2f}",
@@ -379,6 +384,8 @@ def main() -> int:
             "total_trades": total_trades,
             "win_rate": metrics_win_rate,
             "avg_r": avg_r_total,
+            "objective": {"target_metric": "net_total_return"},
+            "net_total_return": metrics_net_total_return,
             "ending_equity": ending_equity,
             "max_drawdown": max_drawdown,
             "per_symbol": per_symbol_trades.reset_index().to_dict(orient="records") if not per_symbol_trades.empty else [],

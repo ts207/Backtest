@@ -173,6 +173,26 @@ def test_run_engine_prefers_run_scoped_inputs(tmp_path: Path) -> None:
     assert len(frame) == 6
 
 
+
+
+def test_run_engine_mixed_run_scoped_and_fallback_inputs(tmp_path: Path) -> None:
+    _write_fixture(tmp_path, symbol="BTCUSDT", periods=10)
+    _write_fixture(tmp_path, symbol="ETHUSDT", periods=10)
+    _write_fixture(tmp_path, symbol="BTCUSDT", periods=6, run_id="run_mixed")
+
+    result = run_engine(
+        run_id="run_mixed",
+        symbols=["BTCUSDT", "ETHUSDT"],
+        strategies=["vol_compression_v1"],
+        params={"trade_day_timezone": "UTC", "one_trade_per_day": True},
+        cost_bps=6.0,
+        data_root=tmp_path,
+    )
+    frame = result["strategy_frames"]["vol_compression_v1"]
+    by_symbol = frame.groupby("symbol").size().to_dict()
+    assert by_symbol["BTCUSDT"] == 6
+    assert by_symbol["ETHUSDT"] == 10
+
 def test_backtest_pipeline_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_fixture(tmp_path)
     monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
@@ -211,7 +231,15 @@ def test_backtest_pipeline_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     metrics = json.loads((engine_dir / "metrics.json").read_text())
     assert "portfolio" in metrics
 
+    strategy_returns = pd.read_csv(engine_dir / "strategy_returns_vol_compression_v1.csv")
+    expected_cols = {"timestamp", "symbol", "pos", "ret", "pnl", "fp_active", "fp_age_bars", "fp_norm_due"}
+    assert expected_cols.issubset(set(strategy_returns.columns))
+    assert pd.api.types.is_integer_dtype(strategy_returns["pos"])
+    assert pd.api.types.is_numeric_dtype(strategy_returns["ret"])
+    assert pd.api.types.is_numeric_dtype(strategy_returns["pnl"])
+
     stage_metrics = json.loads((trades_dir / "metrics.json").read_text())
+    assert "net_total_return" in stage_metrics
     trades = pd.read_csv(trades_dir / "trades_BTCUSDT.csv")
     assert stage_metrics["total_trades"] == len(trades)
     assert stage_metrics["win_rate"] == pytest.approx(float((trades["pnl"] > 0).mean()))
@@ -231,8 +259,11 @@ def test_backtest_pipeline_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
     summary_md = (tmp_path / "reports" / "vol_compression_expansion_v1" / run_id / "summary.md").read_text()
     assert "- Win rate (combined):" in summary_md
+    assert "- Net total return (combined):" in summary_md
     assert "- Ending equity (combined):" in summary_md
 
     summary_json = json.loads((tmp_path / "reports" / "vol_compression_expansion_v1" / run_id / "summary.json").read_text())
     assert "win_rate" in summary_json
+    assert "net_total_return" in summary_json
+    assert summary_json.get("objective", {}).get("target_metric") == "net_total_return"
     assert "ending_equity" in summary_json
