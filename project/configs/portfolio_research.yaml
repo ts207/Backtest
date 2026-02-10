@@ -1,0 +1,6 @@
+multi_edge_portfolio:
+  constraints:
+    turnover_budget_daily: 0.40
+  gates:
+    regime_sign_consistency_min: 0.70
+    symbol_positive_pnl_ratio_min: 0.50

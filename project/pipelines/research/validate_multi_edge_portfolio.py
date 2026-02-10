@@ -52,6 +52,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Validate multi-edge portfolio promotion gates")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--require_pass", type=int, default=1)
+    parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
 
@@ -66,7 +67,9 @@ def main() -> int:
     outputs: List[Dict[str, object]] = []
     manifest = start_manifest("validate_multi_edge_portfolio", args.run_id, params, inputs, outputs)
 
-    config = load_configs([str(PROJECT_ROOT / "configs" / "portfolio.yaml")])
+    config_paths = [str(PROJECT_ROOT / "configs" / "portfolio.yaml")]
+    config_paths.extend(args.config)
+    config = load_configs(config_paths)
     gates_cfg = config.get("multi_edge_portfolio", {}).get("gates", {})
 
     try:

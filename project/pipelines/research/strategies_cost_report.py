@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Dict, List
 
+import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -21,8 +22,6 @@ from pipelines.features.build_features_v1 import DEFAULT_WINDOWS, _build_feature
 
 def _parse_csv(raw: str) -> List[str]:
     return [x.strip() for x in raw.split(",") if x.strip()]
-
-
 
 
 def _timeframe_factor(timeframe: str) -> int:
@@ -48,6 +47,7 @@ def _aggregate_ohlcv_15m_to_tf(bars: pd.DataFrame, timeframe: str) -> pd.DataFra
     agg["high"] = out["high"].resample(rule, label="right", closed="right").max()
     agg["low"] = out["low"].resample(rule, label="right", closed="right").min()
     agg["close"] = out["close"].resample(rule, label="right", closed="right").last()
+    agg["volume"] = out["volume"].resample(rule, label="right", closed="right").sum() if "volume" in out.columns else 0.0
 
     if "funding_rate_scaled" in out.columns:
         agg["funding_rate_scaled"] = out["funding_rate_scaled"].resample(rule, label="right", closed="right").last()
@@ -78,6 +78,112 @@ def _build_features_for_timeframe(bars: pd.DataFrame, timeframe: str) -> pd.Data
     features = features.rename(columns={rv_col: "rv_pct_2880", range_med_col: "range_med_480"})
     return features
 
+
+def _aggregation_identity_diagnostics(bars_15m: pd.DataFrame, bars_tf: pd.DataFrame, timeframe: str) -> Dict[str, float]:
+    if timeframe == "15m":
+        return {
+            "timeframe": timeframe,
+            "checked_bars": int(len(bars_tf)),
+            "open_mismatch_ratio": 0.0,
+            "close_mismatch_ratio": 0.0,
+            "high_mismatch_ratio": 0.0,
+            "low_mismatch_ratio": 0.0,
+            "volume_mismatch_ratio": 0.0,
+        }
+
+    src = bars_15m.copy()
+    src["timestamp"] = pd.to_datetime(src["timestamp"], utc=True)
+    src = src.set_index("timestamp").sort_index()
+    rule = "1h" if timeframe == "1h" else "4h"
+
+    first_open = src["open"].resample(rule, label="right", closed="right").first()
+    last_close = src["close"].resample(rule, label="right", closed="right").last()
+    max_high = src["high"].resample(rule, label="right", closed="right").max()
+    min_low = src["low"].resample(rule, label="right", closed="right").min()
+    sum_volume = src["volume"].resample(rule, label="right", closed="right").sum() if "volume" in src.columns else pd.Series(dtype=float)
+
+    tf = bars_tf.copy()
+    tf["timestamp"] = pd.to_datetime(tf["timestamp"], utc=True)
+    tf = tf.set_index("timestamp").sort_index()
+
+    aligned = pd.DataFrame(index=tf.index)
+    aligned["open_expected"] = first_open.reindex(tf.index)
+    aligned["close_expected"] = last_close.reindex(tf.index)
+    aligned["high_expected"] = max_high.reindex(tf.index)
+    aligned["low_expected"] = min_low.reindex(tf.index)
+    aligned["volume_expected"] = sum_volume.reindex(tf.index) if not sum_volume.empty else np.nan
+
+    eps = 1e-12
+    checked = max(1, len(aligned))
+    open_mismatch = float(((tf["open"] - aligned["open_expected"]).abs() > eps).mean())
+    close_mismatch = float(((tf["close"] - aligned["close_expected"]).abs() > eps).mean())
+    high_mismatch = float(((tf["high"] - aligned["high_expected"]).abs() > eps).mean())
+    low_mismatch = float(((tf["low"] - aligned["low_expected"]).abs() > eps).mean())
+    if "volume" in tf.columns and not aligned["volume_expected"].isna().all():
+        vol_mismatch = float(((tf["volume"] - aligned["volume_expected"]).abs() > eps).mean())
+    else:
+        vol_mismatch = 0.0
+
+    return {
+        "timeframe": timeframe,
+        "checked_bars": checked,
+        "open_mismatch_ratio": open_mismatch,
+        "close_mismatch_ratio": close_mismatch,
+        "high_mismatch_ratio": high_mismatch,
+        "low_mismatch_ratio": low_mismatch,
+        "volume_mismatch_ratio": vol_mismatch,
+    }
+
+
+def _feature_semantic_equivalence_diagnostics(bars_15m: pd.DataFrame, timeframe: str) -> Dict[str, float]:
+    if timeframe == "15m":
+        return {
+            "timeframe": timeframe,
+            "rv_pct_2880_corr": 1.0,
+            "range_med_480_corr": 1.0,
+            "samples": int(len(bars_15m)),
+        }
+
+    bars_tf = _aggregate_ohlcv_15m_to_tf(bars_15m, timeframe)
+    features_a = _build_features_for_timeframe(bars_tf, timeframe).copy()
+    features_b_15m = _build_features_for_timeframe(bars_15m, "15m").copy()
+
+    features_a["timestamp"] = pd.to_datetime(features_a["timestamp"], utc=True)
+    features_b_15m["timestamp"] = pd.to_datetime(features_b_15m["timestamp"], utc=True)
+
+    sampled_b = pd.merge_asof(
+        features_a[["timestamp"]].sort_values("timestamp"),
+        features_b_15m[["timestamp", "rv_pct_2880", "range_med_480"]].sort_values("timestamp"),
+        on="timestamp",
+        direction="backward",
+    )
+
+    merged = features_a[["timestamp", "rv_pct_2880", "range_med_480"]].merge(
+        sampled_b,
+        on="timestamp",
+        suffixes=("_agg", "_sampled"),
+        how="inner",
+    )
+
+    rv = merged[["rv_pct_2880_agg", "rv_pct_2880_sampled"]].dropna()
+    rmed = merged[["range_med_480_agg", "range_med_480_sampled"]].dropna()
+
+    def _corr(df: pd.DataFrame, left: str, right: str) -> float:
+        if len(df) < 3:
+            return 0.0
+        if float(df[left].std()) == 0.0 or float(df[right].std()) == 0.0:
+            return 0.0
+        val = float(df[left].corr(df[right]))
+        return 0.0 if np.isnan(val) else val
+
+    return {
+        "timeframe": timeframe,
+        "rv_pct_2880_corr": _corr(rv, "rv_pct_2880_agg", "rv_pct_2880_sampled"),
+        "range_med_480_corr": _corr(rmed, "range_med_480_agg", "range_med_480_sampled"),
+        "samples": int(len(merged)),
+    }
+
+
 def _weighted_mean(symbol_rows: List[Dict[str, float]], key: str) -> float:
     total_bars = float(sum(row["total_bars"] for row in symbol_rows))
     if total_bars <= 0:
@@ -95,6 +201,9 @@ def main() -> int:
     parser.add_argument("--spread_bps", type=float, default=2.0)
     parser.add_argument("--execution_delay_bars", type=int, default=0)
     parser.add_argument("--execution_min_hold_bars", type=int, default=0)
+    parser.add_argument("--execution_decision_grid_hours", type=int, default=0)
+    parser.add_argument("--execution_decision_grid_bars", type=int, default=0)
+    parser.add_argument("--execution_decision_grid_offset_bars", type=int, default=0)
     parser.add_argument("--data_root", default=str(DEFAULT_DATA_ROOT))
     args = parser.parse_args()
 
@@ -106,14 +215,18 @@ def main() -> int:
         "execution_delay_bars": int(args.execution_delay_bars),
         "execution_min_hold_bars": int(args.execution_min_hold_bars),
         "execution_spread_bps": float(args.spread_bps),
+        "execution_decision_grid_hours": int(args.execution_decision_grid_hours),
+        "execution_decision_grid_bars": int(args.execution_decision_grid_bars),
+        "execution_decision_grid_offset_bars": int(args.execution_decision_grid_offset_bars),
     }
 
     rows = []
+    diagnostics_rows: List[Dict[str, object]] = []
     for strategy_name in strategies:
         per_symbol: List[Dict[str, float]] = []
         for symbol in symbols:
-            bars, _features = _load_symbol_data(data_root, symbol, run_id=args.run_id)
-            bars_tf = _aggregate_ohlcv_15m_to_tf(bars, args.timeframe)
+            bars_15m, _features = _load_symbol_data(data_root, symbol, run_id=args.run_id)
+            bars_tf = _aggregate_ohlcv_15m_to_tf(bars_15m, args.timeframe)
             features_tf = _build_features_for_timeframe(bars_tf, args.timeframe)
             result = _strategy_returns(symbol, bars_tf, features_tf, strategy_name, params, float(args.cost_bps))
             d = result.diagnostics
@@ -128,6 +241,18 @@ def main() -> int:
                     "avg_turnover_per_bar": float(d.get("avg_turnover_per_bar", 0.0)),
                     "avg_abs_position": float(d.get("avg_abs_position", 0.0)),
                     "nonzero_position_pct": float(d.get("nonzero_position_pct", 0.0)),
+                    "num_trades": float(d.get("num_trades", 0.0)),
+                    "avg_holding_bars": float(d.get("avg_holding_bars", 0.0)),
+                }
+            )
+
+            diagnostics_rows.append(
+                {
+                    "strategy": strategy_name,
+                    "symbol": symbol,
+                    "timeframe": args.timeframe,
+                    **_aggregation_identity_diagnostics(bars_15m, bars_tf, args.timeframe),
+                    **_feature_semantic_equivalence_diagnostics(bars_15m, args.timeframe),
                 }
             )
 
@@ -144,6 +269,9 @@ def main() -> int:
             {
                 "strategy": strategy_name,
                 "timeframe": args.timeframe,
+                "execution_decision_grid_hours": int(args.execution_decision_grid_hours),
+                "execution_decision_grid_bars": int(args.execution_decision_grid_bars),
+                "execution_decision_grid_offset_bars": int(args.execution_decision_grid_offset_bars),
                 "gross_pnl": gross_pnl,
                 "base_cost_paid": base_cost_paid,
                 "spread_cost_paid": spread_cost_paid,
@@ -155,6 +283,8 @@ def main() -> int:
                 "avg_turnover_per_bar": _weighted_mean(per_symbol, "avg_turnover_per_bar"),
                 "avg_abs_position": _weighted_mean(per_symbol, "avg_abs_position"),
                 "nonzero_position_pct": _weighted_mean(per_symbol, "nonzero_position_pct"),
+                "num_trades": _weighted_mean(per_symbol, "num_trades"),
+                "avg_holding_bars": _weighted_mean(per_symbol, "avg_holding_bars"),
             }
         )
 
@@ -162,14 +292,25 @@ def main() -> int:
     ensure_dir(out_dir)
     frame = pd.DataFrame(rows).sort_values("strategy").reset_index(drop=True)
 
-    csv_path = out_dir / f"strategies_cost_report_{args.timeframe}.csv"
-    json_path = out_dir / f"strategies_cost_report_{args.timeframe}.json"
+    grid_bars = int(args.execution_decision_grid_bars)
+    grid_hours = int(args.execution_decision_grid_hours)
+    if grid_bars > 0:
+        suffix = f"{args.timeframe}_grid{grid_bars}bars_off{int(args.execution_decision_grid_offset_bars)}"
+    elif grid_hours > 0:
+        suffix = f"{args.timeframe}_grid{grid_hours}h_off{int(args.execution_decision_grid_offset_bars)}"
+    else:
+        suffix = args.timeframe
+    csv_path = out_dir / f"strategies_cost_report_{suffix}.csv"
+    json_path = out_dir / f"strategies_cost_report_{suffix}.json"
+    diagnostics_path = out_dir / f"strategies_cost_report_diagnostics_{suffix}.json"
     frame.to_csv(csv_path, index=False)
     json_path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+    diagnostics_path.write_text(json.dumps(diagnostics_rows, indent=2), encoding="utf-8")
 
     print(frame.to_string(index=False))
     print(f"\nWrote: {csv_path}")
     print(f"Wrote: {json_path}")
+    print(f"Wrote: {diagnostics_path}")
     return 0
 
 
