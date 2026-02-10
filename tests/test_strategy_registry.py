@@ -67,3 +67,23 @@ def test_tsmom_no_lookahead_on_last_bar_perturbation() -> None:
     perturbed = strategy.generate_positions(perturbed_bars, features, {"fast_n": 16, "slow_n": 96, "band_bps": 10.0})
 
     pd.testing.assert_series_equal(base.iloc[:-1], perturbed.iloc[:-1], check_names=False)
+
+
+def test_tsmom_cooldown_reduces_position_changes() -> None:
+    bars, features = _bars_and_features()
+    strategy = get_strategy("tsmom_v1")
+
+    baseline = strategy.generate_positions(
+        bars,
+        features,
+        {"fast_n": 8, "slow_n": 21, "band_bps": 1.0, "cooldown_bars": 0},
+    )
+    cooled = strategy.generate_positions(
+        bars,
+        features,
+        {"fast_n": 8, "slow_n": 21, "band_bps": 1.0, "cooldown_bars": 8},
+    )
+
+    baseline_changes = int((baseline.diff().fillna(baseline) != 0).sum())
+    cooled_changes = int((cooled.diff().fillna(cooled) != 0).sum())
+    assert cooled_changes <= baseline_changes
