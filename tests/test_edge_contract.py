@@ -14,6 +14,9 @@ def _approved_edge() -> dict:
         "edge_id": "vc_core",
         "strategy": "vol_compression_v1",
         "status": "APPROVED",
+        "family_id": "vol_compression",
+        "relative_rank_within_family": 1,
+        "dominated_by": [],
         "signal_fields": ["rv_pct_2880", "range_96"],
         "cost_assumptions": {"fee_bps_per_side": 4.0, "slippage_bps_per_fill": 2.0},
         "validity_window": {"start": "2020-01-01", "end": None},
@@ -51,3 +54,10 @@ def test_load_approved_edge_contracts_filters_non_approved() -> None:
     loaded = load_approved_edge_contracts([draft, _approved_edge()])
     assert len(loaded) == 1
     assert loaded[0]["edge_id"] == "vc_core"
+
+
+def test_validate_edge_contract_requires_comparative_fields_for_approved() -> None:
+    bad = _approved_edge()
+    bad.pop("family_id")
+    with pytest.raises(EdgeContractValidationError, match="comparative fields"):
+        validate_edge_contract(bad, require_approved=True)

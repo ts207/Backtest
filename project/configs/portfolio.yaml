@@ -30,6 +30,9 @@ multi_edge_portfolio:
     default_modes: equal_risk,score_weighted,constrained_optimizer
     lookback_bars: 384
     return_tilt: 0.35
+  family_policy:
+    enforce_one_per_family: true
+    max_abs_position_corr_within_family: 0.35
   gates:
     uplift_min_vs_baseline: 0.0
     regime_sign_consistency_min: 0.80
@@ -39,6 +42,9 @@ multi_edge_portfolio:
     - edge_id: vc_core
       strategy: vol_compression_v1
       status: APPROVED
+      family_id: vol_compression
+      relative_rank_within_family: 1
+      dominated_by: []
       signal_fields: [rv_pct_2880, range_96, range_med_480, high_96, low_96]
       cost_assumptions:
         fee_bps_per_side: 4.0
@@ -59,9 +65,13 @@ multi_edge_portfolio:
         exit_rv_pct_revert: 40.0
       overlays: []
       score: 1.0
-    - edge_id: vc_return_tilt
-      strategy: vol_compression_v1
+    - edge_id: vc_momentum
+      strategy: vol_compression_momentum_v1
       status: APPROVED
+      family_id: vol_compression
+      relative_rank_within_family: 2
+      dominated_by:
+        - vc_core
       signal_fields: [rv_pct_2880, range_96, range_med_480, high_96, low_96]
       cost_assumptions:
         fee_bps_per_side: 4.0
@@ -76,16 +86,19 @@ multi_edge_portfolio:
           universe: BTCUSDT,ETHUSDT
           config_hash: survivability-a-v1
       params:
-        one_trade_per_day: false
-        compression_rv_pct_max: 12.0
-        compression_range_mult: 0.90
-        exit_rv_pct_revert: 45.0
+        entry_rv_pct_max: 12.0
+        exit_rv_pct_min: 35.0
+        max_hold_bars: 64
       overlays:
         - vol_shock_relaxation_delay30_v1
       score: 0.85
-    - edge_id: vc_conservative
-      strategy: vol_compression_v1
+    - edge_id: vc_reversion
+      strategy: vol_compression_reversion_v1
       status: APPROVED
+      family_id: vol_compression
+      relative_rank_within_family: 3
+      dominated_by:
+        - vc_core
       signal_fields: [rv_pct_2880, range_96, range_med_480, high_96, low_96]
       cost_assumptions:
         fee_bps_per_side: 4.0
@@ -100,9 +113,85 @@ multi_edge_portfolio:
           universe: BTCUSDT,ETHUSDT
           config_hash: survivability-b-v1
       params:
-        one_trade_per_day: true
-        compression_rv_pct_max: 8.0
-        compression_range_mult: 0.70
-        exit_rv_pct_revert: 35.0
+        entry_rv_pct_max: 15.0
+        band_frac: 0.2
+        max_hold_bars: 24
       overlays: []
       score: 0.75
+
+    - edge_id: tsmom_trend
+      strategy: tsmom_v1
+      status: APPROVED
+      family_id: trend
+      relative_rank_within_family: 1
+      dominated_by: []
+      signal_fields: [close]
+      cost_assumptions:
+        fee_bps_per_side: 4.0
+        slippage_bps_per_fill: 2.0
+      validity_window:
+        start: "2020-01-01"
+        end: null
+      required_evidence:
+        - run_id: baseline_2021_2022_trend_seed
+          split: promotion
+          date_range: "2021-01-01..2022-12-31"
+          universe: BTCUSDT,ETHUSDT
+          config_hash: trend-seed-v1
+      params:
+        fast_n: 16
+        slow_n: 96
+        band_bps: 10.0
+      overlays: []
+      score: 0.90
+    - edge_id: carry_funding
+      strategy: funding_carry_v1
+      status: APPROVED
+      family_id: carry
+      relative_rank_within_family: 1
+      dominated_by: []
+      signal_fields: [funding_rate_scaled]
+      cost_assumptions:
+        fee_bps_per_side: 4.0
+        slippage_bps_per_fill: 2.0
+      validity_window:
+        start: "2020-01-01"
+        end: null
+      required_evidence:
+        - run_id: baseline_2021_2022_carry_seed
+          split: promotion
+          date_range: "2021-01-01..2022-12-31"
+          universe: BTCUSDT,ETHUSDT
+          config_hash: carry-seed-v1
+      params:
+        n: 192
+        thr: 0.00005
+        gap_bars: 0
+      overlays: []
+      score: 0.80
+
+    - edge_id: intraday_reversion_core
+      strategy: intraday_reversion_v1
+      status: APPROVED
+      family_id: reversion
+      relative_rank_within_family: 1
+      dominated_by: []
+      signal_fields: [close]
+      cost_assumptions:
+        fee_bps_per_side: 4.0
+        slippage_bps_per_fill: 2.0
+      validity_window:
+        start: "2020-01-01"
+        end: null
+      required_evidence:
+        - run_id: baseline_2021_2022_reversion_seed
+          split: promotion
+          date_range: "2021-01-01..2022-12-31"
+          universe: BTCUSDT,ETHUSDT
+          config_hash: reversion-seed-v1
+      params:
+        n: 64
+        thr: 1.5
+        gap_bars: 0
+      overlays: []
+      score: 0.70
