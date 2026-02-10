@@ -8,8 +8,6 @@ import sys
 from pathlib import Path
 from typing import Dict, List
 
-import pandas as pd
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -17,41 +15,14 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from pipelines._lib.config import load_configs
 from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
-
-
-def _yearly_sign_consistency(portfolio_path: Path) -> float:
-    if not portfolio_path.exists():
-        return 0.0
-    df = pd.read_csv(portfolio_path)
-    if df.empty:
-        return 0.0
-    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, format="mixed")
-    df["year"] = df["timestamp"].dt.year
-    yearly = df.groupby("year", as_index=False)["portfolio_pnl"].sum()
-    if yearly.empty:
-        return 0.0
-    signs = yearly["portfolio_pnl"].apply(lambda x: 1 if x > 0 else -1 if x < 0 else 0)
-    non_zero = signs[signs != 0]
-    if non_zero.empty:
-        return 0.0
-    dominant = non_zero.mode().iloc[0]
-    consistency = float((non_zero == dominant).mean())
-    return consistency
-
-
-def _symbol_positive_ratio(symbol_contrib_path: Path) -> float:
-    if not symbol_contrib_path.exists():
-        return 0.0
-    df = pd.read_csv(symbol_contrib_path)
-    if df.empty or "total_pnl" not in df.columns:
-        return 0.0
-    return float((pd.to_numeric(df["total_pnl"], errors="coerce").fillna(0.0) > 0).mean())
+from pipelines.research._lib.metrics import symbol_positive_pnl_ratio, yearly_sign_consistency
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate multi-edge portfolio promotion gates")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--require_pass", type=int, default=1)
+    parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
 
@@ -66,7 +37,9 @@ def main() -> int:
     outputs: List[Dict[str, object]] = []
     manifest = start_manifest("validate_multi_edge_portfolio", args.run_id, params, inputs, outputs)
 
-    config = load_configs([str(PROJECT_ROOT / "configs" / "portfolio.yaml")])
+    config_paths = [str(PROJECT_ROOT / "configs" / "portfolio.yaml")]
+    config_paths.extend(args.config)
+    config = load_configs(config_paths)
     gates_cfg = config.get("multi_edge_portfolio", {}).get("gates", {})
 
     try:
@@ -90,8 +63,8 @@ def main() -> int:
         portfolio_path = Path(str(selected_payload.get("paths", {}).get("portfolio", "")))
         symbol_contrib_path = Path(str(selected_payload.get("paths", {}).get("symbol_contribution", "")))
 
-        regime_consistency = _yearly_sign_consistency(portfolio_path)
-        symbol_ratio = _symbol_positive_ratio(symbol_contrib_path)
+        regime_consistency = yearly_sign_consistency(portfolio_path)
+        symbol_ratio = symbol_positive_pnl_ratio(symbol_contrib_path)
 
         estimated_cost_drag = float(selected_payload.get("estimated_cost_drag", 0.0) or 0.0)
         friction_excess = selected_return - estimated_cost_drag

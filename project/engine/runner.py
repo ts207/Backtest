@@ -155,10 +155,40 @@ def _validate_positions(series: pd.Series) -> None:
         raise ValueError(f"Positions must be in {{-1,0,1}}. Found: {bad_vals}")
 
 
-def _apply_execution_stress(positions: pd.Series, *, delay_bars: int, min_hold_bars: int) -> pd.Series:
+def _apply_execution_stress(
+    positions: pd.Series,
+    *,
+    delay_bars: int,
+    min_hold_bars: int,
+    decision_grid_hours: int,
+    decision_grid_bars: int,
+    decision_grid_offset_bars: int,
+) -> pd.Series:
     stressed = positions.copy()
     if delay_bars > 0:
         stressed = stressed.shift(delay_bars).fillna(0).astype(int)
+
+    grid_bars = max(0, int(decision_grid_bars))
+    grid_hours = max(0, int(decision_grid_hours))
+
+    if grid_bars <= 0 and grid_hours > 0:
+        ts = pd.DatetimeIndex(stressed.index)
+        if len(ts) >= 2:
+            step_minutes = max(1.0, float(np.median((ts[1:] - ts[:-1]).total_seconds()) / 60.0))
+            grid_bars = max(1, int(round((grid_hours * 60.0) / step_minutes)))
+
+    if grid_bars > 0:
+        n = len(stressed)
+        offset = int(decision_grid_offset_bars) % grid_bars
+        decision_mask = ((np.arange(n) - offset) % grid_bars) == 0
+        values = stressed.to_numpy(copy=True)
+        current = 0
+        for i in range(n):
+            if bool(decision_mask[i]):
+                current = int(values[i])
+            else:
+                values[i] = current
+        stressed = pd.Series(values, index=stressed.index).astype(int)
 
     min_hold = max(1, int(min_hold_bars))
     if min_hold <= 1:
@@ -195,11 +225,21 @@ def _strategy_returns(
     delay_bars = max(0, int(params.get("execution_delay_bars", 0)))
     min_hold_bars = max(1, int(params.get("execution_min_hold_bars", 1)))
     spread_bps = max(0.0, float(params.get("execution_spread_bps", 0.0)))
+    decision_grid_hours = max(0, int(params.get("execution_decision_grid_hours", 0)))
+    decision_grid_bars = max(0, int(params.get("execution_decision_grid_bars", 0)))
+    decision_grid_offset_bars = max(0, int(params.get("execution_decision_grid_offset_bars", 0)))
 
     positions = strategy.generate_positions(bars, features, params)
     timestamp_index = pd.DatetimeIndex(bars["timestamp"])
     positions = positions.reindex(timestamp_index).fillna(0).astype(int)
-    positions = _apply_execution_stress(positions, delay_bars=delay_bars, min_hold_bars=min_hold_bars)
+    positions = _apply_execution_stress(
+        positions,
+        delay_bars=delay_bars,
+        min_hold_bars=min_hold_bars,
+        decision_grid_hours=decision_grid_hours,
+        decision_grid_bars=decision_grid_bars,
+        decision_grid_offset_bars=decision_grid_offset_bars,
+    )
     _validate_positions(positions)
 
     bars_indexed = bars.set_index("timestamp")
@@ -263,6 +303,20 @@ def _strategy_returns(
         }
     )
     total_bars = int(len(ret))
+    num_trades = int((position_delta > 0).sum()) if total_bars else 0
+    holding_lengths = []
+    if total_bars:
+        vals = positions.to_numpy()
+        run = 1
+        for i in range(1, len(vals)):
+            if vals[i] == vals[i - 1]:
+                run += 1
+            else:
+                holding_lengths.append(run)
+                run = 1
+        holding_lengths.append(run)
+    avg_holding_bars = float(np.mean(holding_lengths)) if holding_lengths else 0.0
+
     diagnostics = {
         "total_bars": total_bars,
         "nan_return_bars": int(nan_ret_mask.sum()),
@@ -275,12 +329,17 @@ def _strategy_returns(
         "execution_delay_bars": delay_bars,
         "execution_min_hold_bars": min_hold_bars,
         "execution_spread_bps": spread_bps,
+        "execution_decision_grid_hours": decision_grid_hours,
+        "execution_decision_grid_bars": decision_grid_bars,
+        "execution_decision_grid_offset_bars": decision_grid_offset_bars,
         "cost_bps_effective": stressed_cost_bps,
         "base_cost_bps": base_cost_bps,
         "spread_cost_bps": spread_cost_bps,
         "avg_abs_position": float(abs_pos.mean()) if total_bars else 0.0,
         "nonzero_position_pct": float((abs_pos > 0).mean()) if total_bars else 0.0,
         "avg_turnover_per_bar": float(position_delta.mean()) if total_bars else 0.0,
+        "num_trades": num_trades,
+        "avg_holding_bars": avg_holding_bars,
         "gross_pnl": float(gross_pnl_series.sum()),
         "base_cost_paid": float(base_cost_paid_series.sum()),
         "spread_cost_paid": float(spread_cost_paid_series.sum()),
