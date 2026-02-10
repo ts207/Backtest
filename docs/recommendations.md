@@ -60,3 +60,33 @@
 - Full suite stays green.
 - At least one schema contract test added for each critical output family.
 - A single dashboard/report artifact summarizes run-over-run stability for candidate overlays.
+
+
+## 5) Portfolio gate calibration workflow (new)
+
+1. **Split portfolio policy profiles**
+   - Keep strict production defaults in `project/configs/portfolio_production.yaml`.
+   - Use `project/configs/portfolio_research.yaml` as an overlay for discovery runs.
+
+2. **Run harshness sweeps on completed runs**
+   - `python3 project/pipelines/research/sweep_portfolio_harshness.py --run_ids <id1,id2,...>`
+   - Review `frontier.csv` and `report.md` under `reports/multi_edge_validation/harshness_sweep`.
+
+3. **Promotion discipline**
+   - Discovery can use research overlay.
+   - Promotion must re-run `validate_multi_edge_portfolio.py` with strict production settings.
+
+
+4. **Use 15m-signal / 4h-execution feasibility runs**
+   - Keep features/signals on native 15m bars and set `--execution_decision_grid_hours 4` in `strategies_cost_report.py`.
+   - Goal: suppress turnover without redefining feature semantics.
+
+5. **Always pair 4h aggregation tests with semantic diagnostics**
+   - Inspect `strategies_cost_report_diagnostics_*.json` for aggregation identity mismatch ratios and feature equivalence correlations (`rv_pct_2880`, `range_med_480`).
+   - Goal: avoid false conclusions from non-equivalent timeframe transformations.
+
+
+6. **Use bar-index execution masks for 4h throttle experiments**
+   - Prefer `--timeframe 15m --execution_decision_grid_bars 16 --execution_decision_grid_offset_bars 0` for block-start sampling (`t % 16 == 0`).
+   - Use `--execution_decision_grid_offset_bars 15` for end-of-block sampling (`t % 16 == 15`).
+   - Goal: test execution throttling only, while keeping 15m signal semantics unchanged.
