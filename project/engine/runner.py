@@ -210,6 +210,8 @@ def _strategy_returns(
     nan_ret_mask = ret.isna()
     forced_flat_bars = int((nan_ret_mask & (positions != 0)).sum())
     positions = positions.mask(nan_ret_mask, 0).astype(int)
+    abs_pos = positions.abs()
+    position_delta = positions.diff().fillna(positions).abs()
     stressed_cost_bps = float(cost_bps) + float(spread_bps)
     pnl = compute_pnl(positions, ret, stressed_cost_bps)
     if nan_ret_mask.any():
@@ -262,6 +264,9 @@ def _strategy_returns(
         "execution_delay_bars": delay_bars,
         "execution_min_hold_bars": min_hold_bars,
         "execution_spread_bps": spread_bps,
+        "avg_abs_position": float(abs_pos.mean()) if total_bars else 0.0,
+        "nonzero_position_pct": float((abs_pos > 0).mean()) if total_bars else 0.0,
+        "avg_turnover_per_bar": float(position_delta.mean()) if total_bars else 0.0,
     }
     return StrategyResult(name=strategy_name, data=df, diagnostics=diagnostics)
 
