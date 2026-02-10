@@ -210,7 +210,20 @@ def _strategy_returns(
     nan_ret_mask = ret.isna()
     forced_flat_bars = int((nan_ret_mask & (positions != 0)).sum())
     positions = positions.mask(nan_ret_mask, 0).astype(int)
-    stressed_cost_bps = float(cost_bps) + float(spread_bps)
+    abs_pos = positions.abs()
+    position_delta = positions.diff().fillna(positions).abs()
+    base_cost_bps = float(cost_bps)
+    spread_cost_bps = float(spread_bps)
+    stressed_cost_bps = base_cost_bps + spread_cost_bps
+    prior_pos = positions.shift(1).fillna(0).astype(float)
+    gross_pnl_series = prior_pos * ret
+    base_cost_paid_series = position_delta * (base_cost_bps / 10000.0)
+    spread_cost_paid_series = position_delta * (spread_cost_bps / 10000.0)
+    cost_paid_series = base_cost_paid_series + spread_cost_paid_series
+    gross_pnl_series = gross_pnl_series.mask(nan_ret_mask, 0.0)
+    base_cost_paid_series = base_cost_paid_series.mask(nan_ret_mask, 0.0)
+    spread_cost_paid_series = spread_cost_paid_series.mask(nan_ret_mask, 0.0)
+    cost_paid_series = cost_paid_series.mask(nan_ret_mask, 0.0)
     pnl = compute_pnl(positions, ret, stressed_cost_bps)
     if nan_ret_mask.any():
         LOGGER.info(
@@ -262,6 +275,17 @@ def _strategy_returns(
         "execution_delay_bars": delay_bars,
         "execution_min_hold_bars": min_hold_bars,
         "execution_spread_bps": spread_bps,
+        "cost_bps_effective": stressed_cost_bps,
+        "base_cost_bps": base_cost_bps,
+        "spread_cost_bps": spread_cost_bps,
+        "avg_abs_position": float(abs_pos.mean()) if total_bars else 0.0,
+        "nonzero_position_pct": float((abs_pos > 0).mean()) if total_bars else 0.0,
+        "avg_turnover_per_bar": float(position_delta.mean()) if total_bars else 0.0,
+        "gross_pnl": float(gross_pnl_series.sum()),
+        "base_cost_paid": float(base_cost_paid_series.sum()),
+        "spread_cost_paid": float(spread_cost_paid_series.sum()),
+        "cost_paid": float(cost_paid_series.sum()),
+        "net_pnl": float(pnl.sum()),
     }
     return StrategyResult(name=strategy_name, data=df, diagnostics=diagnostics)
 
@@ -375,6 +399,29 @@ def run_engine(
             "missing_feature_bars": sum(res.diagnostics["missing_feature_bars"] for res in symbol_results),
         }
         total_bars = diagnostics_total["total_bars"]
+        gross_pnl = float(sum(float(res.diagnostics.get("gross_pnl", 0.0)) for res in symbol_results))
+        base_cost_paid = float(sum(float(res.diagnostics.get("base_cost_paid", 0.0)) for res in symbol_results))
+        spread_cost_paid = float(sum(float(res.diagnostics.get("spread_cost_paid", 0.0)) for res in symbol_results))
+        cost_paid = float(sum(float(res.diagnostics.get("cost_paid", 0.0)) for res in symbol_results))
+        net_pnl = float(sum(float(res.diagnostics.get("net_pnl", 0.0)) for res in symbol_results))
+        weighted_abs_position = (
+            float(sum(float(res.diagnostics.get("avg_abs_position", 0.0)) * float(res.diagnostics.get("total_bars", 0)) for res in symbol_results))
+            / float(total_bars)
+            if total_bars
+            else 0.0
+        )
+        weighted_nonzero_pct = (
+            float(sum(float(res.diagnostics.get("nonzero_position_pct", 0.0)) * float(res.diagnostics.get("total_bars", 0)) for res in symbol_results))
+            / float(total_bars)
+            if total_bars
+            else 0.0
+        )
+        weighted_turnover = (
+            float(sum(float(res.diagnostics.get("avg_turnover_per_bar", 0.0)) * float(res.diagnostics.get("total_bars", 0)) for res in symbol_results))
+            / float(total_bars)
+            if total_bars
+            else 0.0
+        )
         diagnostics = {
             **diagnostics_total,
             "nan_return_pct": float(diagnostics_total["nan_return_bars"] / total_bars) if total_bars else 0.0,
@@ -383,6 +430,17 @@ def run_engine(
             "missing_feature_columns": sorted(
                 {col for res in symbol_results for col in res.diagnostics.get("missing_feature_columns", [])}
             ),
+            "cost_bps_effective": float(cost_bps) + max(0.0, float(params.get("execution_spread_bps", 0.0))),
+            "base_cost_bps": float(cost_bps),
+            "spread_cost_bps": max(0.0, float(params.get("execution_spread_bps", 0.0))),
+            "avg_abs_position": weighted_abs_position,
+            "nonzero_position_pct": weighted_nonzero_pct,
+            "avg_turnover_per_bar": weighted_turnover,
+            "gross_pnl": gross_pnl,
+            "base_cost_paid": base_cost_paid,
+            "spread_cost_paid": spread_cost_paid,
+            "cost_paid": cost_paid,
+            "net_pnl": net_pnl,
         }
         metrics["strategies"][strategy_name] = {**summary, "entries": entries}
         metrics.setdefault("diagnostics", {}).setdefault("strategies", {})[strategy_name] = diagnostics

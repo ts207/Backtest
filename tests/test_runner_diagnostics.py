@@ -62,3 +62,15 @@ def test_runner_diagnostics(tmp_path: Path, monkeypatch):
     assert diagnostics["nan_return_bars"] > 0
     assert diagnostics["forced_flat_bars"] > 0
     assert "missing_feature_pct" in diagnostics
+    assert "avg_abs_position" in diagnostics
+    assert "nonzero_position_pct" in diagnostics
+    assert "avg_turnover_per_bar" in diagnostics
+    assert "cost_bps_effective" in diagnostics
+    assert "base_cost_bps" in diagnostics
+    assert "spread_cost_bps" in diagnostics
+    assert "gross_pnl" in diagnostics
+    assert "base_cost_paid" in diagnostics
+    assert "spread_cost_paid" in diagnostics
+    assert "cost_paid" in diagnostics
+    assert "net_pnl" in diagnostics
+    assert diagnostics["cost_paid"] == diagnostics["base_cost_paid"] + diagnostics["spread_cost_paid"]

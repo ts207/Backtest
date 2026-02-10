@@ -34,6 +34,7 @@ class TsmomV1:
         fast_n = int(local_params.get("fast_n", 16))
         slow_n = int(local_params.get("slow_n", 96))
         band_bps = float(local_params.get("band_bps", 10.0))
+        cooldown_bars = max(0, int(local_params.get("cooldown_bars", 0)))
         if fast_n <= 0 or slow_n <= 0:
             raise ValueError("fast_n and slow_n must be positive")
         if fast_n >= slow_n:
@@ -65,5 +66,27 @@ class TsmomV1:
         valid = rel_spread.notna() & (~merged["is_gap"].astype(bool)) & (merged["gap_len"].astype(int) <= 0)
         pos.loc[valid & (rel_spread > band)] = 1
         pos.loc[valid & (rel_spread < -band)] = -1
+
+        if cooldown_bars > 0:
+            values = pos.to_numpy(copy=True)
+            executed = values.copy()
+            last_change_idx = -cooldown_bars - 1
+            for i in range(len(values)):
+                if i == 0:
+                    executed[i] = values[i]
+                    if executed[i] != 0:
+                        last_change_idx = i
+                    continue
+                prev = executed[i - 1]
+                desired = values[i]
+                if desired == prev:
+                    executed[i] = prev
+                    continue
+                if (i - last_change_idx) <= cooldown_bars:
+                    executed[i] = prev
+                    continue
+                executed[i] = desired
+                last_change_idx = i
+            pos = pd.Series(executed, index=pos.index, dtype=int)
 
         return pd.Series(pos.values, index=merged["timestamp"], name="position").astype(int)
