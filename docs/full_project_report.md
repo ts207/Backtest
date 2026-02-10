@@ -4,19 +4,7 @@ _Date: 2026-02-10_
 
 ## 1) Executive Summary
 
-
-## Addendum (implemented follow-up actions)
-
-The following recommendations from this report have now been implemented:
-- **P0:** Added `docs/architecture_diagram.md` and `docs/operator_runbook.md`.
-- **P2:** Added two additional baseline strategies and registered them:
-  - `vol_compression_momentum_v1`
-  - `vol_compression_reversion_v1`
-
----
-
-
-Backtest is a Python-based quantitative research and backtesting system focused on crypto perpetual futures at 15-minute resolution. The repository is organized around a staged pipeline (`ingest -> clean -> features -> backtest -> report`) with optional research and portfolio-validation branches. The codebase has strong modular separation (pipelines, engine, strategies, analyzers, portfolio), explicit configuration support, and solid regression coverage. Test health is currently strong (`83 passed`).
+Backtest is a Python-based quantitative research and backtesting system focused on crypto perpetual futures at 15-minute resolution. The repository is organized around a staged pipeline (`ingest -> clean -> features -> backtest -> report`) with optional research and portfolio-validation branches. The codebase has strong modular separation (pipelines, engine, strategies, analyzers, portfolio), explicit configuration support, and solid regression coverage. Test health is currently strong (`81 passed`).
 
 Overall assessment:
 - **Maturity:** Medium-high for research-grade workflows.
@@ -29,15 +17,15 @@ Overall assessment:
 ## 2) Repository Inventory
 
 High-level inventory from filesystem scan:
-- Python files: **104**
-- Markdown docs: **19**
+- Python files: **101**
+- Markdown docs: **16**
 - YAML configs: **5**
 - JSON edge specs: **3**
 
 Major folders and role:
-- `project/` (**136 files**) — implementation code.
-- `tests/` (**62 files**) — regression and contract tests.
-- `docs/` (**11 files**) — architecture, research notes, recommendations.
+- `project/` (**132 files**) — implementation code.
+- `tests/` (**60 files**) — regression and contract tests.
+- `docs/` (**8 files**) — architecture, research notes, recommendations.
 - `edges/` (**3 files**) — pinned overlay specifications.
 
 ---
@@ -129,7 +117,7 @@ This balance gives strong reproducibility while still supporting controlled expe
 
 Validation executed in this review:
 - `python3 -m pytest -q`
-- Result: **83 passed**, 0 failed.
+- Result: **81 passed**, 0 failed.
 
 Test suite coverage domains (from file inventory):
 - Pipeline orchestration and diagnostics.
