@@ -62,6 +62,26 @@ python project\pipelines\run_all.py --symbols BTCUSDT,ETHUSDT --start 2020-06-01
 
 The orchestrator auto-generates `run_id` (format `YYYYMMDD_HHMMSS`) unless you provide one via `--run_id`.
 
+## Multi-edge portfolio run (Top 10 universe, recommended constraints)
+Run baseline + multi-edge allocator + validation in one command:
+
+```bash
+python3 project/pipelines/run_all.py \
+  --symbols BTCUSDT,ETHUSDT \
+  --start 2020-06-01 \
+  --end 2025-07-10 \
+  --run_edge_candidate_universe 1 \
+  --run_multi_edge_portfolio 1 \
+  --run_multi_edge_validation 1 \
+  --multi_edge_symbols TOP10 \
+  --multi_edge_modes equal_risk,score_weighted,constrained_optimizer
+```
+
+Key multi-edge outputs:
+- `data/lake/trades/backtests/multi_edge_portfolio/<run_id>/metrics.json`
+- `data/reports/multi_edge_portfolio/<run_id>/summary.md`
+- `data/reports/multi_edge_validation/<run_id>/verdict.json`
+
 ## Run stages individually
 ```bash
 # 1) Ingest 15m OHLCV

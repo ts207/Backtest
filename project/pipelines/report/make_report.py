@@ -146,6 +146,22 @@ def _format_funding_section(cleaned_stats: Dict[str, object]) -> List[str]:
     return lines
 
 
+def _load_multi_edge_payload(run_id: str) -> Dict[str, object]:
+    multi_root = DATA_ROOT / "lake" / "trades" / "backtests" / "multi_edge_portfolio" / run_id
+    metrics_path = multi_root / "metrics.json"
+    if not metrics_path.exists():
+        return {}
+    payload = _read_json(metrics_path)
+    payload["_root"] = str(multi_root)
+    return payload
+
+
+def _load_optional_csv(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_csv(path)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate report")
     parser.add_argument("--run_id", required=True)
@@ -196,6 +212,7 @@ def main() -> int:
         engine_metrics_path = DATA_ROOT / "runs" / run_id / "engine" / "metrics.json"
         engine_metrics = _read_json(engine_metrics_path) if engine_metrics_path.exists() else {}
         engine_diagnostics = engine_metrics.get("diagnostics", {})
+        multi_edge_payload = _load_multi_edge_payload(run_id)
 
         inputs.append({"path": str(metrics_path), "rows": 1, "start_ts": None, "end_ts": None})
         inputs.append({"path": str(trades_dir), "rows": len(trades), "start_ts": None, "end_ts": None})
@@ -376,6 +393,33 @@ def main() -> int:
                         )
                 lines.append(_table_text(pd.DataFrame(sym_rows)) if sym_rows else "No binding stats")
 
+        lines.extend(["", "## Multi-Edge Portfolio", ""])
+        if not multi_edge_payload:
+            lines.append("No multi-edge portfolio artifacts for this run.")
+        else:
+            selected_mode = str(multi_edge_payload.get("selected_mode", "")).strip()
+            mode_payload = multi_edge_payload.get("modes", {}).get(selected_mode, {}) if selected_mode else {}
+            lines.append(f"- Selected mode: `{selected_mode}`")
+            lines.append(f"- Constraints pass: {bool(mode_payload.get('constraints_pass', False))}")
+            lines.append(f"- Net total return: {float(mode_payload.get('net_total_return', 0.0) or 0.0):.2%}")
+            lines.append(f"- Sharpe (annualized): {float(mode_payload.get('sharpe_annualized', 0.0) or 0.0):.2f}")
+            lines.append(f"- Max drawdown: {float(mode_payload.get('max_drawdown', 0.0) or 0.0):.2%}")
+            lines.append(f"- CVaR 1d 99%: {float(mode_payload.get('cvar_1d_99', 0.0) or 0.0):.2%}")
+            lines.append(f"- Avg daily turnover: {float(mode_payload.get('avg_daily_turnover', 0.0) or 0.0):.4f}")
+            lines.append(f"- Diversification benefit: {float(mode_payload.get('diversification_benefit', 0.0) or 0.0):.2%}")
+            if mode_payload.get("constraint_breaches"):
+                lines.append(f"- Constraint breaches: {', '.join(mode_payload.get('constraint_breaches', []))}")
+
+            edge_contrib_path = Path(str(mode_payload.get("paths", {}).get("edge_contribution", "")))
+            symbol_contrib_path = Path(str(mode_payload.get("paths", {}).get("symbol_contribution", "")))
+            edge_contrib = _load_optional_csv(edge_contrib_path)
+            symbol_contrib = _load_optional_csv(symbol_contrib_path)
+
+            lines.extend(["", "### Edge Contribution"])
+            lines.append(_table_text(edge_contrib) if not edge_contrib.empty else "No edge contribution rows.")
+            lines.extend(["", "### Symbol Contribution"])
+            lines.append(_table_text(symbol_contrib) if not symbol_contrib.empty else "No symbol contribution rows.")
+
         report_path.write_text("\n".join(lines), encoding="utf-8")
         outputs.append({"path": str(report_path), "rows": len(lines), "start_ts": None, "end_ts": None})
 
@@ -398,6 +442,7 @@ def main() -> int:
                 "by_active": context_by_active.to_dict(orient="records") if not context_by_active.empty else [],
                 "by_age_bucket": context_by_age.to_dict(orient="records") if not context_by_age.empty else [],
             },
+            "multi_edge_portfolio": multi_edge_payload if multi_edge_payload else {},
         }
         summary_path = report_dir / "summary.json"
         summary_path.write_text(json.dumps(summary_json, indent=2, sort_keys=True), encoding="utf-8")

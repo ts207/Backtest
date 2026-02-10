@@ -32,8 +32,23 @@ class VolCompressionV1:
         """
         Generate positions for the vol compression -> expansion strategy.
         """
-        one_trade_per_day = bool(params.get("one_trade_per_day", True))
-        trade_day_timezone = str(params.get("trade_day_timezone", "UTC"))
+        strategy_overrides = params.get("strategy_overrides", {})
+        if isinstance(strategy_overrides, dict):
+            strategy_params = strategy_overrides.get(self.name, {})
+            if not isinstance(strategy_params, dict):
+                strategy_params = {}
+        else:
+            strategy_params = {}
+
+        local_params = dict(params)
+        local_params.update(strategy_params)
+
+        one_trade_per_day = bool(local_params.get("one_trade_per_day", True))
+        trade_day_timezone = str(local_params.get("trade_day_timezone", "UTC"))
+        compression_rv_pct_max = float(local_params.get("compression_rv_pct_max", 10.0))
+        compression_range_mult = float(local_params.get("compression_range_mult", 0.8))
+        exit_rv_pct_revert = float(local_params.get("exit_rv_pct_revert", 40.0))
+        max_hold_bars = int(local_params.get("max_hold_bars", 48))
 
         bars = bars.copy()
         features = features.copy()
@@ -83,9 +98,9 @@ class VolCompressionV1:
                         exit_triggered = True
                     elif position["direction"] == "short" and row["low"] <= position["target_price"]:
                         exit_triggered = True
-                    elif bars_held >= 48:
+                    elif bars_held >= max_hold_bars:
                         exit_triggered = True
-                    elif row["rv_pct_2880"] > 40:
+                    elif row["rv_pct_2880"] > exit_rv_pct_revert:
                         exit_triggered = True
 
                 if exit_triggered:
@@ -98,7 +113,7 @@ class VolCompressionV1:
                 positions.append(1 if in_position and position.get("direction") == "long" else -1 if in_position else 0)
                 continue
 
-            compression = row["rv_pct_2880"] <= 10 and row["range_96"] <= 0.8 * row["range_med_480"]
+            compression = row["rv_pct_2880"] <= compression_rv_pct_max and row["range_96"] <= compression_range_mult * row["range_med_480"]
             if not compression:
                 positions.append(0)
                 continue

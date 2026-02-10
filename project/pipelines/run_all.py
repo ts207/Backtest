@@ -69,6 +69,12 @@ def main() -> int:
     parser.add_argument("--run_phase1_aftershock", type=int, default=0)
     parser.add_argument("--aftershock_window_start", type=int, default=0)
     parser.add_argument("--aftershock_window_end", type=int, default=96)
+    parser.add_argument("--run_edge_candidate_universe", type=int, default=0)
+    parser.add_argument("--run_multi_edge_portfolio", type=int, default=0)
+    parser.add_argument("--run_multi_edge_validation", type=int, default=0)
+    parser.add_argument("--multi_edge_symbols", default="TOP10")
+    parser.add_argument("--multi_edge_modes", default="")
+    parser.add_argument("--multi_edge_require_validation_pass", type=int, default=1)
     args = parser.parse_args()
 
     run_id = args.run_id or _run_id_default()
@@ -257,11 +263,61 @@ def main() -> int:
         insert_at = next((i for i, (name, _, _) in enumerate(stages) if name == "build_context_features"), len(stages))
         stages[insert_at:insert_at] = phase2_stages
 
+    if int(args.run_edge_candidate_universe):
+        edge_stage = [
+            (
+                "export_edge_candidates",
+                PROJECT_ROOT / "pipelines" / "research" / "export_edge_candidates.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    args.multi_edge_symbols,
+                    "--execute",
+                    "1",
+                ],
+            )
+        ]
+        insert_at = next((i for i, (name, _, _) in enumerate(stages) if name == "build_context_features"), len(stages))
+        stages[insert_at:insert_at] = edge_stage
+
+    if int(args.run_multi_edge_portfolio):
+        portfolio_stage = (
+            "backtest_multi_edge_portfolio",
+            PROJECT_ROOT / "pipelines" / "backtest" / "backtest_multi_edge_portfolio.py",
+            [
+                "--run_id",
+                run_id,
+                "--symbols",
+                args.multi_edge_symbols,
+                "--modes",
+                args.multi_edge_modes,
+                "--force",
+                force_flag,
+            ],
+        )
+        insert_at = next((i for i, (name, _, _) in enumerate(stages) if name == "make_report"), len(stages))
+        stages.insert(insert_at, portfolio_stage)
+
+    if int(args.run_multi_edge_validation):
+        validation_stage = (
+            "validate_multi_edge_portfolio",
+            PROJECT_ROOT / "pipelines" / "research" / "validate_multi_edge_portfolio.py",
+            [
+                "--run_id",
+                run_id,
+                "--require_pass",
+                str(int(args.multi_edge_require_validation_pass)),
+            ],
+        )
+        stages.append(validation_stage)
+
     stages_with_config = {
         "build_cleaned_15m",
         "build_features_v1",
         "build_context_features",
         "backtest_vol_compression_v1",
+        "backtest_multi_edge_portfolio",
         "make_report",
     }
     for stage_name, _, base_args in stages:
