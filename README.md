@@ -1,9 +1,21 @@
 # Backtest
 
-## Setup
+## Standardized setup (recommended)
 - Python 3.10+
-- Install dependencies: `python3 -m pip install -r requirements.txt`
-- Optional: create a virtual environment in `.venv` before installing
+- Create a local virtualenv:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -r requirements-dev.txt
+```
+
+- Validate the environment:
+
+```bash
+python -m pytest -q
+```
 
 ## Dependency compatibility policy
 - CI/local validation target is `python3 -m pytest -q` and should remain green before/after dependency upgrades.
@@ -16,6 +28,23 @@ To change this location, set `BACKTEST_DATA_ROOT` to an absolute path before run
 
 ```bash
 export BACKTEST_DATA_ROOT=/path/to/backtest-data
+```
+
+## Data strategy
+- `data/` is local-first and intentionally ignored in git.
+- Keep code/config/manifests in git; keep large market data outside version control.
+- For archival/sharing, publish compressed run snapshots externally (object storage/NAS) and preserve `run_id`.
+- See `docs/data_strategy.md` for the full policy.
+
+## End-to-end smoke run
+Use this short run to validate ingest -> clean -> features -> backtest -> report:
+
+```bash
+python project/pipelines/run_all.py \
+  --run_id 20260210_000001 \
+  --symbols BTCUSDT \
+  --start 2020-06-01 \
+  --end 2020-06-07
 ```
 
 ## One-command pipeline run
