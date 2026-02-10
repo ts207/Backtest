@@ -73,6 +73,12 @@ def test_multi_edge_backtest_writes_metrics(tmp_path: Path, monkeypatch: pytest.
             "equal_risk,score_weighted",
             "--force",
             "1",
+            "--exec_delay_bars",
+            "1",
+            "--exec_spread_bps",
+            "1.5",
+            "--exec_min_hold_bars",
+            "2",
         ],
     )
     assert multi_stage.main() == 0
@@ -84,3 +90,11 @@ def test_multi_edge_backtest_writes_metrics(tmp_path: Path, monkeypatch: pytest.
     assert payload["objective"]["target_metric"] == "net_total_return"
     assert payload["selected_mode"] in {"equal_risk", "score_weighted"}
     assert "modes" in payload and payload["modes"]
+    assert "selected_edge_ids" in payload
+    assert "execution_stress" in payload
+    assert "family_competition_diagnostics" in payload
+    assert "pairwise" in payload["family_competition_diagnostics"]
+    assert "skipped_edge_ids" in payload
+    assert "tsmom_trend" in payload["selected_edge_ids"]
+    assert "carry_funding" in payload["selected_edge_ids"]
+    assert "intraday_reversion_core" in payload["selected_edge_ids"]

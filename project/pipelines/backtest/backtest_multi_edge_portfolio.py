@@ -110,6 +110,124 @@ def _build_edge_matrices(
     return edge_returns, edge_symbol_positions, edge_symbol_pnl
 
 
+def _family_competition_diagnostics(edge_frames: Dict[str, pd.DataFrame]) -> Dict[str, object]:
+    edge_ids = sorted(edge_frames.keys())
+    if not edge_ids:
+        return {"pairwise": [], "summary": {"mean_position_corr": 0.0, "mean_pnl_corr": 0.0}}
+
+    pos_map = {}
+    pnl_map = {}
+    sig_map = {}
+    for edge_id, frame in edge_frames.items():
+        if frame.empty:
+            pos_map[edge_id] = pd.Series(dtype=float)
+            pnl_map[edge_id] = pd.Series(dtype=float)
+            sig_map[edge_id] = pd.Series(dtype=float)
+            continue
+        grouped = frame.groupby("timestamp", sort=True)
+        pos = grouped["pos"].sum()
+        pnl = grouped["pnl"].sum()
+        sig = (pos != 0).astype(float)
+        pos_map[edge_id] = pos
+        pnl_map[edge_id] = pnl
+        sig_map[edge_id] = sig
+
+    pos_df = pd.concat(pos_map, axis=1).sort_index().fillna(0.0)
+    pnl_df = pd.concat(pnl_map, axis=1).reindex(pos_df.index).fillna(0.0)
+    sig_df = pd.concat(sig_map, axis=1).reindex(pos_df.index).fillna(0.0)
+
+    pairwise = []
+    for i, left in enumerate(edge_ids):
+        for right in edge_ids[i + 1 :]:
+            left_pos = pos_df[left]
+            right_pos = pos_df[right]
+            left_sig = sig_df[left]
+            right_sig = sig_df[right]
+            both_active = (left_sig > 0) & (right_sig > 0)
+            same_direction = both_active & ((left_pos * right_pos) > 0)
+            pairwise.append(
+                {
+                    "edge_a": left,
+                    "edge_b": right,
+                    "signal_corr": float(sig_df[[left, right]].corr().iloc[0, 1]),
+                    "position_corr": float(pos_df[[left, right]].corr().iloc[0, 1]),
+                    "pnl_corr": float(pnl_df[[left, right]].corr().iloc[0, 1]),
+                    "both_non_zero_frac": float(both_active.mean()) if len(both_active) else 0.0,
+                    "same_direction_frac": float(same_direction.mean()) if len(same_direction) else 0.0,
+                }
+            )
+
+    if pairwise:
+        mean_pos = float(pd.Series([x["position_corr"] for x in pairwise]).fillna(0.0).mean())
+        mean_pnl = float(pd.Series([x["pnl_corr"] for x in pairwise]).fillna(0.0).mean())
+    else:
+        mean_pos = 0.0
+        mean_pnl = 0.0
+
+    return {"pairwise": pairwise, "summary": {"mean_position_corr": mean_pos, "mean_pnl_corr": mean_pnl}}
+
+
+def _edge_position_corr(edge_frames: Dict[str, pd.DataFrame], left: str, right: str) -> float:
+    lf = edge_frames.get(left, pd.DataFrame())
+    rf = edge_frames.get(right, pd.DataFrame())
+    if lf.empty or rf.empty:
+        return 0.0
+    lp = lf.groupby("timestamp", sort=True)["pos"].sum()
+    rp = rf.groupby("timestamp", sort=True)["pos"].sum()
+    aligned = pd.concat([lp, rp], axis=1).fillna(0.0)
+    corr = aligned.corr().iloc[0, 1]
+    return float(0.0 if pd.isna(corr) else corr)
+
+
+def _select_edges_with_family_policy(
+    edges: List[Dict[str, object]],
+    edge_frames: Dict[str, pd.DataFrame],
+    *,
+    max_abs_position_corr_within_family: float,
+    enforce_one_per_family: bool,
+) -> List[Dict[str, object]]:
+    if not edges:
+        return []
+
+    by_family: Dict[str, List[Dict[str, object]]] = {}
+    for edge in edges:
+        family = str(edge.get("family_id", "unknown")).strip() or "unknown"
+        by_family.setdefault(family, []).append(edge)
+
+    selected: List[Dict[str, object]] = []
+    for family_edges in by_family.values():
+        ordered = sorted(
+            family_edges,
+            key=lambda e: (
+                int(e.get("relative_rank_within_family", 10_000)),
+                -float(e.get("score", 0.0)),
+                str(e.get("edge_id", "")),
+            ),
+        )
+        if enforce_one_per_family:
+            selected.append(ordered[0])
+            continue
+
+        keep_ids: List[str] = []
+        for edge in ordered:
+            edge_id = str(edge["edge_id"])
+            if not keep_ids:
+                keep_ids.append(edge_id)
+                continue
+            ok = True
+            for kept in keep_ids:
+                corr = _edge_position_corr(edge_frames, edge_id, kept)
+                if abs(corr) > max_abs_position_corr_within_family:
+                    ok = False
+                    break
+            if ok:
+                keep_ids.append(edge_id)
+        selected.extend([edge for edge in ordered if str(edge["edge_id"]) in keep_ids])
+
+    selected_ids = {str(edge["edge_id"]) for edge in selected}
+    return [edge for edge in edges if str(edge["edge_id"]) in selected_ids]
+
+
 def _edge_contribution(weights: pd.DataFrame, edge_returns: pd.DataFrame) -> pd.DataFrame:
     if weights.empty or edge_returns.empty:
         return pd.DataFrame(columns=["edge_id", "total_pnl", "mean_weight", "marginal_sharpe"])
@@ -169,6 +287,9 @@ def main() -> int:
     parser.add_argument("--force", type=int, default=0)
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--log_path", default=None)
+    parser.add_argument("--exec_delay_bars", type=int, default=1)
+    parser.add_argument("--exec_spread_bps", type=float, default=0.0)
+    parser.add_argument("--exec_min_hold_bars", type=int, default=1)
     args = parser.parse_args()
 
     log_handlers = [logging.StreamHandler(sys.stdout)]
@@ -189,6 +310,7 @@ def main() -> int:
     constraints_cfg = dict(portfolio_cfg.get("constraints", {}))
     allocator_cfg = dict(portfolio_cfg.get("allocator", {}))
     universe_cfg = dict(portfolio_cfg.get("universe", {}))
+    family_policy_cfg = dict(portfolio_cfg.get("family_policy", {}))
 
     fee_bps = float(config.get("fee_bps_per_side", 4.0))
     slippage_bps = float(config.get("slippage_bps_per_fill", 2.0))
@@ -197,6 +319,9 @@ def main() -> int:
     base_params = {
         "trade_day_timezone": str(config.get("trade_day_timezone", "UTC")),
         "one_trade_per_day": True,
+        "execution_delay_bars": max(0, int(args.exec_delay_bars)),
+        "execution_spread_bps": max(0.0, float(args.exec_spread_bps)),
+        "execution_min_hold_bars": max(1, int(args.exec_min_hold_bars)),
     }
 
     requested_symbols = resolve_requested_symbols(
@@ -228,6 +353,12 @@ def main() -> int:
         "constraints": constraints_cfg,
         "objective": portfolio_cfg.get("objective", {}),
         "cost_bps": cost_bps,
+        "execution_stress": {
+            "delay_bars": max(0, int(args.exec_delay_bars)),
+            "spread_bps": max(0.0, float(args.exec_spread_bps)),
+            "min_hold_bars": max(1, int(args.exec_min_hold_bars)),
+        },
+        "family_policy": family_policy_cfg,
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
@@ -251,6 +382,17 @@ def main() -> int:
             base_params=base_params,
             cost_bps=cost_bps,
         )
+        edge_returns, edge_symbol_positions, edge_symbol_pnl = _build_edge_matrices(edge_frames)
+        family_diagnostics = _family_competition_diagnostics(edge_frames)
+
+        effective_edges = _select_edges_with_family_policy(
+            approved_edges,
+            edge_frames,
+            max_abs_position_corr_within_family=float(family_policy_cfg.get("max_abs_position_corr_within_family", 0.35)),
+            enforce_one_per_family=bool(family_policy_cfg.get("enforce_one_per_family", True)),
+        )
+        active_edge_ids = {str(edge["edge_id"]) for edge in effective_edges}
+        edge_frames = {edge_id: frame for edge_id, frame in edge_frames.items() if edge_id in active_edge_ids}
         edge_returns, edge_symbol_positions, edge_symbol_pnl = _build_edge_matrices(edge_frames)
 
         if edge_returns.empty:
@@ -366,7 +508,15 @@ def main() -> int:
                 "top_n": top_n,
             },
             "constraints": constraints_cfg,
-            "edge_ids": [str(edge["edge_id"]) for edge in approved_edges],
+            "execution_stress": {
+                "delay_bars": max(0, int(args.exec_delay_bars)),
+                "spread_bps": max(0.0, float(args.exec_spread_bps)),
+                "min_hold_bars": max(1, int(args.exec_min_hold_bars)),
+            },
+            "selected_edge_ids": [str(edge["edge_id"]) for edge in effective_edges],
+            "edge_ids": [str(edge["edge_id"]) for edge in effective_edges],
+            "skipped_edge_ids": [str(edge["edge_id"]) for edge in approved_edges if str(edge["edge_id"]) not in active_edge_ids],
+            "family_competition_diagnostics": family_diagnostics,
             "modes": mode_metrics,
             "selected_mode": selected_mode,
         }
@@ -399,7 +549,7 @@ def main() -> int:
 
         stats["selected_mode"] = selected_mode
         stats["symbols"] = requested_symbols
-        stats["edges"] = [str(edge["edge_id"]) for edge in approved_edges]
+        stats["edges"] = [str(edge["edge_id"]) for edge in effective_edges]
         finalize_manifest(manifest, "success", stats=stats)
         return 0
     except Exception as exc:  # pragma: no cover

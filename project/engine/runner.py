@@ -155,6 +155,32 @@ def _validate_positions(series: pd.Series) -> None:
         raise ValueError(f"Positions must be in {{-1,0,1}}. Found: {bad_vals}")
 
 
+def _apply_execution_stress(positions: pd.Series, *, delay_bars: int, min_hold_bars: int) -> pd.Series:
+    stressed = positions.copy()
+    if delay_bars > 0:
+        stressed = stressed.shift(delay_bars).fillna(0).astype(int)
+
+    min_hold = max(1, int(min_hold_bars))
+    if min_hold <= 1:
+        return stressed
+
+    values = stressed.to_numpy(copy=True)
+    n = len(values)
+    i = 0
+    while i < n:
+        if values[i] == 0:
+            i += 1
+            continue
+        sign = values[i]
+        j = i + 1
+        while j < n and values[j] == sign:
+            j += 1
+        if (j - i) < min_hold:
+            values[i:j] = 0
+        i = j
+    return pd.Series(values, index=stressed.index).astype(int)
+
+
 def _strategy_returns(
     symbol: str,
     bars: pd.DataFrame,
@@ -166,9 +192,14 @@ def _strategy_returns(
     strategy = get_strategy(strategy_name)
     required_features = getattr(strategy, "required_features", []) or []
 
+    delay_bars = max(0, int(params.get("execution_delay_bars", 0)))
+    min_hold_bars = max(1, int(params.get("execution_min_hold_bars", 1)))
+    spread_bps = max(0.0, float(params.get("execution_spread_bps", 0.0)))
+
     positions = strategy.generate_positions(bars, features, params)
     timestamp_index = pd.DatetimeIndex(bars["timestamp"])
     positions = positions.reindex(timestamp_index).fillna(0).astype(int)
+    positions = _apply_execution_stress(positions, delay_bars=delay_bars, min_hold_bars=min_hold_bars)
     _validate_positions(positions)
 
     bars_indexed = bars.set_index("timestamp")
@@ -179,7 +210,8 @@ def _strategy_returns(
     nan_ret_mask = ret.isna()
     forced_flat_bars = int((nan_ret_mask & (positions != 0)).sum())
     positions = positions.mask(nan_ret_mask, 0).astype(int)
-    pnl = compute_pnl(positions, ret, cost_bps)
+    stressed_cost_bps = float(cost_bps) + float(spread_bps)
+    pnl = compute_pnl(positions, ret, stressed_cost_bps)
     if nan_ret_mask.any():
         LOGGER.info(
             "Gap-safe returns forced flat %s bars for %s/%s.",
@@ -227,6 +259,9 @@ def _strategy_returns(
         "forced_flat_pct": float(forced_flat_bars / total_bars) if total_bars else 0.0,
         "missing_feature_pct": float(missing_feature_mask.mean()) if total_bars else 0.0,
         "missing_feature_columns": missing_feature_columns,
+        "execution_delay_bars": delay_bars,
+        "execution_min_hold_bars": min_hold_bars,
+        "execution_spread_bps": spread_bps,
     }
     return StrategyResult(name=strategy_name, data=df, diagnostics=diagnostics)
 

@@ -16,6 +16,7 @@ REQUIRED_EDGE_FIELDS = {
 }
 ALLOWED_EDGE_STATUS = {"DRAFT", "APPROVED", "REJECTED", "ARCHIVED"}
 REQUIRED_EVIDENCE_FIELDS = {"run_id", "split", "date_range", "universe", "config_hash"}
+REQUIRED_APPROVED_COMPARATIVE_FIELDS = {"family_id", "relative_rank_within_family", "dominated_by"}
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,30 @@ def _validate_required_evidence(edge: Dict[str, Any], require_approved: bool) ->
                     raise EdgeContractValidationError(f"required_evidence[{idx}].{field} cannot be empty")
 
 
+def _validate_comparative_fields(edge: Dict[str, Any], require_approved: bool) -> None:
+    status = str(edge.get("status", "")).strip().upper()
+    if status != "APPROVED" and not require_approved:
+        return
+
+    missing = sorted(REQUIRED_APPROVED_COMPARATIVE_FIELDS.difference(edge.keys()))
+    if missing:
+        raise EdgeContractValidationError(f"APPROVED edge missing comparative fields: {missing}")
+
+    family_id = str(edge.get("family_id", "")).strip()
+    if not family_id:
+        raise EdgeContractValidationError("APPROVED edge requires non-empty family_id")
+
+    rank = edge.get("relative_rank_within_family")
+    if not isinstance(rank, int) or rank < 1:
+        raise EdgeContractValidationError("relative_rank_within_family must be an integer >= 1")
+
+    dominated_by = edge.get("dominated_by")
+    if not isinstance(dominated_by, list):
+        raise EdgeContractValidationError("dominated_by must be a list")
+    if any(not str(item).strip() for item in dominated_by):
+        raise EdgeContractValidationError("dominated_by cannot contain empty edge ids")
+
+
 def validate_edge_contract(edge: Dict[str, Any], *, require_approved: bool = False) -> Dict[str, Any]:
     """Validate edge contract structure and return a defensive copy."""
     if not isinstance(edge, dict):
@@ -105,6 +130,7 @@ def validate_edge_contract(edge: Dict[str, Any], *, require_approved: bool = Fal
     _validate_validity_window(edge)
     _validate_params(edge)
     _validate_required_evidence(edge, require_approved=require_approved)
+    _validate_comparative_fields(edge, require_approved=require_approved)
     return deepcopy(edge)
 
 
