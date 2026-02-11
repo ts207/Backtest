@@ -1,0 +1,34 @@
+{
+  "error": null,
+  "finished_at": "2026-02-11T03:38:59.212829+00:00",
+  "inputs": [],
+  "outputs": [
+    {
+      "end_ts": null,
+      "path": "/tmp/pytest-of-tstuv/pytest-35/test_collects_unified_multi_ev0/reports/edge_candidates/edge_universe_run/edge_candidates_normalized.csv",
+      "rows": 3,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/tmp/pytest-of-tstuv/pytest-35/test_collects_unified_multi_ev0/reports/edge_candidates/edge_universe_run/edge_candidates_normalized.json",
+      "rows": 3,
+      "start_ts": null
+    }
+  ],
+  "parameters": {
+    "execute": 0,
+    "hypothesis_datasets": "auto",
+    "hypothesis_max_fused": 24,
+    "run_hypothesis_generator": 1,
+    "run_id": "edge_universe_run",
+    "symbols": "BTCUSDT,ETHUSDT"
+  },
+  "run_id": "edge_universe_run",
+  "stage": "export_edge_candidates",
+  "started_at": "2026-02-11T03:38:59.198709+00:00",
+  "stats": {
+    "candidate_count": 3
+  },
+  "status": "success"
+}

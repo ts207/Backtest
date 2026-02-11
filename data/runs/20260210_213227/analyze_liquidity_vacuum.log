@@ -1,0 +1,5 @@
+2026-02-10 22:08:16,370 WARNING Calibration did not yield enough events for BTCUSDT; threshold may be unreliable (selected=0.015777496823084575, count=0)
+2026-02-10 22:08:21,940 INFO No liquidity vacuum events detected for BTCUSDT
+2026-02-10 22:08:51,058 WARNING Calibration did not yield enough events for ETHUSDT; threshold may be unreliable (selected=0.020573256035222302, count=0)
+2026-02-10 22:08:56,855 INFO No liquidity vacuum events detected for ETHUSDT
+2026-02-10 22:08:56,856 INFO Wrote summary to /home/tstuv/snap/Backtest/data/reports/liquidity_vacuum/20260210_213227/liquidity_vacuum_summary.json

@@ -1,0 +1,23 @@
+{
+  "run_id": "20260210_213227",
+  "event_type": "vol_shock_relaxation",
+  "phase1_pass": true,
+  "phase1_structure_pass": true,
+  "phase1_decision": "freeze",
+  "conditions_generated": 17,
+  "actions_generated": 8,
+  "conditions_evaluated": 17,
+  "actions_evaluated": 8,
+  "candidates_evaluated": 120,
+  "caps": {
+    "max_conditions": 20,
+    "max_actions": 9,
+    "condition_cap_pass": true,
+    "action_cap_pass": true,
+    "simplicity_gate_pass": true
+  },
+  "opportunity": {
+    "horizon_bars": 20,
+    "tight_ci_eps": 0.005
+  }
+}

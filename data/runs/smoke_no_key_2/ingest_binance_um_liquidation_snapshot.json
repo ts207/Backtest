@@ -1,0 +1,31 @@
+{
+  "error": "Missing CoinGlass API key. Set environment variable COINGLASS_API_KEY (or CG_API_KEY) before running this ingest stage.",
+  "finished_at": "2026-02-11T02:08:31.201469+00:00",
+  "inputs": [],
+  "outputs": [],
+  "parameters": {
+    "coinglass_exchange": "Binance",
+    "coinglass_interval": "1h",
+    "coinglass_window_days": 30,
+    "end": "2025-01-02T00:00:00+00:00",
+    "fail_if_no_data": 1,
+    "force": 0,
+    "max_retries": 5,
+    "provider": "coinglass",
+    "request_timeout_sec": 30,
+    "retry_backoff_sec": 2.0,
+    "run_id": "smoke_no_key_2",
+    "start": "2025-01-01T00:00:00+00:00",
+    "symbols": [
+      "BTCUSDT"
+    ]
+  },
+  "run_id": "smoke_no_key_2",
+  "stage": "ingest_binance_um_liquidation_snapshot",
+  "started_at": "2026-02-11T02:08:31.199887+00:00",
+  "stats": {
+    "provider": "coinglass",
+    "symbols": {}
+  },
+  "status": "failed"
+}

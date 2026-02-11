@@ -1,0 +1,57 @@
+{
+  "error": null,
+  "finished_at": "2026-02-11T02:21:11.469556+00:00",
+  "inputs": [],
+  "outputs": [
+    {
+      "path": "/home/tstuv/snap/Backtest/data/lake/raw/binance/perp/BTCUSDT/open_interest/5m/year=2022/month=01/open_interest_BTCUSDT_5m_2022-01.csv",
+      "rows": 864,
+      "storage": "csv"
+    }
+  ],
+  "parameters": {
+    "api_base": "https://fapi.binance.com",
+    "api_history_days": 30,
+    "archive_base": "https://data.binance.vision/data/futures/um",
+    "archive_list_base": "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision",
+    "end": "2022-01-03T00:00:00+00:00",
+    "fail_if_no_data": 1,
+    "force": 0,
+    "ingest_mode": "auto",
+    "limit": 500,
+    "max_retries": 5,
+    "period": "5m",
+    "request_timeout_sec": 30,
+    "retry_backoff_sec": 2.0,
+    "run_id": "oi_check_small3",
+    "sleep_sec": 0.0,
+    "start": "2022-01-01T00:00:00+00:00",
+    "symbols": [
+      "BTCUSDT"
+    ]
+  },
+  "run_id": "oi_check_small3",
+  "stage": "ingest_binance_um_open_interest_hist",
+  "started_at": "2026-02-11T02:20:58.326752+00:00",
+  "stats": {
+    "api_calls_total": 0,
+    "ingest_mode": "auto",
+    "symbols": {
+      "BTCUSDT": {
+        "api_calls": 0,
+        "api_rows": 0,
+        "archive_available_days": 1532,
+        "archive_days_in_archive": 3,
+        "archive_downloads_attempted": 3,
+        "archive_downloads_not_found": 0,
+        "archive_downloads_ok": 3,
+        "archive_requested_days": 3,
+        "archive_rows": 864,
+        "rows": 864,
+        "written_partitions": 1,
+        "written_rows": 864
+      }
+    }
+  },
+  "status": "success"
+}

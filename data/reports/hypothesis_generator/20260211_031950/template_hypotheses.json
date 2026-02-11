@@ -1,0 +1,431 @@
+[
+  {
+    "hypothesis_id": "20260211_031950_H0001",
+    "source_kind": "template",
+    "template_id": "T1_forced_participation_constraint",
+    "fusion_operator": null,
+    "mechanism_sentence": "Non-economic forced_buy_flow under isolated participation creates short term volatility expansion over a short horizon.",
+    "event_family_spec": {
+      "event_type": "forced_flow_cluster",
+      "trigger": "forced_buy_flow",
+      "context": "isolated",
+      "consequence_class": "short_term_volatility_expansion",
+      "horizon_bucket": "short",
+      "invalidation": "opposite_forced_flow_in_window",
+      "pre_event_conditioning_only": true
+    },
+    "fixed_horizon_bucket": "short",
+    "negative_controls": [
+      "time_shuffled_events",
+      "direction_inverted_events",
+      "randomized_clustering_windows"
+    ],
+    "required_datasets": [
+      "um_liquidation_snapshot"
+    ]
+  },
+  {
+    "hypothesis_id": "20260211_031950_H0002",
+    "source_kind": "template",
+    "template_id": "T1_forced_participation_constraint",
+    "fusion_operator": null,
+    "mechanism_sentence": "Non-economic forced_buy_flow under clustered participation creates temporary price dislocation over a short horizon.",
+    "event_family_spec": {
+      "event_type": "forced_flow_cluster",
+      "trigger": "forced_buy_flow",
+      "context": "clustered",
+      "consequence_class": "temporary_price_dislocation",
+      "horizon_bucket": "short",
+      "invalidation": "opposite_forced_flow_in_window",
+      "pre_event_conditioning_only": true
+    },
+    "fixed_horizon_bucket": "short",
+    "negative_controls": [
+      "time_shuffled_events",
+      "direction_inverted_events",
+      "randomized_clustering_windows"
+    ],
+    "required_datasets": [
+      "um_liquidation_snapshot"
+    ]
+  },
+  {
+    "hypothesis_id": "20260211_031950_H0003",
+    "source_kind": "template",
+    "template_id": "T1_forced_participation_constraint",
+    "fusion_operator": null,
+    "mechanism_sentence": "Non-economic forced_buy_flow under clustered participation creates liquidity vacuum over a medium horizon.",
+    "event_family_spec": {
+      "event_type": "forced_flow_cluster",
+      "trigger": "forced_buy_flow",
+      "context": "clustered",
+      "consequence_class": "liquidity_vacuum",
+      "horizon_bucket": "medium",
+      "invalidation": "opposite_forced_flow_in_window",
+      "pre_event_conditioning_only": true
+    },
+    "fixed_horizon_bucket": "medium",
+    "negative_controls": [
+      "time_shuffled_events",
+      "direction_inverted_events",
+      "randomized_clustering_windows"
+    ],
+    "required_datasets": [
+      "um_liquidation_snapshot"
+    ]
+  },
+  {
+    "hypothesis_id": "20260211_031950_H0004",
+    "source_kind": "template",
+    "template_id": "T1_forced_participation_constraint",
+    "fusion_operator": null,
+    "mechanism_sentence": "Non-economic forced_buy_flow under cascading participation creates liquidity vacuum over a medium horizon.",
+    "event_family_spec": {
+      "event_type": "forced_flow_cluster",
+      "trigger": "forced_buy_flow",
+      "context": "cascading",
+      "consequence_class": "liquidity_vacuum",
+      "horizon_bucket": "medium",
+      "invalidation": "opposite_forced_flow_in_window",
+      "pre_event_conditioning_only": true
+    },
+    "fixed_horizon_bucket": "medium",
+    "negative_controls": [
+      "time_shuffled_events",
+      "direction_inverted_events",
+      "randomized_clustering_windows"
+    ],
+    "required_datasets": [
+      "um_liquidation_snapshot"
+    ]
+  },
+  {
+    "hypothesis_id": "20260211_031950_H0005",
+    "source_kind": "template",
+    "template_id": "T1_forced_participation_constraint",
+    "fusion_operator": null,
+    "mechanism_sentence": "Non-economic forced_buy_flow under cascading participation creates volatility aftershock over a medium horizon.",
+    "event_family_spec": {
+      "event_type": "forced_flow_cluster",
+      "trigger": "forced_buy_flow",
+      "context": "cascading",
+      "consequence_class": "volatility_aftershock",
+      "horizon_bucket": "medium",
+      "invalidation": "opposite_forced_flow_in_window",
+      "pre_event_conditioning_only": true
+    },
+    "fixed_horizon_bucket": "medium",
+    "negative_controls": [
+      "time_shuffled_events",
+      "direction_inverted_events",
+      "randomized_clustering_windows"
+    ],
+    "required_datasets": [
+      "um_liquidation_snapshot"
+    ]
+  },
+  {
+    "hypothesis_id": "20260211_031950_H0006",
+    "source_kind": "template",
+    "template_id": "T1_forced_participation_constraint",
+    "fusion_operator": null,
+    "mechanism_sentence": "Non-economic forced_sell_flow under isolated participation creates short term volatility expansion over a short horizon.",
+    "event_family_spec": {
+      "event_type": "forced_flow_cluster",
+      "trigger": "forced_sell_flow",
+      "context": "isolated",
+      "consequence_class": "short_term_volatility_expansion",
+      "horizon_bucket": "short",
+      "invalidation": "opposite_forced_flow_in_window",
+      "pre_event_conditioning_only": true
+    },
+    "fixed_horizon_bucket": "short",
+    "negative_controls": [
+      "time_shuffled_events",
+      "direction_inverted_events",
+      "randomized_clustering_windows"
+    ],
+    "required_datasets": [
+      "um_liquidation_snapshot"
+    ]
+  },
+  {
+    "hypothesis_id": "20260211_031950_H0007",
+    "source_kind": "template",
+    "template_id": "T1_forced_participation_constraint",
+    "fusion_operator": null,
+    "mechanism_sentence": "Non-economic forced_sell_flow under clustered participation creates temporary price dislocation over a short horizon.",
+    "event_family_spec": {
+      "event_type": "forced_flow_cluster",
+      "trigger": "forced_sell_flow",
+      "context": "clustered",
+      "consequence_class": "temporary_price_dislocation",
+      "horizon_bucket": "short",
+      "invalidation": "opposite_forced_flow_in_window",
+      "pre_event_conditioning_only": true
+    },
+    "fixed_horizon_bucket": "short",
+    "negative_controls": [
+      "time_shuffled_events",
+      "direction_inverted_events",
+      "randomized_clustering_windows"
+    ],
+    "required_datasets": [
+      "um_liquidation_snapshot"
+    ]
+  },
+  {
+    "hypothesis_id": "20260211_031950_H0008",
+    "source_kind": "template",
+    "template_id": "T1_forced_participation_constraint",
+    "fusion_operator": null,
+    "mechanism_sentence": "Non-economic forced_sell_flow under clustered participation creates liquidity vacuum over a medium horizon.",
+    "event_family_spec": {
+      "event_type": "forced_flow_cluster",
+      "trigger": "forced_sell_flow",
+      "context": "clustered",
+      "consequence_class": "liquidity_vacuum",
+      "horizon_bucket": "medium",
+      "invalidation": "opposite_forced_flow_in_window",
+      "pre_event_conditioning_only": true
+    },
+    "fixed_horizon_bucket": "medium",
+    "negative_controls": [
+      "time_shuffled_events",
+      "direction_inverted_events",
+      "randomized_clustering_windows"
+    ],
+    "required_datasets": [
+      "um_liquidation_snapshot"
+    ]
+  },
+  {
+    "hypothesis_id": "20260211_031950_H0009",
+    "source_kind": "template",
+    "template_id": "T1_forced_participation_constraint",
+    "fusion_operator": null,
+    "mechanism_sentence": "Non-economic forced_sell_flow under cascading participation creates liquidity vacuum over a medium horizon.",
+    "event_family_spec": {
+      "event_type": "forced_flow_cluster",
+      "trigger": "forced_sell_flow",
+      "context": "cascading",
+      "consequence_class": "liquidity_vacuum",
+      "horizon_bucket": "medium",
+      "invalidation": "opposite_forced_flow_in_window",
+      "pre_event_conditioning_only": true
+    },
+    "fixed_horizon_bucket": "medium",
+    "negative_controls": [
+      "time_shuffled_events",
+      "direction_inverted_events",
+      "randomized_clustering_windows"
+    ],
+    "required_datasets": [
+      "um_liquidation_snapshot"
+    ]
+  },
+  {
+    "hypothesis_id": "20260211_031950_H0010",
+    "source_kind": "template",
+    "template_id": "T1_forced_participation_constraint",
+    "fusion_operator": null,
+    "mechanism_sentence": "Non-economic forced_sell_flow under cascading participation creates volatility aftershock over a medium horizon.",
+    "event_family_spec": {
+      "event_type": "forced_flow_cluster",
+      "trigger": "forced_sell_flow",
+      "context": "cascading",
+      "consequence_class": "volatility_aftershock",
+      "horizon_bucket": "medium",
+      "invalidation": "opposite_forced_flow_in_window",
+      "pre_event_conditioning_only": true
+    },
+    "fixed_horizon_bucket": "medium",
+    "negative_controls": [
+      "time_shuffled_events",
+      "direction_inverted_events",
+      "randomized_clustering_windows"
+    ],
+    "required_datasets": [
+      "um_liquidation_snapshot"
+    ]
+  },
+  {
+    "hypothesis_id": "20260211_031950_H0011",
+    "source_kind": "template",
+    "template_id": "T3_capacity_saturation_liquidity_discontinuity",
+    "fusion_operator": null,
+    "mechanism_sentence": "When depth depletion burst exceeds local capacity, the market shows nonlinear impact over a short horizon.",
+    "event_family_spec": {
+      "event_type": "liquidity_discontinuity",
+      "trigger": "depth_depletion_burst",
+      "context": "finite_supply_of_immediacy",
+      "consequence_class": "nonlinear_impact",
+      "horizon_bucket": "short",
+      "invalidation": "book_depth_normalized_early",
+      "pre_event_conditioning_only": true
+    },
+    "fixed_horizon_bucket": "short",
+    "negative_controls": [
+      "pre_event_depth_shift",
+      "randomized_depletion_groups",
+      "state_label_shuffle"
+    ],
+    "required_datasets": [
+      "um_perp_ohlcv_15m"
+    ]
+  },
+  {
+    "hypothesis_id": "20260211_031950_H0012",
+    "source_kind": "template",
+    "template_id": "T3_capacity_saturation_liquidity_discontinuity",
+    "fusion_operator": null,
+    "mechanism_sentence": "When aggressive trade burst exceeds local capacity, the market shows refill lag over a medium horizon.",
+    "event_family_spec": {
+      "event_type": "liquidity_discontinuity",
+      "trigger": "aggressive_trade_burst",
+      "context": "finite_supply_of_immediacy",
+      "consequence_class": "refill_lag",
+      "horizon_bucket": "medium",
+      "invalidation": "book_depth_normalized_early",
+      "pre_event_conditioning_only": true
+    },
+    "fixed_horizon_bucket": "medium",
+    "negative_controls": [
+      "pre_event_depth_shift",
+      "randomized_depletion_groups",
+      "state_label_shuffle"
+    ],
+    "required_datasets": [
+      "um_perp_ohlcv_15m"
+    ]
+  },
+  {
+    "hypothesis_id": "20260211_031950_H0013",
+    "source_kind": "template",
+    "template_id": "T3_capacity_saturation_liquidity_discontinuity",
+    "fusion_operator": null,
+    "mechanism_sentence": "When book thinning event exceeds local capacity, the market shows liquidity vacuum over a medium horizon.",
+    "event_family_spec": {
+      "event_type": "liquidity_discontinuity",
+      "trigger": "book_thinning_event",
+      "context": "finite_supply_of_immediacy",
+      "consequence_class": "liquidity_vacuum",
+      "horizon_bucket": "medium",
+      "invalidation": "book_depth_normalized_early",
+      "pre_event_conditioning_only": true
+    },
+    "fixed_horizon_bucket": "medium",
+    "negative_controls": [
+      "pre_event_depth_shift",
+      "randomized_depletion_groups",
+      "state_label_shuffle"
+    ],
+    "required_datasets": [
+      "um_perp_ohlcv_15m"
+    ]
+  },
+  {
+    "hypothesis_id": "20260211_031950_H0014",
+    "source_kind": "template",
+    "template_id": "T4_crowding_constraint_unwind",
+    "fusion_operator": null,
+    "mechanism_sentence": "Under crowded long, forced flow shock induces asymmetric unwind over a medium horizon.",
+    "event_family_spec": {
+      "event_type": "crowding_unwind",
+      "trigger": "forced_flow_shock",
+      "context": "crowded_long",
+      "consequence_class": "asymmetric_unwind",
+      "horizon_bucket": "medium",
+      "invalidation": "opposite_crowding_state_appears",
+      "pre_event_conditioning_only": true
+    },
+    "fixed_horizon_bucket": "medium",
+    "negative_controls": [
+      "crowding_state_shuffle",
+      "side_inversion",
+      "stress_trigger_permutation"
+    ],
+    "required_datasets": [
+      "um_funding_rates",
+      "um_open_interest_hist"
+    ]
+  },
+  {
+    "hypothesis_id": "20260211_031950_H0015",
+    "source_kind": "template",
+    "template_id": "T4_crowding_constraint_unwind",
+    "fusion_operator": null,
+    "mechanism_sentence": "Under crowded short, forced flow shock induces asymmetric unwind over a medium horizon.",
+    "event_family_spec": {
+      "event_type": "crowding_unwind",
+      "trigger": "forced_flow_shock",
+      "context": "crowded_short",
+      "consequence_class": "asymmetric_unwind",
+      "horizon_bucket": "medium",
+      "invalidation": "opposite_crowding_state_appears",
+      "pre_event_conditioning_only": true
+    },
+    "fixed_horizon_bucket": "medium",
+    "negative_controls": [
+      "crowding_state_shuffle",
+      "side_inversion",
+      "stress_trigger_permutation"
+    ],
+    "required_datasets": [
+      "um_funding_rates",
+      "um_open_interest_hist"
+    ]
+  },
+  {
+    "hypothesis_id": "20260211_031950_H0016",
+    "source_kind": "template",
+    "template_id": "T4_crowding_constraint_unwind",
+    "fusion_operator": null,
+    "mechanism_sentence": "Under crowded long, volatility spike induces delayed aftershock over a medium horizon.",
+    "event_family_spec": {
+      "event_type": "crowding_unwind",
+      "trigger": "volatility_spike",
+      "context": "crowded_long",
+      "consequence_class": "delayed_aftershock",
+      "horizon_bucket": "medium",
+      "invalidation": "opposite_crowding_state_appears",
+      "pre_event_conditioning_only": true
+    },
+    "fixed_horizon_bucket": "medium",
+    "negative_controls": [
+      "crowding_state_shuffle",
+      "side_inversion",
+      "stress_trigger_permutation"
+    ],
+    "required_datasets": [
+      "um_funding_rates",
+      "um_open_interest_hist"
+    ]
+  },
+  {
+    "hypothesis_id": "20260211_031950_H0017",
+    "source_kind": "template",
+    "template_id": "T4_crowding_constraint_unwind",
+    "fusion_operator": null,
+    "mechanism_sentence": "Under crowded short, volatility spike induces delayed aftershock over a medium horizon.",
+    "event_family_spec": {
+      "event_type": "crowding_unwind",
+      "trigger": "volatility_spike",
+      "context": "crowded_short",
+      "consequence_class": "delayed_aftershock",
+      "horizon_bucket": "medium",
+      "invalidation": "opposite_crowding_state_appears",
+      "pre_event_conditioning_only": true
+    },
+    "fixed_horizon_bucket": "medium",
+    "negative_controls": [
+      "crowding_state_shuffle",
+      "side_inversion",
+      "stress_trigger_permutation"
+    ],
+    "required_datasets": [
+      "um_funding_rates",
+      "um_open_interest_hist"
+    ]
+  }
+]
