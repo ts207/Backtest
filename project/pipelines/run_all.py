@@ -83,6 +83,11 @@ def main() -> int:
     parser.add_argument("--aftershock_window_start", type=int, default=0)
     parser.add_argument("--aftershock_window_end", type=int, default=96)
     parser.add_argument("--run_recommendations_checklist", type=int, default=1)
+    parser.add_argument("--run_promoted_edge_audits", type=int, default=0)
+    parser.add_argument("--promoted_edge_audit_top_n", type=int, default=3)
+    parser.add_argument("--promoted_edge_audit_horizon_bars", type=int, default=1)
+    parser.add_argument("--promoted_edge_audit_fee_bps", type=float, default=8.0)
+    parser.add_argument("--promoted_edge_audit_spread_bps", type=float, default=2.0)
     args = parser.parse_args()
 
     run_id = args.run_id or _run_id_default()
@@ -216,6 +221,26 @@ def main() -> int:
                 "generate_recommendations_checklist",
                 PROJECT_ROOT / "pipelines" / "research" / "generate_recommendations_checklist.py",
                 ["--run_id", run_id],
+            )
+        )
+
+    if int(args.run_promoted_edge_audits):
+        stages.append(
+            (
+                "run_promoted_edge_audits",
+                PROJECT_ROOT / "pipelines" / "research" / "run_promoted_edge_audits.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--top_n",
+                    str(int(args.promoted_edge_audit_top_n)),
+                    "--horizon_bars",
+                    str(int(args.promoted_edge_audit_horizon_bars)),
+                    "--fee_bps_per_side",
+                    str(float(args.promoted_edge_audit_fee_bps)),
+                    "--spread_bps_per_side",
+                    str(float(args.promoted_edge_audit_spread_bps)),
+                ],
             )
         )
 
