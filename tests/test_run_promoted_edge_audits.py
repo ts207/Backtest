@@ -68,4 +68,7 @@ def test_run_promoted_edge_audits_generates_family_summary(tmp_path: Path, monke
     assert (out_dir / "summary.md").exists()
     summary = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
     assert summary["candidates"][0]["trades"] == 1
-    assert summary["candidates"][0]["mean_net_return"] > 0
+    assert summary["candidates"][0]["mean_net_return"] < 0
+    assert summary["candidates"][0]["events_loaded"] == 1
+    assert "fees_paid_return" in summary["candidates"][0]
+    assert "independence" in payload
