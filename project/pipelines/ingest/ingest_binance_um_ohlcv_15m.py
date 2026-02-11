@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -13,6 +14,7 @@ import pandas as pd
 import requests
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.http_utils import download_with_retries
@@ -82,12 +84,29 @@ def _read_ohlcv_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame:
     with ZipFile(path) as zf:
         csv_name = zf.namelist()[0]
         with zf.open(csv_name) as f:
-            df = pd.read_csv(f, header=None, names=columns)
-    df["timestamp"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
-    df = df[["timestamp", "open", "high", "low", "close", "volume"]]
-    df[["open", "high", "low", "close", "volume"]] = df[
-        ["open", "high", "low", "close", "volume"]
-    ].astype(float)
+            # Some Binance archives include a header row; read raw then coerce.
+            df = pd.read_csv(f, header=None)
+
+    if df.empty:
+        return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "symbol", "source"])
+
+    usable_cols = min(len(columns), df.shape[1])
+    df = df.iloc[:, :usable_cols].copy()
+    df.columns = columns[:usable_cols]
+
+    if "open_time" not in df.columns:
+        raise ValueError(f"Unexpected OHLCV archive schema in {path}: missing open_time column")
+
+    df["open_time"] = pd.to_numeric(df["open_time"], errors="coerce")
+    df = df[df["open_time"].notna()].copy()
+    if df.empty:
+        return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "symbol", "source"])
+
+    df["timestamp"] = pd.to_datetime(df["open_time"].astype("int64"), unit="ms", utc=True)
+    df = df[["timestamp", "open", "high", "low", "close", "volume"]].copy()
+    for col in ["open", "high", "low", "close", "volume"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df = df.dropna(subset=["open", "high", "low", "close", "volume"]).copy()
     df["symbol"] = symbol
     df["source"] = source
     ensure_utc_timestamp(df["timestamp"], "timestamp")
@@ -116,7 +135,7 @@ def main() -> int:
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
-    parser.add_argument("--out_root", default=str(PROJECT_ROOT / "lake" / "raw" / "binance" / "perp"))
+    parser.add_argument("--out_root", default=str(DATA_ROOT / "lake" / "raw" / "binance" / "perp"))
     parser.add_argument("--max_retries", type=int, default=5)
     parser.add_argument("--retry_backoff_sec", type=float, default=2.0)
     parser.add_argument("--force", type=int, default=0)
