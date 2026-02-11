@@ -33,6 +33,24 @@ def test_infer_funding_scale(values, expected_scale):
     assert np.allclose(scaled["funding_rate_scaled"].values, expected)
 
 
+def test_infer_funding_scale_known_sources_stay_decimal():
+    df = pd.DataFrame(
+        {
+            "funding_rate": [0.0001, -0.0002, 0.00005],
+            "source": ["archive_monthly", "archive_daily", "api"],
+        }
+    )
+    scaled, scale_used = infer_and_apply_funding_scale(df, "funding_rate")
+    assert scale_used == 1.0
+    assert np.allclose(scaled["funding_rate_scaled"].values, df["funding_rate"].values)
+
+
+def test_infer_funding_scale_known_source_rejects_non_decimal():
+    df = pd.DataFrame({"funding_rate": [0.02], "source": ["api"]})
+    with pytest.raises(ValueError, match="must already be decimal"):
+        infer_and_apply_funding_scale(df, "funding_rate")
+
+
 def test_constant_funding_detection():
     constant_series = pd.Series([0.0001, 0.0001, 0.0001])
     varying_series = pd.Series([0.0001, 0.0002, 0.0001])

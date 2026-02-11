@@ -9,6 +9,7 @@ from pipelines._lib.validation import ensure_utc_timestamp, validate_columns
 
 FUNDING_MAX_ABS = 0.01
 FUNDING_SCALE_CANDIDATES = (1.0, 0.01, 0.0001)
+_KNOWN_DECIMAL_FUNDING_SOURCES = {"archive_monthly", "archive_daily", "api"}
 
 
 def assert_ohlcv_schema(df: pd.DataFrame) -> None:
@@ -37,7 +38,11 @@ def assert_monotonic_utc_timestamp(df: pd.DataFrame, col: str = "timestamp") -> 
         raise ValueError(f"{col} must be monotonic increasing")
 
 
-def infer_and_apply_funding_scale(df: pd.DataFrame, col: str = "funding_rate") -> Tuple[pd.DataFrame, float]:
+def infer_and_apply_funding_scale(
+    df: pd.DataFrame,
+    col: str = "funding_rate",
+    source_col: str = "source",
+) -> Tuple[pd.DataFrame, float]:
     """
     Infer funding rate scale and add funding_rate_scaled column.
     """
@@ -49,10 +54,23 @@ def infer_and_apply_funding_scale(df: pd.DataFrame, col: str = "funding_rate") -
 
     max_abs = float(non_null.abs().max())
     scale_used = None
-    for scale in FUNDING_SCALE_CANDIDATES:
-        if max_abs * scale <= FUNDING_MAX_ABS:
-            scale_used = scale
-            break
+
+    # Source-aware strict path: known Binance ingest sources are already decimal.
+    if source_col in df.columns:
+        source_values = {str(v).strip().lower() for v in df[source_col].dropna().unique().tolist()}
+        if source_values and source_values.issubset(_KNOWN_DECIMAL_FUNDING_SOURCES):
+            if max_abs > FUNDING_MAX_ABS:
+                raise ValueError(
+                    "Known source funding rates must already be decimal. "
+                    f"Observed max_abs={max_abs} exceeds {FUNDING_MAX_ABS:.4f}."
+                )
+            scale_used = 1.0
+
+    if scale_used is None:
+        for scale in FUNDING_SCALE_CANDIDATES:
+            if max_abs * scale <= FUNDING_MAX_ABS:
+                scale_used = scale
+                break
 
     if scale_used is None:
         raise ValueError(f"Unable to infer funding scale; max_abs={max_abs}")

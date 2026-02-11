@@ -16,7 +16,14 @@ DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.config import load_configs
-from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet, write_parquet
+from pipelines._lib.io_utils import (
+    choose_partition_dir,
+    ensure_dir,
+    list_parquet_files,
+    read_parquet,
+    run_scoped_lake_path,
+    write_parquet,
+)
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.validation import ensure_utc_timestamp, validate_columns
 
@@ -209,10 +216,18 @@ def main() -> int:
 
     try:
         for symbol in symbols:
-            cleaned_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
-            funding_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "funding_15m"
-            cleaned_files = list_parquet_files(cleaned_dir)
-            funding_files = list_parquet_files(funding_dir)
+            cleaned_candidates = [
+                run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", "perp", symbol, "bars_15m"),
+                DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_15m",
+            ]
+            funding_candidates = [
+                run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", "perp", symbol, "funding_15m"),
+                DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "funding_15m",
+            ]
+            cleaned_dir = choose_partition_dir(cleaned_candidates)
+            funding_dir = choose_partition_dir(funding_candidates)
+            cleaned_files = list_parquet_files(cleaned_dir) if cleaned_dir else []
+            funding_files = list_parquet_files(funding_dir) if funding_dir else []
             bars = read_parquet(cleaned_files)
             funding = read_parquet(funding_files)
             if bars.empty:
@@ -223,9 +238,9 @@ def main() -> int:
             ensure_utc_timestamp(bars["timestamp"], "timestamp")
             bars = bars.sort_values("timestamp").reset_index(drop=True)
 
-            inputs.append({"path": str(cleaned_dir), **_collect_stats(bars)})
+            inputs.append({"path": str(cleaned_dir) if cleaned_dir else str(cleaned_candidates[0]), **_collect_stats(bars)})
             if not funding.empty:
-                inputs.append({"path": str(funding_dir), **_collect_stats(funding)})
+                inputs.append({"path": str(funding_dir) if funding_dir else str(funding_candidates[0]), **_collect_stats(funding)})
 
             if funding.empty:
                 if not args.allow_missing_funding:
@@ -268,7 +283,7 @@ def main() -> int:
 
             features["year"] = features["timestamp"].dt.year
             features["month"] = features["timestamp"].dt.month
-            out_dir = DATA_ROOT / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
+            out_dir = run_scoped_lake_path(DATA_ROOT, run_id, "features", "perp", symbol, "15m", "features_v1")
 
             partitions_written: List[str] = []
             partitions_skipped: List[str] = []

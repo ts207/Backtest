@@ -219,7 +219,11 @@ def _fetch_funding_api(
 
 def _partition_complete(path: Path, expected_ts: List[pd.Timestamp]) -> bool:
     if not path.exists():
-        return False
+        csv_path = path.with_suffix(".csv")
+        if csv_path.exists():
+            path = csv_path
+        else:
+            return False
     try:
         df = read_parquet([path])
         if df.empty:
@@ -308,6 +312,7 @@ def main() -> int:
             api_calls = 0
 
             month_frames: List[pd.DataFrame] = []
+            month_specs: List[Dict[str, object]] = []
 
             # ---------- archive ingest per month ----------
             for month_start in _iter_months(effective_start, effective_end):
@@ -325,6 +330,14 @@ def main() -> int:
                     / f"month={month_start.month:02d}"
                 )
                 out_path = out_dir / f"funding_{symbol}_{month_start.year}-{month_start.month:02d}.parquet"
+                month_specs.append(
+                    {
+                        "out_path": out_path,
+                        "range_start": range_start,
+                        "range_end_exclusive": range_end_exclusive,
+                        "expected_ts_month": expected_ts_month,
+                    }
+                )
 
                 if not args.force and _partition_complete(out_path, expected_ts_month):
                     partitions_skipped.append(str(out_path))
@@ -406,20 +419,6 @@ def main() -> int:
 
                 month_frames.append(data)
 
-                if not data.empty:
-                    ensure_dir(out_dir)
-                    written_path, storage = write_parquet(data, out_path)
-                    outputs.append(
-                        {
-                            "path": str(written_path),
-                            "rows": int(len(data)),
-                            "start_ts": data["timestamp"].min().isoformat(),
-                            "end_ts": data["timestamp"].max().isoformat(),
-                            "storage": storage,
-                        }
-                    )
-                    partitions_written.append(str(written_path))
-
             archive_data = pd.concat(month_frames, ignore_index=True) if month_frames else pd.DataFrame()
             archive_data = archive_data.sort_values("timestamp") if not archive_data.empty else archive_data
             if not archive_data.empty:
@@ -446,9 +445,43 @@ def main() -> int:
                     api_coverage_start = api_data["timestamp"].min().isoformat()
                     api_coverage_end = api_data["timestamp"].max().isoformat()
 
-            combined = pd.concat([archive_data, api_data], ignore_index=True)
-            if not combined.empty:
+            frames_to_merge = [frame for frame in (archive_data, api_data) if not frame.empty]
+            if frames_to_merge:
+                combined = pd.concat(frames_to_merge, ignore_index=True)
                 combined = combined.sort_values("timestamp").drop_duplicates(subset=["timestamp"], keep="first")
+            else:
+                combined = pd.DataFrame(columns=["timestamp", "funding_rate", "symbol", "source"])
+
+            # Persist final per-month coverage (archive + API fallback) for downstream stages.
+            for spec in month_specs:
+                out_path = spec["out_path"]
+                range_start = spec["range_start"]
+                range_end_exclusive = spec["range_end_exclusive"]
+                expected_ts_month = spec["expected_ts_month"]
+                if combined.empty:
+                    month_data = pd.DataFrame(columns=["timestamp", "funding_rate", "symbol", "source"])
+                else:
+                    month_data = combined[
+                        (combined["timestamp"] >= range_start) & (combined["timestamp"] < range_end_exclusive)
+                    ].copy()
+                    month_data = month_data.sort_values("timestamp").drop_duplicates(subset=["timestamp"], keep="first")
+                if month_data.empty:
+                    continue
+                if not args.force and _partition_complete(out_path, expected_ts_month):
+                    partitions_skipped.append(str(out_path))
+                    continue
+                ensure_dir(out_path.parent)
+                written_path, storage = write_parquet(month_data, out_path)
+                outputs.append(
+                    {
+                        "path": str(written_path),
+                        "rows": int(len(month_data)),
+                        "start_ts": month_data["timestamp"].min().isoformat(),
+                        "end_ts": month_data["timestamp"].max().isoformat(),
+                        "storage": storage,
+                    }
+                )
+                partitions_written.append(str(written_path))
 
             missing_after_all = _missing_expected_timestamps(combined, expected_ts_all)
 
@@ -471,8 +504,8 @@ def main() -> int:
                 "api_calls": api_calls,
                 "api_coverage_start": api_coverage_start,
                 "api_coverage_end": api_coverage_end,
-                "partitions_written": partitions_written,
-                "partitions_skipped": partitions_skipped,
+                "partitions_written": sorted(set(partitions_written)),
+                "partitions_skipped": sorted(set(partitions_skipped)),
             }
 
         finalize_manifest(manifest, "success", stats=stats)

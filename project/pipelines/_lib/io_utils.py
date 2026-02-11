@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -79,3 +80,38 @@ def write_parquet(df: pd.DataFrame, path: Path) -> Tuple[Path, str]:
     df.to_csv(temp_path, index=False)
     temp_path.replace(csv_path)
     return csv_path, "csv"
+
+
+def run_lake_root(data_root: Path, run_id: str) -> Path:
+    """
+    Root directory for run-scoped lake artifacts.
+    """
+    return data_root / "lake" / "runs" / run_id
+
+
+def run_scoped_lake_path(data_root: Path, run_id: str, *parts: str) -> Path:
+    """
+    Build a run-scoped lake path under data/lake/runs/<run_id>/...
+    """
+    return run_lake_root(data_root, run_id) / Path(*parts)
+
+
+def _has_partition_files(path: Path) -> bool:
+    return bool(list_parquet_files(path))
+
+
+def choose_partition_dir(candidates: Sequence[Path]) -> Optional[Path]:
+    """
+    Return the first candidate directory that has parquet/csv partitions.
+    """
+    for candidate in candidates:
+        if _has_partition_files(candidate):
+            return candidate
+    return None
+
+
+def env_data_root(default_root: Path) -> Path:
+    """
+    Resolve data root at call time, allowing monkeypatches to BACKTEST_DATA_ROOT.
+    """
+    return Path(os.getenv("BACKTEST_DATA_ROOT", str(default_root)))

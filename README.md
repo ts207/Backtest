@@ -1,71 +1,77 @@
 # Backtest
 
-## Setup
-- Python 3.10+
-- Install dependencies: `python3 -m pip install -r requirements.txt`
-- Optional: create a virtual environment in `.venv` before installing
+A modular crypto-perpetual backtesting and research repository with run-scoped data pipelines, deterministic tests, and phase-gated research analyzers.
 
-## Data root
-By default, all data, runs, and reports live under `data/` at the repo root.
-To change this location, set `BACKTEST_DATA_ROOT` to an absolute path before running.
+## Quick start
+
+### 1) Install
 
 ```bash
-export BACKTEST_DATA_ROOT=/path/to/backtest-data
+python3 -m pip install -r requirements.txt
+python3 -m pip install -r requirements-dev.txt
 ```
 
-## One-command pipeline run
-Run the full pipeline from the repo root:
+### 2) Optional data root override
 
 ```bash
-python3 project/pipelines/run_all.py --symbols BTCUSDT,ETHUSDT --start 2020-06-01 --end 2025-07-10
+export BACKTEST_DATA_ROOT=/absolute/path/to/backtest-data
 ```
 
-PowerShell example:
+### 3) Canonical command surface (run from repo root)
 
-```powershell
-python project\pipelines\run_all.py --symbols BTCUSDT,ETHUSDT --start 2020-06-01 --end 2025-07-10
-```
-
-The orchestrator auto-generates `run_id` (format `YYYYMMDD_HHMMSS`) unless you provide one via `--run_id`.
-
-## Run stages individually
 ```bash
-# 1) Ingest 15m OHLCV
-python3 project/pipelines/ingest/ingest_binance_um_ohlcv_15m.py --run_id 20260101_120000 --symbols BTCUSDT,ETHUSDT --start 2020-06-01 --end 2020-06-01
-
-# 2) Ingest funding rates
-python3 project/pipelines/ingest/ingest_binance_um_funding.py --run_id 20260101_120000 --symbols BTCUSDT,ETHUSDT --start 2020-06-01 --end 2025-06-01
-
-# 3) Build cleaned canonical 15m bars + aligned funding
-python3 project/pipelines/clean/build_cleaned_15m.py --run_id 20260101_120000 --symbols BTCUSDT,ETHUSDT --start 2020-06-01 --end 2025-06-01
-
-# 4) Build features v1
-python3 project/pipelines/features/build_features_v1.py --run_id 20260101_120000 --symbols BTCUSDT,ETHUSDT
-
-# 5) Run the backtest
-python3 project/pipelines/backtest/backtest_vol_compression_v1.py --run_id 20260101_120000 --symbols BTCUSDT,ETHUSDT
-
-# 6) Generate report
-python3 project/pipelines/report/make_report.py --run_id 20260101_120000
+make run-core START=2023-01-01 END=2025-12-31 SYMBOLS=BTCUSDT,ETHUSDT
+make run-research-vsr START=2023-01-01 END=2025-12-31 SYMBOLS=BTCUSDT,ETHUSDT
+make run-full START=2023-01-01 END=2025-12-31 SYMBOLS=BTCUSDT,ETHUSDT
 ```
 
-## Output locations
-- Raw data: `data/lake/raw/binance/perp/<symbol>/...`
-- Cleaned bars: `data/lake/cleaned/perp/<symbol>/bars_15m/...`
-- Aligned funding: `data/lake/cleaned/perp/<symbol>/funding_15m/...`
-- Features: `data/lake/features/perp/<symbol>/15m/features_v1/...`
-- Backtest outputs: `data/lake/trades/backtests/vol_compression_expansion_v1/<run_id>/...`
-- Reports: `data/reports/vol_compression_expansion_v1/<run_id>/summary.md`
-- Manifests/logs: `data/runs/<run_id>/<stage>.json` and `.log`
+## Common developer commands
 
-## Sanity gates and funding handling
-- Funding is treated as discrete 8h events. Cleaned funding stores `funding_event_ts` and `funding_rate_scaled` aligned to each 15m bar.
-- Missing funding fails the clean and features stages unless `--allow_missing_funding=1` is provided.
-- Constant funding within a month (std == 0 after scaling) fails the clean stage unless `--allow_constant_funding=1`.
-- Funding timestamps must be on-the-hour; `--allow_funding_timestamp_rounding=1` will round to the nearest hour and record counts in manifests.
-- Sanity checks enforce UTC, monotonic timestamps, and funding bounds (abs <= 1% per 8h).
+```bash
+make help
+make test
+make smoke
+make audit
+```
 
-## Data availability and gaps
-- USD-M futures archives do not exist before late 2019. Requests earlier than that are clamped to the first available date and recorded in manifests as `requested_start` vs `effective_start`.
-- Missing archive files are recorded in manifests and do not fail the run.
-- Funding gaps are recorded in manifests; missing funding does not get silently filled.
+## Repository layout
+
+- `project/pipelines/`: ingest, clean, feature engineering, backtest, report, and research stages.
+- `project/engine/`: return and PnL computation + strategy aggregation.
+- `project/strategies/`: strategy implementations and registry.
+- `project/features/`: context/feature logic consumed by engine + pipelines.
+- `tests/`: regression and contract tests.
+- `docs/spec/`: contracts, schemas, and interpretation locks.
+- `docs/report/`: run analyses and audit narratives.
+- `edges/`: overlay/promotion edge definitions.
+
+## Data output layout (default)
+
+- Raw ingest: `data/lake/raw/...`
+- Run-scoped cleaned bars: `data/lake/runs/<run_id>/cleaned/...`
+- Run-scoped features: `data/lake/runs/<run_id>/features/...`
+- Run-scoped context: `data/lake/runs/<run_id>/context/...`
+- Engine outputs + run metadata: `data/runs/<run_id>/...`
+- Reports: `data/reports/...`
+
+## Canonical workflow order
+
+`run_all.py` executes explicit workflow semantics:
+
+1. ingest (optional)
+2. cleaned bars
+3. base features
+4. context features
+5. phase1 → phase2 → checklist → promoted audits (`research` / `full`)
+6. backtest + report (`core` / `full`)
+
+## Contract verification
+
+```bash
+bash scripts/verify_run_contract.sh <RID> core
+bash scripts/verify_run_contract.sh <RID> research directional_exhaustion_after_forced_flow
+```
+
+## Documentation index
+
+See [`docs/README.md`](docs/README.md) for stable spec/report taxonomy.

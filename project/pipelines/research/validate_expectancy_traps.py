@@ -15,7 +15,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet
+from pipelines._lib.io_utils import (
+    choose_partition_dir,
+    ensure_dir,
+    list_parquet_files,
+    read_parquet,
+    run_scoped_lake_path,
+)
 
 
 @dataclass
@@ -125,11 +131,15 @@ def _tail_report(returns: pd.Series) -> Dict[str, float]:
     }
 
 
-def _load_symbol_features(symbol: str) -> pd.DataFrame:
-    features_dir = DATA_ROOT / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
-    files = list_parquet_files(features_dir)
+def _load_symbol_features(symbol: str, run_id: str) -> pd.DataFrame:
+    candidates = [
+        run_scoped_lake_path(DATA_ROOT, run_id, "features", "perp", symbol, "15m", "features_v1"),
+        DATA_ROOT / "lake" / "features" / "perp" / symbol / "15m" / "features_v1",
+    ]
+    features_dir = choose_partition_dir(candidates)
+    files = list_parquet_files(features_dir) if features_dir else []
     if not files:
-        raise ValueError(f"No features found for {symbol}")
+        raise ValueError(f"No features found for {symbol}: {candidates[0]}")
     df = read_parquet(files)
     if df.empty:
         raise ValueError(f"Empty features for {symbol}")
@@ -377,7 +387,7 @@ def main() -> int:
     event_summary_rows: List[Dict[str, object]] = []
 
     for symbol in symbols:
-        df = _load_symbol_features(symbol)
+        df = _load_symbol_features(symbol, run_id=args.run_id)
         df = _build_features(df, args.htf_window, args.htf_lookback, args.funding_pct_window)
         leakage[symbol] = _leakage_check(df, args.htf_window, args.htf_lookback)
         events = _extract_compression_events(df, symbol=symbol, max_duration=args.max_event_duration)

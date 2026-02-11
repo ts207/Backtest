@@ -15,7 +15,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet
+from pipelines._lib.io_utils import (
+    choose_partition_dir,
+    ensure_dir,
+    list_parquet_files,
+    read_parquet,
+    run_scoped_lake_path,
+)
 
 EVENT_TYPES = [
     "funding_extreme_onset",
@@ -55,11 +61,15 @@ def _pick_window_column(columns: Iterable[str], prefix: str, fallback: str) -> s
     raise ValueError(f"Missing required column prefix={prefix} fallback={fallback}")
 
 
-def _load_features(symbol: str) -> pd.DataFrame:
-    features_dir = DATA_ROOT / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
-    files = list_parquet_files(features_dir)
+def _load_features(symbol: str, run_id: str) -> pd.DataFrame:
+    candidates = [
+        run_scoped_lake_path(DATA_ROOT, run_id, "features", "perp", symbol, "15m", "features_v1"),
+        DATA_ROOT / "lake" / "features" / "perp" / symbol / "15m" / "features_v1",
+    ]
+    features_dir = choose_partition_dir(candidates)
+    files = list_parquet_files(features_dir) if features_dir else []
     if not files:
-        raise ValueError(f"No feature partitions found for {symbol}: {features_dir}")
+        raise ValueError(f"No feature partitions found for {symbol}: {candidates[0]}")
     df = read_parquet(files)
     if df.empty:
         raise ValueError(f"Empty features for {symbol}")
@@ -970,7 +980,7 @@ def main() -> int:
     rng = np.random.default_rng(args.baseline_seed)
 
     for symbol in symbols:
-        df = _load_features(symbol)
+        df = _load_features(symbol, run_id=args.run_id)
         required = {"timestamp", "close", "funding_rate_scaled", "rv_96"}
         missing = sorted(required - set(df.columns))
         if missing:

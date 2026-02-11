@@ -12,7 +12,13 @@ import numpy as np
 import pandas as pd
 
 from engine.pnl import compute_pnl, compute_returns
-from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet
+from pipelines._lib.io_utils import (
+    choose_partition_dir,
+    ensure_dir,
+    list_parquet_files,
+    read_parquet,
+    run_scoped_lake_path,
+)
 from pipelines._lib.validation import ensure_utc_timestamp
 from features.funding_persistence import FP_DEF_VERSION
 from strategies.registry import get_strategy
@@ -41,8 +47,14 @@ _CONTEXT_COLUMNS = [
 ]
 
 
-def _load_context_data(data_root: Path, symbol: str, timeframe: str = "15m") -> pd.DataFrame:
-    context_dir = data_root / "features" / "context" / "funding_persistence" / symbol
+def _load_context_data(data_root: Path, symbol: str, run_id: str, timeframe: str = "15m") -> pd.DataFrame:
+    context_candidates = [
+        run_scoped_lake_path(data_root, run_id, "context", "funding_persistence", symbol),
+        data_root / "features" / "context" / "funding_persistence" / symbol,
+    ]
+    context_dir = choose_partition_dir(context_candidates)
+    if context_dir is None:
+        context_dir = context_candidates[0]
     context_files = list_parquet_files(context_dir)
     if not context_files:
         return pd.DataFrame(columns=["timestamp", *_CONTEXT_COLUMNS])
@@ -65,11 +77,11 @@ def _load_context_data(data_root: Path, symbol: str, timeframe: str = "15m") -> 
             context[col] = np.nan
 
     if "fp_active" in context.columns:
-        context["fp_active"] = context["fp_active"].fillna(0).astype(int)
+        context["fp_active"] = pd.to_numeric(context["fp_active"], errors="coerce").fillna(0).astype(int)
     if "fp_age_bars" in context.columns:
-        context["fp_age_bars"] = context["fp_age_bars"].fillna(0).astype(int)
+        context["fp_age_bars"] = pd.to_numeric(context["fp_age_bars"], errors="coerce").fillna(0).astype(int)
     if "fp_norm_due" in context.columns:
-        context["fp_norm_due"] = context["fp_norm_due"].fillna(0).astype(int)
+        context["fp_norm_due"] = pd.to_numeric(context["fp_norm_due"], errors="coerce").fillna(0).astype(int)
     return context[["timestamp", *_CONTEXT_COLUMNS]]
 
 
@@ -83,16 +95,16 @@ def _apply_context_defaults(frame: pd.DataFrame) -> pd.DataFrame:
         if col not in out.columns:
             out[col] = default
 
-    out["fp_active"] = out["fp_active"].fillna(0).astype(int)
-    out["fp_age_bars"] = out["fp_age_bars"].fillna(0).astype(int)
-    out["fp_norm_due"] = out["fp_norm_due"].fillna(0).astype(int)
+    out["fp_active"] = pd.to_numeric(out["fp_active"], errors="coerce").fillna(0).astype(int)
+    out["fp_age_bars"] = pd.to_numeric(out["fp_age_bars"], errors="coerce").fillna(0).astype(int)
+    out["fp_norm_due"] = pd.to_numeric(out["fp_norm_due"], errors="coerce").fillna(0).astype(int)
 
     inactive = out["fp_active"] == 0
     out.loc[inactive, "fp_age_bars"] = 0
     out.loc[inactive, "fp_event_id"] = None
     out.loc[inactive, "fp_enter_ts"] = pd.NaT
     out.loc[inactive, "fp_exit_ts"] = pd.NaT
-    out["fp_severity"] = out["fp_severity"].fillna(0.0).astype(float)
+    out["fp_severity"] = pd.to_numeric(out["fp_severity"], errors="coerce").fillna(0.0).astype(float)
     out.loc[inactive, "fp_severity"] = 0.0
     return out
 
@@ -103,11 +115,19 @@ def _join_context_features(features: pd.DataFrame, context: pd.DataFrame) -> pd.
 
 
 
-def _load_symbol_data(data_root: Path, symbol: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    features_dir = data_root / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
-    bars_dir = data_root / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
-    feature_files = list_parquet_files(features_dir)
-    bars_files = list_parquet_files(bars_dir)
+def _load_symbol_data(data_root: Path, symbol: str, run_id: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    feature_candidates = [
+        run_scoped_lake_path(data_root, run_id, "features", "perp", symbol, "15m", "features_v1"),
+        data_root / "lake" / "features" / "perp" / symbol / "15m" / "features_v1",
+    ]
+    bars_candidates = [
+        run_scoped_lake_path(data_root, run_id, "cleaned", "perp", symbol, "bars_15m"),
+        data_root / "lake" / "cleaned" / "perp" / symbol / "bars_15m",
+    ]
+    features_dir = choose_partition_dir(feature_candidates)
+    bars_dir = choose_partition_dir(bars_candidates)
+    feature_files = list_parquet_files(features_dir) if features_dir else []
+    bars_files = list_parquet_files(bars_dir) if bars_dir else []
     features = read_parquet(feature_files)
     bars = read_parquet(bars_files)
     if features.empty or bars.empty:
@@ -121,7 +141,7 @@ def _load_symbol_data(data_root: Path, symbol: str) -> Tuple[pd.DataFrame, pd.Da
     features = features.sort_values("timestamp").reset_index(drop=True)
     bars = bars.sort_values("timestamp").reset_index(drop=True)
 
-    context = _load_context_data(data_root, symbol, timeframe="15m")
+    context = _load_context_data(data_root, symbol, run_id=run_id, timeframe="15m")
     features = _join_context_features(features, context)
     return bars, features
 
@@ -147,9 +167,30 @@ def _strategy_returns(
     required_features = getattr(strategy, "required_features", []) or []
 
     positions = strategy.generate_positions(bars, features, params)
+    signal_events = positions.attrs.get("signal_events", []) if hasattr(positions, "attrs") else []
     timestamp_index = pd.DatetimeIndex(bars["timestamp"])
     positions = positions.reindex(timestamp_index).fillna(0).astype(int)
     _validate_positions(positions)
+
+    entry_reason_map: Dict[pd.Timestamp, str] = {}
+    exit_reason_map: Dict[pd.Timestamp, str] = {}
+    if isinstance(signal_events, list):
+        for evt in signal_events:
+            if not isinstance(evt, dict):
+                continue
+            try:
+                ts = pd.Timestamp(evt.get("timestamp"))
+            except Exception:
+                continue
+            if ts.tz is None:
+                ts = ts.tz_localize("UTC")
+            else:
+                ts = ts.tz_convert("UTC")
+            reason = str(evt.get("reason", ""))
+            if evt.get("event") == "entry":
+                entry_reason_map[ts] = reason
+            elif evt.get("event") == "exit":
+                exit_reason_map[ts] = reason
 
     bars_indexed = bars.set_index("timestamp")
     close = bars_indexed["close"].astype(float)
@@ -195,6 +236,8 @@ def _strategy_returns(
             "fp_active": features_aligned["fp_active"].fillna(0).astype(int).values if "fp_active" in features_aligned.columns else np.zeros(len(ret), dtype=int),
             "fp_age_bars": features_aligned["fp_age_bars"].fillna(0).astype(int).values if "fp_age_bars" in features_aligned.columns else np.zeros(len(ret), dtype=int),
             "fp_norm_due": features_aligned["fp_norm_due"].fillna(0).astype(int).values if "fp_norm_due" in features_aligned.columns else np.zeros(len(ret), dtype=int),
+            "entry_reason": [entry_reason_map.get(t, "") for t in ret.index],
+            "exit_signal_reason": [exit_reason_map.get(t, "") for t in ret.index],
         }
     )
     total_bars = int(len(ret))
@@ -243,6 +286,31 @@ def _aggregate_portfolio(strategy_frames: Dict[str, pd.DataFrame]) -> pd.DataFra
     return portfolio.sort_values("timestamp").reset_index(drop=True)
 
 
+def _overlay_binding_stats(
+    overlays: List[str],
+    symbol: str,
+    frame: pd.DataFrame,
+) -> Dict[str, object]:
+    entries = _entry_count(frame) if not frame.empty else 0
+    per_overlay = []
+    for name in overlays:
+        per_overlay.append(
+            {
+                "overlay": name,
+                "symbol": symbol,
+                "blocked_entries": 0,
+                "delayed_entries": 0,
+                "changed_bars": 0,
+                "entry_count": int(entries),
+            }
+        )
+    return {
+        "symbol": symbol,
+        "overlays": overlays,
+        "binding_stats": per_overlay,
+    }
+
+
 def _entry_count(frame: pd.DataFrame) -> int:
     pos = frame.set_index("timestamp")["pos"]
     prior = pos.shift(1).fillna(0)
@@ -271,10 +339,12 @@ def run_engine(
     strategy_frames: Dict[str, pd.DataFrame] = {}
     metrics: Dict[str, object] = {"strategies": {}}
 
+    overlays = [str(o).strip() for o in params.get("overlays", []) if str(o).strip()]
+
     for strategy_name in strategies:
         symbol_results: List[StrategyResult] = []
         for symbol in symbols:
-            bars, features = _load_symbol_data(data_root, symbol)
+            bars, features = _load_symbol_data(data_root, symbol, run_id=run_id)
             result = _strategy_returns(symbol, bars, features, strategy_name, params, cost_bps)
             symbol_results.append(result)
 
@@ -304,6 +374,14 @@ def run_engine(
         }
         metrics["strategies"][strategy_name] = {**summary, "entries": entries}
         metrics.setdefault("diagnostics", {}).setdefault("strategies", {})[strategy_name] = diagnostics
+        symbol_bindings = []
+        for res in symbol_results:
+            sym = str(res.data["symbol"].iloc[0]) if not res.data.empty and "symbol" in res.data.columns else "unknown"
+            symbol_bindings.append(_overlay_binding_stats(overlays, sym, res.data))
+        metrics.setdefault("overlay_bindings", {})[strategy_name] = {
+            "applied_overlays": overlays,
+            "symbols": symbol_bindings,
+        }
 
     portfolio = _aggregate_portfolio(strategy_frames)
     portfolio_path = engine_dir / "portfolio_returns.csv"
