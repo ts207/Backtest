@@ -30,6 +30,37 @@ def _load_trades(trades_dir: Path) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def _format_funding_section(cleaned_stats: Dict[str, object]) -> List[str]:
+    lines: List[str] = []
+    lines.append("### Funding coverage (%) by month")
+    for symbol, details in cleaned_stats.get("symbols", {}).items():
+        lines.append(f"- **{symbol}**")
+        for month, values in details.get("pct_missing_funding_event", {}).items():
+            coverage = float(values.get("pct_funding_event_coverage", 0.0))
+            lines.append(f"  - {month}: {coverage:.2%}")
+    lines.append("")
+    lines.append("### Funding missing (%) by month")
+    for symbol, details in cleaned_stats.get("symbols", {}).items():
+        lines.append(f"- **{symbol}**")
+        for month, values in details.get("pct_missing_funding_event", {}).items():
+            missing = float(values.get("pct_missing_funding_event", 0.0))
+            lines.append(f"  - {month}: {missing:.2%}")
+    lines.append("")
+    lines.append("### Funding diagnostics")
+    for symbol, details in cleaned_stats.get("symbols", {}).items():
+        lines.append(f"- **{symbol}**")
+        pct_bars_with_event = float(details.get("pct_bars_with_funding_event", 0.0))
+        funding_min = details.get("funding_rate_scaled_min")
+        funding_max = details.get("funding_rate_scaled_max")
+        funding_std = details.get("funding_rate_scaled_std")
+        funding_min_display = f"{funding_min:.6f}" if isinstance(funding_min, (float, int)) else "n/a"
+        funding_max_display = f"{funding_max:.6f}" if isinstance(funding_max, (float, int)) else "n/a"
+        funding_std_display = f"{funding_std:.6f}" if isinstance(funding_std, (float, int)) else "n/a"
+        lines.append(f"  - % bars with funding_event_ts: {pct_bars_with_event:.2%}")
+        lines.append(f"  - funding_rate_scaled min/max/std: {funding_min_display} / {funding_max_display} / {funding_std_display}")
+    return lines
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate report")
     parser.add_argument("--run_id", required=True)
@@ -138,11 +169,7 @@ def main() -> int:
                 for month, values in details.get("pct_missing_ohlcv", {}).items():
                     lines.append(f"  - {month}: {values.get('pct_missing_ohlcv', 0.0):.2%}")
             lines.append("")
-            lines.append("### Funding fill (%) by month")
-            for symbol, details in cleaned_stats.get("symbols", {}).items():
-                lines.append(f"- **{symbol}**")
-                for month, values in details.get("pct_missing_funding_filled", {}).items():
-                    lines.append(f"  - {month}: {values.get('pct_missing_funding_filled', 0.0):.2%}")
+            lines.extend(_format_funding_section(cleaned_stats))
 
         report_path.write_text("\n".join(lines), encoding="utf-8")
         outputs.append({"path": str(report_path), "rows": len(lines), "start_ts": None, "end_ts": None})
