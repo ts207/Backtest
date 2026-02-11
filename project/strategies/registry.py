@@ -3,11 +3,15 @@ from __future__ import annotations
 from typing import Dict, List
 
 from strategies.base import Strategy
+from strategies.vol_compression_momentum_v1 import VolCompressionMomentumV1
+from strategies.vol_compression_reversion_v1 import VolCompressionReversionV1
 from strategies.vol_compression_v1 import VolCompressionV1
 
 
 _REGISTRY: Dict[str, Strategy] = {
     "vol_compression_v1": VolCompressionV1(),
+    "vol_compression_momentum_v1": VolCompressionMomentumV1(),
+    "vol_compression_reversion_v1": VolCompressionReversionV1(),
 }
 
 
