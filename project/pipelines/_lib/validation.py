@@ -9,7 +9,7 @@ def ensure_utc_timestamp(series: pd.Series, name: str) -> pd.Series:
     """
     Validate that a pandas Series of timestamps is timezone-aware UTC.
     """
-    if not pd.api.types.is_datetime64tz_dtype(series):
+    if not isinstance(series.dtype, pd.DatetimeTZDtype):
         raise ValueError(f"{name} must be timezone-aware UTC")
     if str(series.dt.tz) != "UTC":
         raise ValueError(f"{name} must be UTC")

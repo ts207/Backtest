@@ -1,17 +1,33 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from functools import lru_cache
-from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
+
+PHASE1_ANALYZERS = {
+    "vol_shock_relaxation": (
+        "analyze_vol_shock_relaxation",
+        PROJECT_ROOT / "pipelines" / "research" / "analyze_vol_shock_relaxation.py",
+    ),
+    "directional_exhaustion_after_forced_flow": (
+        "analyze_directional_exhaustion_after_forced_flow",
+        PROJECT_ROOT / "pipelines" / "research" / "analyze_directional_exhaustion_after_forced_flow.py",
+    ),
+    "liquidity_refill_lag_window": (
+        "analyze_liquidity_refill_lag_window",
+        PROJECT_ROOT / "pipelines" / "research" / "analyze_liquidity_refill_lag_window.py",
+    ),
+}
 
 
 def _run_id_default() -> str:
@@ -24,6 +40,43 @@ def _script_supports_log_path(script_path: Path) -> bool:
         return "--log_path" in script_path.read_text(encoding="utf-8")
     except OSError:
         return False
+
+
+def _git_commit_hash() -> str:
+    try:
+        return (
+            subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT.parent)
+            .decode("utf-8")
+            .strip()
+        )
+    except Exception:
+        return "unknown"
+
+
+def _write_run_metadata(run_id: str, args: argparse.Namespace) -> Path:
+    runs_dir = DATA_ROOT / "runs" / run_id
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "run_id": run_id,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "git_commit": _git_commit_hash(),
+        "workflow": args.workflow,
+        "symbols": args.symbols,
+        "start": args.start,
+        "end": args.end,
+        "phase2_event_type": args.phase2_event_type,
+        "run_phase2_conditional": int(args.run_phase2_conditional),
+        "run_recommendations_checklist": int(args.run_recommendations_checklist),
+        "run_promoted_edge_audits": int(args.run_promoted_edge_audits),
+        "fees_bps": args.fees_bps,
+        "slippage_bps": args.slippage_bps,
+        "cost_bps": args.cost_bps,
+        "strategies": args.strategies,
+        "overlays": args.overlays,
+    }
+    path = runs_dir / "run_metadata.json"
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
 
 
 def _run_stage(
@@ -51,15 +104,42 @@ def _run_stage(
     return True
 
 
+def _print_execution_plan(workflow: str, stages: List[Tuple[str, Path, List[str]]], run_id: str) -> None:
+    print(f"Workflow: {workflow}")
+    print(f"Run ID: {run_id}")
+    print("Execution order:")
+    for idx, (name, _, _) in enumerate(stages, start=1):
+        print(f"  {idx:02d}. {name}")
+
+
+def _verify_run_contract(run_id: str, args: argparse.Namespace) -> bool:
+    verify_script = PROJECT_ROOT.parent / "scripts" / "verify_run_contract.sh"
+    if not verify_script.exists():
+        print("verify_run_contract.sh not found; skipping artifact contract verification")
+        return True
+
+    cmd = [
+        str(verify_script),
+        "--run_id",
+        run_id,
+        "--workflow",
+        args.workflow,
+        "--event_type",
+        args.phase2_event_type,
+        "--expect_promoted_audits",
+        str(int(args.run_promoted_edge_audits)),
+    ]
+    result = subprocess.run(cmd)
+    return result.returncode == 0
+
+
 def main() -> int:
-    """
-    Parse command-line arguments and run all pipeline stages in sequence.
-    """
-    parser = argparse.ArgumentParser(description="Run full pipeline")
+    parser = argparse.ArgumentParser(description="Run pipeline workflows")
     parser.add_argument("--run_id", required=False)
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
+    parser.add_argument("--workflow", default="core", choices=["core", "research", "full"])
     parser.add_argument("--force", type=int, default=0)
     parser.add_argument("--skip_ingest_ohlcv", type=int, default=0)
     parser.add_argument("--skip_ingest_funding", type=int, default=0)
@@ -73,7 +153,15 @@ def main() -> int:
     parser.add_argument("--strategies", default=None)
     parser.add_argument("--overlays", default="")
     parser.add_argument("--run_phase2_conditional", type=int, default=0)
-    parser.add_argument("--phase2_event_type", default="vol_shock_relaxation", choices=["vol_shock_relaxation", "directional_exhaustion_after_forced_flow", "liquidity_refill_lag_window"])
+    parser.add_argument(
+        "--phase2_event_type",
+        default="vol_shock_relaxation",
+        choices=[
+            "vol_shock_relaxation",
+            "directional_exhaustion_after_forced_flow",
+            "liquidity_refill_lag_window",
+        ],
+    )
     parser.add_argument("--phase2_max_conditions", type=int, default=20)
     parser.add_argument("--phase2_max_actions", type=int, default=9)
     parser.add_argument("--phase2_bootstrap_iters", type=int, default=1000)
@@ -88,6 +176,7 @@ def main() -> int:
     parser.add_argument("--promoted_edge_audit_horizon_bars", type=int, default=1)
     parser.add_argument("--promoted_edge_audit_fee_bps", type=float, default=8.0)
     parser.add_argument("--promoted_edge_audit_spread_bps", type=float, default=2.0)
+    parser.add_argument("--verify_contract", type=int, default=0)
     args = parser.parse_args()
 
     run_id = args.run_id or _run_id_default()
@@ -95,6 +184,11 @@ def main() -> int:
     start = args.start
     end = args.end
     force_flag = str(int(args.force))
+
+    # Workflow defaults: research/full imply phase2 unless explicitly enabled already.
+    if args.workflow in {"research", "full"}:
+        args.run_phase2_conditional = 1
+
     allow_missing_funding_flag = str(int(args.allow_missing_funding))
     allow_constant_funding_flag = str(int(args.allow_constant_funding))
     allow_funding_timestamp_rounding_flag = str(int(args.allow_funding_timestamp_rounding))
@@ -105,18 +199,7 @@ def main() -> int:
             (
                 "ingest_binance_um_ohlcv_15m",
                 PROJECT_ROOT / "pipelines" / "ingest" / "ingest_binance_um_ohlcv_15m.py",
-                [
-                    "--run_id",
-                    run_id,
-                    "--symbols",
-                    symbols,
-                    "--start",
-                    start,
-                    "--end",
-                    end,
-                    "--force",
-                    force_flag,
-                ],
+                ["--run_id", run_id, "--symbols", symbols, "--start", start, "--end", end, "--force", force_flag],
             )
         )
     if not args.skip_ingest_funding:
@@ -124,18 +207,7 @@ def main() -> int:
             (
                 "ingest_binance_um_funding",
                 PROJECT_ROOT / "pipelines" / "ingest" / "ingest_binance_um_funding.py",
-                [
-                    "--run_id",
-                    run_id,
-                    "--symbols",
-                    symbols,
-                    "--start",
-                    start,
-                    "--end",
-                    end,
-                    "--force",
-                    force_flag,
-                ],
+                ["--run_id", run_id, "--symbols", symbols, "--start", start, "--end", end, "--force", force_flag],
             )
         )
 
@@ -195,25 +267,56 @@ def main() -> int:
                     force_flag,
                 ],
             ),
+        ]
+    )
+
+    if int(args.run_phase1_aftershock):
+        stages.append(
             (
-                "backtest_vol_compression_v1",
-                PROJECT_ROOT / "pipelines" / "backtest" / "backtest_vol_compression_v1.py",
+                "analyze_vol_aftershock_window",
+                PROJECT_ROOT / "pipelines" / "research" / "analyze_vol_aftershock_window.py",
                 [
                     "--run_id",
                     run_id,
                     "--symbols",
                     symbols,
-                    "--force",
-                    force_flag,
+                    "--window_start",
+                    str(args.aftershock_window_start),
+                    "--window_end",
+                    str(args.aftershock_window_end),
                 ],
-            ),
-            (
-                "make_report",
-                PROJECT_ROOT / "pipelines" / "report" / "make_report.py",
-                ["--run_id", run_id],
-            ),
-        ]
-    )
+            )
+        )
+
+    if int(args.run_phase2_conditional):
+        analyzer_name, analyzer_script = PHASE1_ANALYZERS[args.phase2_event_type]
+        stages.extend(
+            [
+                (analyzer_name, analyzer_script, ["--run_id", run_id, "--symbols", symbols] + (["--timeframe", "15m"] if args.phase2_event_type == "vol_shock_relaxation" else [])),
+                (
+                    "phase2_conditional_hypotheses",
+                    PROJECT_ROOT / "pipelines" / "research" / "phase2_conditional_hypotheses.py",
+                    [
+                        "--run_id",
+                        run_id,
+                        "--event_type",
+                        args.phase2_event_type,
+                        "--symbols",
+                        symbols,
+                        "--max_conditions",
+                        str(args.phase2_max_conditions),
+                        "--max_actions",
+                        str(args.phase2_max_actions),
+                        "--bootstrap_iters",
+                        str(args.phase2_bootstrap_iters),
+                        "--cost_floor",
+                        str(args.phase2_cost_floor),
+                        "--require_phase1_pass",
+                        str(int(args.phase2_require_phase1_pass)),
+                    ],
+                ),
+            ]
+        )
 
     if int(args.run_recommendations_checklist):
         stages.append(
@@ -244,88 +347,31 @@ def main() -> int:
             )
         )
 
-    if int(args.run_phase1_aftershock):
-        phase1_aftershock_stage = [
-            (
-                "analyze_vol_aftershock_window",
-                PROJECT_ROOT / "pipelines" / "research" / "analyze_vol_aftershock_window.py",
-                [
-                    "--run_id",
-                    run_id,
-                    "--symbols",
-                    symbols,
-                    "--window_start",
-                    str(args.aftershock_window_start),
-                    "--window_end",
-                    str(args.aftershock_window_end),
-                ],
-            )
-        ]
-        insert_at = next((i for i, (name, _, _) in enumerate(stages) if name == "build_context_features"), len(stages))
-        stages[insert_at:insert_at] = phase1_aftershock_stage
+    if args.workflow in {"core", "full"}:
+        stages.extend(
+            [
+                (
+                    "backtest_vol_compression_v1",
+                    PROJECT_ROOT / "pipelines" / "backtest" / "backtest_vol_compression_v1.py",
+                    ["--run_id", run_id, "--symbols", symbols, "--force", force_flag],
+                ),
+                (
+                    "make_report",
+                    PROJECT_ROOT / "pipelines" / "report" / "make_report.py",
+                    ["--run_id", run_id],
+                ),
+            ]
+        )
 
-    if int(args.run_phase2_conditional):
-        phase1_analyzers = {
-            "vol_shock_relaxation": (
-                "analyze_vol_shock_relaxation",
-                PROJECT_ROOT / "pipelines" / "research" / "analyze_vol_shock_relaxation.py",
-                [
-                    "--run_id",
-                    run_id,
-                    "--symbols",
-                    symbols,
-                    "--timeframe",
-                    "15m",
-                ],
-            ),
-            "directional_exhaustion_after_forced_flow": (
-                "analyze_directional_exhaustion_after_forced_flow",
-                PROJECT_ROOT / "pipelines" / "research" / "analyze_directional_exhaustion_after_forced_flow.py",
-                [
-                    "--run_id",
-                    run_id,
-                    "--symbols",
-                    symbols,
-                ],
-            ),
-            "liquidity_refill_lag_window": (
-                "analyze_liquidity_refill_lag_window",
-                PROJECT_ROOT / "pipelines" / "research" / "analyze_liquidity_refill_lag_window.py",
-                [
-                    "--run_id",
-                    run_id,
-                    "--symbols",
-                    symbols,
-                ],
-            ),
-        }
-        phase2_stages = [
-            phase1_analyzers[args.phase2_event_type],
-            (
-                "phase2_conditional_hypotheses",
-                PROJECT_ROOT / "pipelines" / "research" / "phase2_conditional_hypotheses.py",
-                [
-                    "--run_id",
-                    run_id,
-                    "--event_type",
-                    args.phase2_event_type,
-                    "--symbols",
-                    symbols,
-                    "--max_conditions",
-                    str(args.phase2_max_conditions),
-                    "--max_actions",
-                    str(args.phase2_max_actions),
-                    "--bootstrap_iters",
-                    str(args.phase2_bootstrap_iters),
-                    "--cost_floor",
-                    str(args.phase2_cost_floor),
-                    "--require_phase1_pass",
-                    str(int(args.phase2_require_phase1_pass)),
-                ],
-            ),
+    if args.workflow == "core":
+        # remove research-only stages unless explicitly requested from CLI
+        pass
+    elif args.workflow == "research":
+        stages = [
+            s
+            for s in stages
+            if s[0] not in {"backtest_vol_compression_v1", "make_report"}
         ]
-        insert_at = next((i for i, (name, _, _) in enumerate(stages) if name == "build_context_features"), len(stages))
-        stages[insert_at:insert_at] = phase2_stages
 
     stages_with_config = {
         "build_cleaned_15m",
@@ -350,12 +396,24 @@ def main() -> int:
             if args.overlays:
                 base_args.extend(["--overlays", str(args.overlays)])
 
+    _print_execution_plan(args.workflow, stages, run_id)
+    metadata_path = _write_run_metadata(run_id, args)
+    print(f"Run metadata written: {metadata_path}")
+
     for stage, script, base_args in stages:
         if not _run_stage(stage, script, base_args, run_id):
             return 1
 
+    if int(args.verify_contract):
+        if not _verify_run_contract(run_id, args):
+            return 1
+
     report_path = DATA_ROOT / "reports" / "vol_compression_expansion_v1" / run_id / "summary.md"
     print(f"Report generated: {report_path}")
+    print(
+        "Artifact contract check command: "
+        f"bash scripts/verify_run_contract.sh --run_id {run_id} --workflow {args.workflow} --event_type {args.phase2_event_type} --expect_promoted_audits {int(args.run_promoted_edge_audits)}"
+    )
     return 0
 
 
