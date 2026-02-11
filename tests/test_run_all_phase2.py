@@ -213,7 +213,7 @@ def test_run_all_full_workflow_runs_core_then_research(monkeypatch) -> None:
     )
 
     assert run_all.main() == 0
-    assert captured.index("make_report") < captured.index("analyze_vol_shock_relaxation")
+    assert captured.index("analyze_vol_shock_relaxation") < captured.index("make_report")
 
 
 def test_run_meta_file_name(monkeypatch, tmp_path: Path) -> None:

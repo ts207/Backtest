@@ -62,8 +62,8 @@ make audit
 2. cleaned bars
 3. base features
 4. context features
-5. backtest + report (`core` / `full`)
-6. phase1 → phase2 → checklist → promoted audits (`research` / `full`)
+5. phase1 → phase2 → checklist → promoted audits (`research` / `full`)
+6. backtest + report (`core` / `full`)
 
 ## Contract verification
 

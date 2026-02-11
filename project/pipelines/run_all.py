@@ -382,7 +382,7 @@ def main() -> int:
     elif args.workflow == "research":
         stages = prereq + research
     else:
-        stages = prereq + core_post + research
+        stages = prereq + research + core_post
 
     _apply_configs_and_backtest_overrides(stages, args)
 
