@@ -65,11 +65,11 @@ def _load_context_data(data_root: Path, symbol: str, timeframe: str = "15m") -> 
             context[col] = np.nan
 
     if "fp_active" in context.columns:
-        context["fp_active"] = context["fp_active"].fillna(0).astype(int)
+        context["fp_active"] = pd.to_numeric(context["fp_active"], errors="coerce").fillna(0).astype("int64")
     if "fp_age_bars" in context.columns:
-        context["fp_age_bars"] = context["fp_age_bars"].fillna(0).astype(int)
+        context["fp_age_bars"] = pd.to_numeric(context["fp_age_bars"], errors="coerce").fillna(0).astype("int64")
     if "fp_norm_due" in context.columns:
-        context["fp_norm_due"] = context["fp_norm_due"].fillna(0).astype(int)
+        context["fp_norm_due"] = pd.to_numeric(context["fp_norm_due"], errors="coerce").fillna(0).astype("int64")
     return context[["timestamp", *_CONTEXT_COLUMNS]]
 
 
@@ -83,16 +83,16 @@ def _apply_context_defaults(frame: pd.DataFrame) -> pd.DataFrame:
         if col not in out.columns:
             out[col] = default
 
-    out["fp_active"] = out["fp_active"].fillna(0).astype(int)
-    out["fp_age_bars"] = out["fp_age_bars"].fillna(0).astype(int)
-    out["fp_norm_due"] = out["fp_norm_due"].fillna(0).astype(int)
+    out["fp_active"] = pd.to_numeric(out["fp_active"], errors="coerce").fillna(0).astype("int64")
+    out["fp_age_bars"] = pd.to_numeric(out["fp_age_bars"], errors="coerce").fillna(0).astype("int64")
+    out["fp_norm_due"] = pd.to_numeric(out["fp_norm_due"], errors="coerce").fillna(0).astype("int64")
 
     inactive = out["fp_active"] == 0
     out.loc[inactive, "fp_age_bars"] = 0
     out.loc[inactive, "fp_event_id"] = None
     out.loc[inactive, "fp_enter_ts"] = pd.NaT
     out.loc[inactive, "fp_exit_ts"] = pd.NaT
-    out["fp_severity"] = out["fp_severity"].fillna(0.0).astype(float)
+    out["fp_severity"] = pd.to_numeric(out["fp_severity"], errors="coerce").fillna(0.0).astype("float64")
     out.loc[inactive, "fp_severity"] = 0.0
     return out
 

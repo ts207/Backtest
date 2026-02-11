@@ -1,62 +1,52 @@
-# Repository Analysis Audit (2026-02-10)
+# Repository Analysis Audit (2026-02-07)
 
 ## Scope
-This audit covers repository structure, automated test health, dependency and vulnerability posture, and a lightweight static security sweep.
+This audit reviewed repository layout, test health, and maintainability signals using a full unit-test run and static inspection of top-level project structure.
 
-## Commands executed
-- `python3 -m pytest -q`
-- `python3 -m pip check`
-- `python3 -m pip_audit`
-- `rg -n "(TODO|FIXME|XXX|HACK)" project tests docs README.md`
-- `rg -n "\\beval\\(|\\bexec\\(|subprocess\\.|shell=True|yaml\\.load\\(" project tests`
-- `rg --files -g '*.py' | wc -l`
-- `rg --files tests -g '*.py' | wc -l`
-- `rg --files docs -g '*.md' | wc -l`
-- `rg --files -g '*.yaml' -g '*.yml' | wc -l`
+## Project snapshot
+- Primary code under `project/` with clear subdomains:
+  - `pipelines/` for orchestration and ETL/research jobs
+  - `engine/` for simulation and PnL logic
+  - `strategies/` for strategy and overlay contracts
+  - `features/` and `analyzers/` for feature engineering and research analysis
+- Strong test coverage footprint under `tests/` including:
+  - engine execution and diagnostics
+  - ingestion and persistence behavior
+  - research/analyzer mechanics and contracts
 
-## Snapshot
-- Python files: **111**
-- Test files: **32**
-- Docs markdown files: **11**
-- YAML/YML config files: **4**
+## Validation result
+- Test command: `python3 -m pytest -q`
+- Outcome: **71 passed, 0 failed**
+- Interpretation: Core behavior is currently stable across included regression tests.
 
-## Architecture and maintainability findings
-- The repository keeps strong modular boundaries: orchestration (`project/pipelines`), simulation (`project/engine`), strategy contracts (`project/strategies`), and edge governance (`project/portfolio`, `edges/`).
-- Run orchestration is centralized in `project/pipelines/run_all.py` with stage-level fail-fast behavior and per-stage logs/manifests, improving traceability.
-- Strategy availability is no longer single-strategy concentrated; the registry exposes six concrete strategies.
+## Warning audit
+The test run surfaced deprecation/future warnings that should be prioritized before dependency upgrades:
 
-## Test and runtime health
-- `python3 -m pytest -q` result: **92 passed, 0 failed**.
-- `python3 -m pip check` result: **No broken requirements found**.
-- No TODO/FIXME/HACK markers were found in source/docs scope queried.
+1. `project/pipelines/_lib/validation.py`
+   - Uses `pd.api.types.is_datetime64tz_dtype`, which is deprecated.
+   - Risk: Future pandas versions may break timezone validation paths.
 
-## Security and dependency posture
-### Static pattern sweep
-- No direct use of `eval(`, `exec(`, `yaml.load(`, or `shell=True` found.
-- `subprocess.run(...)` usage exists in orchestrator and selected research/export paths, but observed invocations use argument lists rather than shell interpolation.
+2. `project/engine/runner.py`
+   - Multiple `fillna(...).astype(...)` paths emit downcasting future warnings.
+   - Risk: Silent dtype coercion behavior changes can alter signal columns or mask subtle bugs.
 
-### Vulnerability scan (`pip_audit`)
-`pip_audit` reported **4 known vulnerabilities in 3 packages**:
-1. `pip==25.3` (`CVE-2026-1703`) → fix in `26.0`
-2. `pyarrow==15.0.2` (`PYSEC-2024-161`) → fix in `17.0.0`
-3. `requests==2.31.0` (`CVE-2024-35195`) → fix in `2.32.0`
-4. `requests==2.31.0` (`CVE-2024-47081`) → fix in `2.32.4`
+3. `project/pipelines/ingest/ingest_binance_um_funding.py`
+   - Concat with empty/all-NA entries emits future warning.
+   - Risk: dtype inference changes may affect persisted funding schema consistency.
 
-## Risk rating
-- **Code correctness risk:** Low (green tests)
-- **Operational risk:** Low to medium (depends on ingest/network variability)
-- **Security/dependency risk:** Medium until vulnerable package pins are upgraded
+## Audit assessment
+- **Reliability:** Good (green tests).
+- **Architecture clarity:** Good (modular folders and explicit pipeline stages).
+- **Forward compatibility:** Moderate risk due to pandas deprecations.
+- **Immediate production risk:** Low.
 
-## Recommended remediation plan
-1. **Upgrade pinned dependencies (highest priority)**
-   - `requests` to `>=2.32.4`
-   - `pyarrow` to `>=17.0.0`
-   - keep `pip` up to date in CI images/tooling
-2. Re-run full test suite after dependency updates and monitor for schema or dtype drift.
-3. Add a CI security gate (`pip_audit`) and fail on high-severity vulnerabilities.
-4. Keep orchestrator subprocess usage list-based (current pattern is appropriate); avoid shell-based command assembly.
+## Recommended next actions
+1. Replace deprecated datetime dtype checks with pandas-supported dtype classes.
+2. Make dtype intent explicit in `runner.py` before/after `fillna` to avoid silent behavior changes.
+3. Normalize/guard empty DataFrames before funding concat operations.
+4. Add a CI mode that fails on deprecation warnings for changed files (or at least logs trend counts).
 
-## Suggested acceptance criteria for follow-up hardening PR
-- `python3 -m pytest -q` remains green.
-- `python3 -m pip_audit` reports zero known vulnerabilities in pinned runtime dependencies.
-- No regression in stage manifests/log paths or report generation flows.
+## Suggested acceptance criteria for follow-up cleanup PR
+- All current tests still pass.
+- Warning count reduced from 45 to near-zero (excluding third-party noise).
+- No schema drift in generated manifests/CSV/Parquet outputs.
