@@ -44,7 +44,7 @@ def test_recommendations_checklist_keep_research_is_non_fatal(monkeypatch, tmp_p
     assert run_all._run_stage("generate_recommendations_checklist", script_without_log, ["--run_id", "x"], "run_x") is True
 
 
-def test_run_all_includes_phase2_chain_when_enabled(monkeypatch) -> None:
+def test_run_all_includes_phase2_chain_for_research_workflow(monkeypatch) -> None:
     captured = []
 
     def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
@@ -65,6 +65,8 @@ def test_run_all_includes_phase2_chain_when_enabled(monkeypatch) -> None:
             "2024-01-01",
             "--end",
             "2024-01-31",
+            "--workflow",
+            "research",
             "--run_phase2_conditional",
             "1",
         ],
@@ -77,7 +79,7 @@ def test_run_all_includes_phase2_chain_when_enabled(monkeypatch) -> None:
     assert "phase2_conditional_hypotheses" in stage_names
     assert stage_names.index("build_features_v1") < stage_names.index("analyze_vol_shock_relaxation")
     assert stage_names.index("analyze_vol_shock_relaxation") < stage_names.index("phase2_conditional_hypotheses")
-    assert stage_names.index("phase2_conditional_hypotheses") < stage_names.index("backtest_vol_compression_v1")
+    assert "backtest_vol_compression_v1" not in stage_names
 
     phase2_args = next(base_args for stage, _, base_args, _ in captured if stage == "phase2_conditional_hypotheses")
     assert "--max_conditions" in phase2_args
@@ -85,7 +87,7 @@ def test_run_all_includes_phase2_chain_when_enabled(monkeypatch) -> None:
     assert "--require_phase1_pass" in phase2_args
 
 
-def test_run_all_includes_recommendations_checklist_by_default(monkeypatch) -> None:
+def test_run_all_includes_recommendations_checklist_by_default_in_research(monkeypatch) -> None:
     captured = []
 
     def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
@@ -106,6 +108,8 @@ def test_run_all_includes_recommendations_checklist_by_default(monkeypatch) -> N
             "2024-01-01",
             "--end",
             "2024-01-31",
+            "--workflow",
+            "research",
         ],
     )
 
@@ -169,6 +173,8 @@ def test_run_all_can_include_promoted_edge_audits_stage(monkeypatch) -> None:
             "2",
             "--promoted_edge_audit_horizon_bars",
             "1",
+            "--workflow",
+            "research",
         ],
     )
 
@@ -178,3 +184,53 @@ def test_run_all_can_include_promoted_edge_audits_stage(monkeypatch) -> None:
     args = next(a for s, a in captured if s == "run_promoted_edge_audits")
     assert "--top_n" in args
     assert "--horizon_bars" in args
+
+
+def test_run_all_full_workflow_runs_core_then_research(monkeypatch) -> None:
+    captured = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append(stage)
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_full_order",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--workflow",
+            "full",
+        ],
+    )
+
+    assert run_all.main() == 0
+    assert captured.index("make_report") < captured.index("analyze_vol_shock_relaxation")
+
+
+def test_run_meta_file_name(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path)
+    args = SimpleNamespace(
+        workflow="core",
+        symbols="BTCUSDT",
+        start="2024-01-01",
+        end="2024-01-02",
+        phase2_event_type="vol_shock_relaxation",
+        run_phase2_conditional=0,
+        promoted_edge_audit_fee_bps=8.0,
+        promoted_edge_audit_spread_bps=2.0,
+        promoted_edge_audit_top_n=3,
+        promoted_edge_audit_horizon_bars=1,
+        config=[],
+    )
+    out = run_all._write_run_meta("rid_meta", args)
+    assert out.name == "run_meta.json"
+    assert out.exists()

@@ -12,7 +12,7 @@ DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT / "data"))
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate run-level checklist aligned with docs/recommendations.md promotion gates."
+        description="Generate run-level checklist aligned with docs/spec/recommendations.md promotion gates."
     )
     parser.add_argument("--run_id", required=True)
     parser.add_argument(
