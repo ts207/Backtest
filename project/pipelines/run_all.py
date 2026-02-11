@@ -92,14 +92,26 @@ def main() -> int:
     )
     parser.add_argument("--phase2_max_conditions", type=int, default=20)
     parser.add_argument("--phase2_max_actions", type=int, default=9)
+    parser.add_argument("--phase2_min_regime_stable_splits", type=int, default=2)
     parser.add_argument("--phase2_require_phase1_pass", type=int, default=1)
 
     parser.add_argument("--run_edge_candidate_universe", type=int, default=0)
     parser.add_argument("--run_expectancy_analysis", type=int, default=0)
     parser.add_argument("--run_expectancy_robustness", type=int, default=0)
     parser.add_argument("--run_recommendations_checklist", type=int, default=1)
+    parser.add_argument("--run_backtest", type=int, default=0)
+    parser.add_argument("--run_make_report", type=int, default=0)
+    parser.add_argument("--fees_bps", type=float, default=None)
+    parser.add_argument("--slippage_bps", type=float, default=None)
+    parser.add_argument("--cost_bps", type=float, default=None)
+    parser.add_argument("--strategies", default=None)
+    parser.add_argument("--overlays", default="")
 
     args = parser.parse_args()
+
+    if int(args.run_backtest) and not (args.strategies and str(args.strategies).strip()):
+        print("run_backtest requires --strategies (comma-separated strategy ids).", file=sys.stderr)
+        return 1
 
     run_id = args.run_id or _run_id_default()
     symbols = args.symbols
@@ -310,6 +322,8 @@ def main() -> int:
                         str(int(args.phase2_max_conditions)),
                         "--max_actions",
                         str(int(args.phase2_max_actions)),
+                        "--min_regime_stable_splits",
+                        str(int(args.phase2_min_regime_stable_splits)),
                         "--require_phase1_pass",
                         _as_flag(args.phase2_require_phase1_pass),
                     ],
@@ -375,21 +389,59 @@ def main() -> int:
             )
         )
 
+    if int(args.run_backtest):
+        stages.append(
+            (
+                "backtest_vol_compression_v1",
+                PROJECT_ROOT / "pipelines" / "backtest" / "backtest_vol_compression_v1.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--force",
+                    force_flag,
+                ],
+            )
+        )
+
+    if int(args.run_make_report) or int(args.run_backtest):
+        stages.append(
+            (
+                "make_report",
+                PROJECT_ROOT / "pipelines" / "report" / "make_report.py",
+                ["--run_id", run_id],
+            )
+        )
+
     stages_with_config = {
         "build_cleaned_15m",
         "build_features_v1",
         "build_context_features",
+        "backtest_vol_compression_v1",
+        "make_report",
     }
     for stage_name, _, base_args in stages:
         if stage_name in stages_with_config:
             for config_path in args.config:
                 base_args.extend(["--config", config_path])
+        if stage_name == "backtest_vol_compression_v1":
+            if args.fees_bps is not None:
+                base_args.extend(["--fees_bps", str(args.fees_bps)])
+            if args.slippage_bps is not None:
+                base_args.extend(["--slippage_bps", str(args.slippage_bps)])
+            if args.cost_bps is not None:
+                base_args.extend(["--cost_bps", str(args.cost_bps)])
+            if args.strategies is not None:
+                base_args.extend(["--strategies", str(args.strategies)])
+            if args.overlays:
+                base_args.extend(["--overlays", str(args.overlays)])
 
     for stage, script, base_args in stages:
         if not _run_stage(stage, script, base_args, run_id):
             return 1
 
-    print(f"Discovery run completed: {run_id}")
+    print(f"Pipeline run completed: {run_id}")
     return 0
 
 

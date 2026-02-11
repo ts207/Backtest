@@ -1,6 +1,4 @@
-# Operator Runbook (Discovery Core)
-
-This runbook is discovery-only.
+# Operator Runbook (Discovery + Optional Backtest)
 
 ## 1) Build datasets and core features
 ```bash
@@ -80,6 +78,24 @@ Expected outputs:
   --end 2025-07-10 \
   --period 5m
 ```
+
+## 6) Optional backtest + report
+```bash
+./.venv/bin/python project/pipelines/run_all.py \
+  --run_id 20260212_000001 \
+  --symbols BTCUSDT,ETHUSDT \
+  --start 2020-06-01 \
+  --end 2025-07-10 \
+  --strategies vol_compression_v1 \
+  --run_backtest 1 \
+  --run_make_report 1
+```
+
+Expected outputs:
+- `data/lake/trades/backtests/vol_compression_expansion_v1/<run_id>/metrics.json`
+- `data/lake/trades/backtests/vol_compression_expansion_v1/<run_id>/equity_curve.csv`
+- `data/reports/vol_compression_expansion_v1/<run_id>/summary.md`
+- `data/reports/vol_compression_expansion_v1/<run_id>/summary.json`
 
 ## Cleanup
 ```bash

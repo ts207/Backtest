@@ -7,14 +7,18 @@ RUN_ID ?= discovery_2020_2025
 SYMBOLS ?= BTCUSDT,ETHUSDT
 START ?= 2020-06-01
 END ?= 2025-07-10
+STRATEGIES ?=
 
-.PHONY: help run discover-edges discover-hybrid test clean-runtime clean-all-data clean-repo
+.PHONY: help run baseline discover-edges discover-hybrid discover-hybrid-backtest test clean-runtime clean-all-data clean-repo
 
 help:
 	@echo "Targets:"
 	@echo "  run               - ingest+clean+features+context"
+	@echo "  baseline          - run + backtest + report"
 	@echo "  discover-edges    - run discovery chain (phase1+phase2+export)"
 	@echo "  discover-hybrid   - discover-edges + expectancy checks"
+	@echo "  discover-hybrid-backtest - discover-hybrid + backtest + report"
+	@echo "                          requires STRATEGIES=... (comma-separated)"
 	@echo "  test              - run test suite"
 	@echo "  clean-runtime     - clean run/report artifacts"
 	@echo "  clean-all-data    - clean all local data artifacts"
@@ -26,6 +30,17 @@ run:
 		--symbols $(SYMBOLS) \
 		--start $(START) \
 		--end $(END)
+
+baseline:
+	@test -n "$(STRATEGIES)" || (echo "Set STRATEGIES=... for baseline" && exit 1)
+	$(PYTHON) $(RUN_ALL) \
+		--run_id $(RUN_ID) \
+		--symbols $(SYMBOLS) \
+		--start $(START) \
+		--end $(END) \
+		--run_backtest 1 \
+		--run_make_report 1 \
+		--strategies "$(STRATEGIES)"
 
 discover-edges:
 	$(PYTHON) $(RUN_ALL) \
@@ -50,6 +65,23 @@ discover-hybrid:
 		--run_edge_candidate_universe 1 \
 		--run_expectancy_analysis 1 \
 		--run_expectancy_robustness 1
+
+discover-hybrid-backtest:
+	@test -n "$(STRATEGIES)" || (echo "Set STRATEGIES=... for discover-hybrid-backtest" && exit 1)
+	$(PYTHON) $(RUN_ALL) \
+		--run_id $(RUN_ID) \
+		--symbols $(SYMBOLS) \
+		--start $(START) \
+		--end $(END) \
+		--run_hypothesis_generator 1 \
+		--run_phase2_conditional 1 \
+		--phase2_event_type all \
+		--run_edge_candidate_universe 1 \
+		--run_expectancy_analysis 1 \
+		--run_expectancy_robustness 1 \
+		--run_backtest 1 \
+		--run_make_report 1 \
+		--strategies "$(STRATEGIES)"
 
 test:
 	$(PYTHON) -m pytest -q

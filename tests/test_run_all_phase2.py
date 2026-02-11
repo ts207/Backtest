@@ -141,3 +141,114 @@ def test_run_all_can_disable_recommendations_checklist(monkeypatch) -> None:
 
     assert run_all.main() == 0
     assert "generate_recommendations_checklist" not in captured
+
+
+def test_run_all_includes_backtest_and_report_when_enabled(monkeypatch) -> None:
+    captured = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, script_path, list(base_args), run_id))
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_with_backtest",
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_backtest",
+            "1",
+            "--run_make_report",
+            "1",
+            "--fees_bps",
+            "3",
+            "--slippage_bps",
+            "1",
+            "--cost_bps",
+            "4",
+            "--strategies",
+            "vol_compression_v1",
+            "--overlays",
+            "funding_extreme_filter",
+        ],
+    )
+
+    assert run_all.main() == 0
+    stage_names = [x[0] for x in captured]
+    assert "backtest_vol_compression_v1" in stage_names
+    assert "make_report" in stage_names
+    assert stage_names.index("backtest_vol_compression_v1") < stage_names.index("make_report")
+
+    backtest_args = next(base_args for stage, _, base_args, _ in captured if stage == "backtest_vol_compression_v1")
+    assert "--fees_bps" in backtest_args and "3.0" in backtest_args
+    assert "--slippage_bps" in backtest_args and "1.0" in backtest_args
+    assert "--cost_bps" in backtest_args and "4.0" in backtest_args
+    assert "--strategies" in backtest_args and "vol_compression_v1" in backtest_args
+    assert "--overlays" in backtest_args and "funding_extreme_filter" in backtest_args
+
+
+def test_run_all_omits_backtest_by_default(monkeypatch) -> None:
+    captured = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append(stage)
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_without_backtest",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+        ],
+    )
+
+    assert run_all.main() == 0
+    assert "backtest_vol_compression_v1" not in captured
+    assert "make_report" not in captured
+
+
+def test_run_all_requires_strategies_when_backtest_enabled(monkeypatch) -> None:
+    captured = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append(stage)
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_backtest_missing_strategies",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_backtest",
+            "1",
+        ],
+    )
+
+    assert run_all.main() == 1
+    assert captured == []

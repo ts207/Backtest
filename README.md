@@ -1,6 +1,6 @@
-# Backtest (Discovery Core)
+# Backtest (Discovery + Optional Execution Validation)
 
-Discovery-only crypto research pipeline for BTC/ETH and related futures sensors.
+Crypto research pipeline for BTC/ETH and related futures sensors, with optional strategy backtesting/reporting.
 
 ## Scope
 The active codebase supports:
@@ -11,11 +11,8 @@ The active codebase supports:
 - Phase1/Phase2 event discovery
 - edge candidate export
 - conditional expectancy + robustness checks
-
-Removed from active scope:
-- strategy execution engine
-- backtest portfolio allocation
-- overlay contracts and promotion checks
+- optional single-strategy backtesting (`vol_compression_v1`)
+- optional backtest report generation
 
 ## Setup
 ```bash
@@ -45,6 +42,18 @@ export BACKTEST_DATA_ROOT=/abs/path/to/data
   --run_expectancy_robustness 1
 ```
 
+## Optional backtest + report
+```bash
+./.venv/bin/python project/pipelines/run_all.py \
+  --run_id 20260212_000001 \
+  --symbols BTCUSDT,ETHUSDT \
+  --start 2020-06-01 \
+  --end 2025-07-10 \
+  --strategies vol_compression_v1 \
+  --run_backtest 1 \
+  --run_make_report 1
+```
+
 ## Key outputs
 - `data/runs/<run_id>/*.json|*.log`
 - `data/reports/hypothesis_generator/<run_id>/...`
@@ -52,6 +61,8 @@ export BACKTEST_DATA_ROOT=/abs/path/to/data
 - `data/reports/edge_candidates/<run_id>/edge_candidates_normalized.csv`
 - `data/reports/expectancy/<run_id>/conditional_expectancy.json`
 - `data/reports/expectancy/<run_id>/conditional_expectancy_robustness.json`
+- `data/lake/trades/backtests/vol_compression_expansion_v1/<run_id>/metrics.json`
+- `data/reports/vol_compression_expansion_v1/<run_id>/summary.md`
 
 ## Optional ingestion sensors
 ```bash

@@ -9,7 +9,12 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "project"))
 
-from pipelines.research.phase2_conditional_hypotheses import ActionSpec, ConditionSpec, _evaluate_candidate
+from pipelines.research.phase2_conditional_hypotheses import (
+    ActionSpec,
+    ConditionSpec,
+    _evaluate_candidate,
+    _gate_regime_stability,
+)
 
 
 def _write_phase1_fixture(tmp_path: Path, run_id: str) -> None:
@@ -216,3 +221,47 @@ def test_phase2_net_benefit_gate_blocks_negative_economics() -> None:
     assert result["net_benefit_mean"] < 0.0
     assert result["gate_g_net_benefit"] is False
     assert "gate_g_net_benefit" in result["fail_reasons"]
+
+
+def test_gate_regime_stability_uses_majority_rule_by_default() -> None:
+    # symbol and vol_regime stay improved (<=0), bull_bear flips sign.
+    sub = pd.DataFrame(
+        {
+            "symbol": ["BTCUSDT"] * 4 + ["ETHUSDT"] * 4,
+            "vol_regime": ["high", "high", "low", "low"] * 2,
+            "bull_bear": ["bull", "bear", "bull", "bear"] * 2,
+            "adverse_effect": [0.2, -0.4, 0.2, -0.4, 0.2, -0.4, 0.2, -0.4],
+        }
+    )
+
+    passed, stable_splits, required_splits = _gate_regime_stability(
+        sub=sub,
+        effect_col="adverse_effect",
+        condition_name="all",
+    )
+
+    assert passed is True
+    assert stable_splits == 2
+    assert required_splits == 2
+
+
+def test_gate_regime_stability_can_be_switched_back_to_strict() -> None:
+    sub = pd.DataFrame(
+        {
+            "symbol": ["BTCUSDT"] * 4 + ["ETHUSDT"] * 4,
+            "vol_regime": ["high", "high", "low", "low"] * 2,
+            "bull_bear": ["bull", "bear", "bull", "bear"] * 2,
+            "adverse_effect": [0.2, -0.4, 0.2, -0.4, 0.2, -0.4, 0.2, -0.4],
+        }
+    )
+
+    passed, stable_splits, required_splits = _gate_regime_stability(
+        sub=sub,
+        effect_col="adverse_effect",
+        condition_name="all",
+        min_stable_splits=3,
+    )
+
+    assert passed is False
+    assert stable_splits == 2
+    assert required_splits == 3

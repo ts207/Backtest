@@ -48,6 +48,8 @@ PRIMARY_OUTPUT_COLUMNS = [
     "gate_b_time_stable",
     "gate_b_year_signs",
     "gate_c_regime_stable",
+    "gate_c_stable_splits",
+    "gate_c_required_splits",
     "gate_d_friction_floor",
     "gate_f_exposure_guard",
     "gate_g_net_benefit",
@@ -672,21 +674,36 @@ def _gate_year_stability(sub: pd.DataFrame, effect_col: str, min_ratio: float = 
     return bool(improvement_ratio >= min_ratio and not catastrophic_reversal), ",".join(str(s) for s in signs)
 
 
-def _gate_regime_stability(sub: pd.DataFrame, effect_col: str, condition_name: str) -> bool:
+def _gate_regime_stability(
+    sub: pd.DataFrame,
+    effect_col: str,
+    condition_name: str,
+    min_stable_splits: int = 2,
+) -> Tuple[bool, int, int]:
     # If condition itself is on split variable, skip that split.
     checks: List[pd.Series] = []
     if not condition_name.startswith("symbol_") and "symbol" in sub.columns:
         checks.append(sub.groupby("symbol")[effect_col].mean())
     if not condition_name.startswith("vol_regime_") and "vol_regime" in sub.columns:
         checks.append(sub.groupby("vol_regime")[effect_col].mean())
+    if not condition_name.startswith("bull_bear_") and "bull_bear" in sub.columns:
+        checks.append(sub.groupby("bull_bear")[effect_col].mean())
+
+    # Majority-style regime gate by default (2/3 when all splits exist).
+    stable_splits = 0
     for s in checks:
         nz = [v for v in s.tolist() if abs(v) > 1e-12]
         if not nz:
-            return False
+            continue
         # Improvement should stay non-positive (adverse reduction) across splits.
-        if any(v > 0 for v in nz):
-            return False
-    return True
+        if not any(v > 0 for v in nz):
+            stable_splits += 1
+
+    if not checks:
+        return False, 0, 0
+
+    required_splits = min(max(1, int(min_stable_splits)), len(checks))
+    return stable_splits >= required_splits, stable_splits, required_splits
 
 
 def _evaluate_candidate(
@@ -701,6 +718,7 @@ def _evaluate_candidate(
     opportunity_near_zero_eps: float,
     net_benefit_floor: float,
     simplicity_gate: bool,
+    min_regime_stable_splits: int = 2,
 ) -> Dict[str, object]:
     adverse_delta_vec, opp_delta_vec, exposure_delta_vec = _apply_action_proxy(sub, action)
 
@@ -714,7 +732,12 @@ def _evaluate_candidate(
     tmp = sub.copy()
     tmp["adverse_effect"] = adverse_delta_vec
     gate_b, year_signs = _gate_year_stability(tmp, "adverse_effect")
-    gate_c = _gate_regime_stability(tmp, "adverse_effect", condition_name=condition.name)
+    gate_c, gate_c_stable_splits, gate_c_required_splits = _gate_regime_stability(
+        tmp,
+        "adverse_effect",
+        condition_name=condition.name,
+        min_stable_splits=min_regime_stable_splits,
+    )
 
     risk_reduction = float(-mean_adv) if np.isfinite(mean_adv) else np.nan
     material_tail = bool(np.isfinite(risk_reduction) and risk_reduction >= tail_material_threshold)
@@ -786,6 +809,8 @@ def _evaluate_candidate(
         "gate_b_time_stable": gate_b,
         "gate_b_year_signs": year_signs,
         "gate_c_regime_stable": gate_c,
+        "gate_c_stable_splits": gate_c_stable_splits,
+        "gate_c_required_splits": gate_c_required_splits,
         "gate_d_friction_floor": gate_d,
         "opportunity_forward_mean": opportunity_forward,
         "opportunity_tail_mean": opportunity_tail,
@@ -816,6 +841,7 @@ def main() -> int:
     parser.add_argument("--opportunity_tight_eps", type=float, default=0.005)
     parser.add_argument("--opportunity_near_zero_eps", type=float, default=0.001)
     parser.add_argument("--net_benefit_floor", type=float, default=0.0)
+    parser.add_argument("--min_regime_stable_splits", type=int, default=2)
     parser.add_argument("--min_sample_size", type=int, default=20)
     parser.add_argument("--require_phase1_pass", type=int, default=1)
     parser.add_argument("--out_dir", default=None)
@@ -898,6 +924,9 @@ def main() -> int:
                 "horizon_bars": int(args.opportunity_horizon_bars),
                 "tight_ci_eps": float(args.opportunity_tight_eps),
             },
+            "gates": {
+                "min_regime_stable_splits": int(args.min_regime_stable_splits),
+            },
             "no_phase1_events": True,
             "phase1_events_file_exists": bool(phase1_events_file_exists),
         }
@@ -959,6 +988,7 @@ def main() -> int:
                     opportunity_near_zero_eps=args.opportunity_near_zero_eps,
                     net_benefit_floor=args.net_benefit_floor,
                     simplicity_gate=simplicity_pass,
+                    min_regime_stable_splits=args.min_regime_stable_splits,
                 )
                 rows.append(res)
 
@@ -1017,6 +1047,9 @@ def main() -> int:
             "near_zero_eps": float(args.opportunity_near_zero_eps),
             "net_benefit_floor": float(args.net_benefit_floor),
         },
+        "gates": {
+            "min_regime_stable_splits": int(args.min_regime_stable_splits),
+        },
     }
     manifest_path.write_text(json.dumps(manifest_payload, indent=2), encoding="utf-8")
 
@@ -1039,6 +1072,7 @@ def main() -> int:
         f"- Actions evaluated: {len(actions)}",
         f"- Candidate rows evaluated: {len(candidates)}",
         f"- Simplicity gate pass: {simplicity_pass}",
+        f"- Regime stability required splits: {int(args.min_regime_stable_splits)}",
         "",
         "## Top candidates",
         _table_text(candidates.sort_values("delta_adverse_mean").head(3)) if not candidates.empty else "No candidates",
