@@ -146,6 +146,24 @@ def main() -> int:
                 ],
             ),
             (
+                "build_context_features",
+                PROJECT_ROOT / "pipelines" / "features" / "build_context_features.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--timeframe",
+                    "15m",
+                    "--start",
+                    start,
+                    "--end",
+                    end,
+                    "--force",
+                    force_flag,
+                ],
+            ),
+            (
                 "backtest_vol_compression_v1",
                 PROJECT_ROOT / "pipelines" / "backtest" / "backtest_vol_compression_v1.py",
                 [
@@ -168,6 +186,7 @@ def main() -> int:
     stages_with_config = {
         "build_cleaned_15m",
         "build_features_v1",
+        "build_context_features",
         "backtest_vol_compression_v1",
         "make_report",
     }

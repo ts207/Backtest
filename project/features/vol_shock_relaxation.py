@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -49,14 +49,20 @@ def _shock_threshold(series: pd.Series, quantile: float) -> float:
     return float(clean.quantile(quantile))
 
 
-def _detect_events_with_threshold(
-    df: pd.DataFrame,
+def detect_vol_shock_relaxation_events(
+    frame: pd.DataFrame,
     symbol: str,
-    config: VolShockRelaxationConfig,
-    t_shock: float,
-) -> pd.DataFrame:
+    config: VolShockRelaxationConfig = DEFAULT_VSR_CONFIG,
+) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float]]:
+    required = {"timestamp", "close", "high", "low"}
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+    df = _compute_core_series(frame, config)
+    t_shock = _shock_threshold(df["shock_ratio"], config.shock_quantile)
     if not np.isfinite(t_shock):
-        return pd.DataFrame()
+        return pd.DataFrame(), df, {"t_shock": np.nan, "t_relax": config.relax_threshold}
 
     event_rows: List[Dict[str, object]] = []
     n = len(df)
@@ -161,79 +167,7 @@ def _detect_events_with_threshold(
         cooldown_until = exit_idx + config.cooldown_bars
         i = cooldown_until + 1
 
-    return pd.DataFrame(event_rows)
-
-
-def calibrate_shock_threshold(
-    frame: pd.DataFrame,
-    symbol: str,
-    config: VolShockRelaxationConfig = DEFAULT_VSR_CONFIG,
-    quantiles: Sequence[float] = (0.95, 0.97, 0.98, 0.99, 0.995),
-    min_events: int = 50,
-) -> Tuple[pd.DataFrame, Dict[str, float]]:
-    df = _compute_core_series(frame, config)
-    rows: List[Dict[str, object]] = []
-
-    quantile_values = sorted({float(q) for q in quantiles if 0.0 < float(q) < 1.0})
-    if not quantile_values:
-        quantile_values = [config.shock_quantile]
-
-    for q in quantile_values:
-        t_shock = _shock_threshold(df["shock_ratio"], q)
-        events = _detect_events_with_threshold(df, symbol=symbol, config=config, t_shock=t_shock)
-        count = int(len(events))
-        rows.append(
-            {
-                "symbol": symbol,
-                "shock_quantile": float(q),
-                "t_shock": float(t_shock) if np.isfinite(t_shock) else np.nan,
-                "event_count": count,
-                "min_events": int(min_events),
-                "meets_min_events": bool(count >= min_events),
-                "selected": False,
-            }
-        )
-
-    table = pd.DataFrame(rows)
-    if table.empty:
-        return table, {"selected_quantile": np.nan, "selected_t_shock": np.nan, "selected_event_count": 0, "min_events": int(min_events)}
-
-    meets = table[table["meets_min_events"]]
-    if not meets.empty:
-        selected = meets.sort_values("shock_quantile", ascending=False).iloc[0]
-    else:
-        default_match = table[np.isclose(table["shock_quantile"].astype(float), float(config.shock_quantile))]
-        if not default_match.empty:
-            selected = default_match.iloc[0]
-        else:
-            selected = table.sort_values("shock_quantile", ascending=False).iloc[0]
-
-    table.loc[table.index == selected.name, "selected"] = True
-    meta = {
-        "selected_quantile": float(selected["shock_quantile"]),
-        "selected_t_shock": float(selected["t_shock"]) if np.isfinite(selected["t_shock"]) else np.nan,
-        "selected_event_count": int(selected["event_count"]),
-        "min_events": int(min_events),
-    }
-    return table, meta
-
-
-def detect_vol_shock_relaxation_events(
-    frame: pd.DataFrame,
-    symbol: str,
-    config: VolShockRelaxationConfig = DEFAULT_VSR_CONFIG,
-    shock_threshold_override: Optional[float] = None,
-) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float]]:
-    required = {"timestamp", "close", "high", "low"}
-    missing = sorted(required - set(frame.columns))
-    if missing:
-        raise ValueError(f"Missing required columns: {missing}")
-
-    df = _compute_core_series(frame, config)
-    t_shock = float(shock_threshold_override) if shock_threshold_override is not None else _shock_threshold(df["shock_ratio"], config.shock_quantile)
-    if not np.isfinite(t_shock):
-        return pd.DataFrame(), df, {"t_shock": np.nan, "t_relax": config.relax_threshold}
-    events = _detect_events_with_threshold(df, symbol=symbol, config=config, t_shock=t_shock)
+    events = pd.DataFrame(event_rows)
     return events, df, {"t_shock": t_shock, "t_relax": config.relax_threshold}
 
 

@@ -1,29 +1,111 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
+
+import numpy as np
 
 import pandas as pd
 
 from engine.pnl import compute_pnl, compute_returns
 from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet
 from pipelines._lib.validation import ensure_utc_timestamp
+from features.funding_persistence import FP_DEF_VERSION
 from strategies.registry import get_strategy
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
 class StrategyResult:
     name: str
     data: pd.DataFrame
+    diagnostics: Dict[str, object]
 
 
-def _load_symbol_data(project_root: Path, symbol: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    features_dir = project_root / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
-    bars_dir = project_root / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
+_CONTEXT_COLUMNS = [
+    "fp_def_version",
+    "fp_active",
+    "fp_age_bars",
+    "fp_event_id",
+    "fp_enter_ts",
+    "fp_exit_ts",
+    "fp_severity",
+    "fp_norm_due",
+]
+
+
+def _load_context_data(data_root: Path, symbol: str, timeframe: str = "15m") -> pd.DataFrame:
+    context_dir = data_root / "features" / "context" / "funding_persistence" / symbol
+    context_files = list_parquet_files(context_dir)
+    if not context_files:
+        return pd.DataFrame(columns=["timestamp", *_CONTEXT_COLUMNS])
+
+    context = read_parquet(context_files)
+    if context.empty:
+        return pd.DataFrame(columns=["timestamp", *_CONTEXT_COLUMNS])
+
+    if "timestamp" not in context.columns:
+        raise ValueError(f"Context data missing timestamp for {symbol}: {context_dir}")
+
+    context["timestamp"] = pd.to_datetime(context["timestamp"], utc=True)
+    ensure_utc_timestamp(context["timestamp"], "timestamp")
+    context = context.sort_values("timestamp").drop_duplicates(subset=["timestamp"], keep="last").reset_index(drop=True)
+    if "fp_def_version" not in context.columns:
+        context["fp_def_version"] = FP_DEF_VERSION
+
+    for col in _CONTEXT_COLUMNS:
+        if col not in context.columns:
+            context[col] = np.nan
+
+    if "fp_active" in context.columns:
+        context["fp_active"] = context["fp_active"].fillna(0).astype(int)
+    if "fp_age_bars" in context.columns:
+        context["fp_age_bars"] = context["fp_age_bars"].fillna(0).astype(int)
+    if "fp_norm_due" in context.columns:
+        context["fp_norm_due"] = context["fp_norm_due"].fillna(0).astype(int)
+    return context[["timestamp", *_CONTEXT_COLUMNS]]
+
+
+def _apply_context_defaults(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    if "fp_def_version" not in out.columns:
+        out["fp_def_version"] = FP_DEF_VERSION
+    out["fp_def_version"] = out["fp_def_version"].fillna(FP_DEF_VERSION)
+
+    for col, default in [("fp_active", 0), ("fp_age_bars", 0), ("fp_norm_due", 0), ("fp_severity", 0.0), ("fp_event_id", None), ("fp_enter_ts", pd.NaT), ("fp_exit_ts", pd.NaT)]:
+        if col not in out.columns:
+            out[col] = default
+
+    out["fp_active"] = out["fp_active"].fillna(0).astype(int)
+    out["fp_age_bars"] = out["fp_age_bars"].fillna(0).astype(int)
+    out["fp_norm_due"] = out["fp_norm_due"].fillna(0).astype(int)
+
+    inactive = out["fp_active"] == 0
+    out.loc[inactive, "fp_age_bars"] = 0
+    out.loc[inactive, "fp_event_id"] = None
+    out.loc[inactive, "fp_enter_ts"] = pd.NaT
+    out.loc[inactive, "fp_exit_ts"] = pd.NaT
+    out["fp_severity"] = out["fp_severity"].fillna(0.0).astype(float)
+    out.loc[inactive, "fp_severity"] = 0.0
+    return out
+
+
+def _join_context_features(features: pd.DataFrame, context: pd.DataFrame) -> pd.DataFrame:
+    joined = features.merge(context, on="timestamp", how="left", validate="one_to_one")
+    return _apply_context_defaults(joined)
+
+
+
+def _load_symbol_data(data_root: Path, symbol: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    features_dir = data_root / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
+    bars_dir = data_root / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
     feature_files = list_parquet_files(features_dir)
     bars_files = list_parquet_files(bars_dir)
     features = read_parquet(feature_files)
@@ -38,6 +120,9 @@ def _load_symbol_data(project_root: Path, symbol: str) -> Tuple[pd.DataFrame, pd
 
     features = features.sort_values("timestamp").reset_index(drop=True)
     bars = bars.sort_values("timestamp").reset_index(drop=True)
+
+    context = _load_context_data(data_root, symbol, timeframe="15m")
+    features = _join_context_features(features, context)
     return bars, features
 
 
@@ -59,14 +144,40 @@ def _strategy_returns(
     cost_bps: float,
 ) -> StrategyResult:
     strategy = get_strategy(strategy_name)
+    required_features = getattr(strategy, "required_features", []) or []
+
     positions = strategy.generate_positions(bars, features, params)
     timestamp_index = pd.DatetimeIndex(bars["timestamp"])
     positions = positions.reindex(timestamp_index).fillna(0).astype(int)
     _validate_positions(positions)
 
-    close = bars.set_index("timestamp")["close"].astype(float)
+    bars_indexed = bars.set_index("timestamp")
+    close = bars_indexed["close"].astype(float)
+    high = bars_indexed["high"].astype(float)
+    low = bars_indexed["low"].astype(float)
     ret = compute_returns(close)
+    nan_ret_mask = ret.isna()
+    forced_flat_bars = int((nan_ret_mask & (positions != 0)).sum())
+    positions = positions.mask(nan_ret_mask, 0).astype(int)
     pnl = compute_pnl(positions, ret, cost_bps)
+    if nan_ret_mask.any():
+        LOGGER.info(
+            "Gap-safe returns forced flat %s bars for %s/%s.",
+            forced_flat_bars,
+            symbol,
+            strategy_name,
+        )
+
+    features_indexed = features.set_index("timestamp")
+    features_aligned = features_indexed.reindex(ret.index)
+    missing_feature_columns = [col for col in required_features if col not in features_aligned.columns]
+    if required_features and not missing_feature_columns:
+        missing_feature_mask = features_aligned[required_features].isna().any(axis=1)
+    else:
+        missing_feature_mask = pd.Series(True if required_features else False, index=ret.index)
+
+    high_96 = features_aligned["high_96"] if "high_96" in features_aligned.columns else pd.Series(index=ret.index, dtype=float)
+    low_96 = features_aligned["low_96"] if "low_96" in features_aligned.columns else pd.Series(index=ret.index, dtype=float)
 
     df = pd.DataFrame(
         {
@@ -75,9 +186,29 @@ def _strategy_returns(
             "pos": positions.values,
             "ret": ret.values,
             "pnl": pnl.values,
+            "close": close.reindex(ret.index).values,
+            "high": high.reindex(ret.index).values,
+            "low": low.reindex(ret.index).values,
+            "high_96": high_96.values,
+            "low_96": low_96.values,
+            "fp_def_version": features_aligned["fp_def_version"].values if "fp_def_version" in features_aligned.columns else FP_DEF_VERSION,
+            "fp_active": features_aligned["fp_active"].fillna(0).astype(int).values if "fp_active" in features_aligned.columns else np.zeros(len(ret), dtype=int),
+            "fp_age_bars": features_aligned["fp_age_bars"].fillna(0).astype(int).values if "fp_age_bars" in features_aligned.columns else np.zeros(len(ret), dtype=int),
+            "fp_norm_due": features_aligned["fp_norm_due"].fillna(0).astype(int).values if "fp_norm_due" in features_aligned.columns else np.zeros(len(ret), dtype=int),
         }
     )
-    return StrategyResult(name=strategy_name, data=df)
+    total_bars = int(len(ret))
+    diagnostics = {
+        "total_bars": total_bars,
+        "nan_return_bars": int(nan_ret_mask.sum()),
+        "forced_flat_bars": forced_flat_bars,
+        "missing_feature_bars": int(missing_feature_mask.sum()),
+        "nan_return_pct": float(nan_ret_mask.mean()) if total_bars else 0.0,
+        "forced_flat_pct": float(forced_flat_bars / total_bars) if total_bars else 0.0,
+        "missing_feature_pct": float(missing_feature_mask.mean()) if total_bars else 0.0,
+        "missing_feature_columns": missing_feature_columns,
+    }
+    return StrategyResult(name=strategy_name, data=df, diagnostics=diagnostics)
 
 
 def _aggregate_strategy(results: Iterable[pd.DataFrame]) -> pd.DataFrame:
@@ -132,30 +263,47 @@ def run_engine(
     strategies: List[str],
     params: Dict[str, object],
     cost_bps: float,
-    project_root: Path = PROJECT_ROOT,
+    data_root: Path = DATA_ROOT,
 ) -> Dict[str, object]:
-    engine_dir = project_root / "runs" / run_id / "engine"
+    engine_dir = data_root / "runs" / run_id / "engine"
     ensure_dir(engine_dir)
 
     strategy_frames: Dict[str, pd.DataFrame] = {}
     metrics: Dict[str, object] = {"strategies": {}}
 
     for strategy_name in strategies:
-        symbol_results: List[pd.DataFrame] = []
+        symbol_results: List[StrategyResult] = []
         for symbol in symbols:
-            bars, features = _load_symbol_data(project_root, symbol)
+            bars, features = _load_symbol_data(data_root, symbol)
             result = _strategy_returns(symbol, bars, features, strategy_name, params, cost_bps)
-            symbol_results.append(result.data)
+            symbol_results.append(result)
 
-        combined = _aggregate_strategy(symbol_results)
+        combined = _aggregate_strategy([res.data for res in symbol_results])
         strategy_frames[strategy_name] = combined
         out_path = engine_dir / f"strategy_returns_{strategy_name}.csv"
         combined.to_csv(out_path, index=False)
 
         pnl_series = combined.groupby("timestamp")["pnl"].sum()
         summary = _summarize_pnl(pnl_series)
-        entries = sum(_entry_count(frame) for frame in symbol_results)
+        entries = sum(_entry_count(res.data) for res in symbol_results)
+        diagnostics_total = {
+            "total_bars": sum(res.diagnostics["total_bars"] for res in symbol_results),
+            "nan_return_bars": sum(res.diagnostics["nan_return_bars"] for res in symbol_results),
+            "forced_flat_bars": sum(res.diagnostics["forced_flat_bars"] for res in symbol_results),
+            "missing_feature_bars": sum(res.diagnostics["missing_feature_bars"] for res in symbol_results),
+        }
+        total_bars = diagnostics_total["total_bars"]
+        diagnostics = {
+            **diagnostics_total,
+            "nan_return_pct": float(diagnostics_total["nan_return_bars"] / total_bars) if total_bars else 0.0,
+            "forced_flat_pct": float(diagnostics_total["forced_flat_bars"] / total_bars) if total_bars else 0.0,
+            "missing_feature_pct": float(diagnostics_total["missing_feature_bars"] / total_bars) if total_bars else 0.0,
+            "missing_feature_columns": sorted(
+                {col for res in symbol_results for col in res.diagnostics.get("missing_feature_columns", [])}
+            ),
+        }
         metrics["strategies"][strategy_name] = {**summary, "entries": entries}
+        metrics.setdefault("diagnostics", {}).setdefault("strategies", {})[strategy_name] = diagnostics
 
     portfolio = _aggregate_portfolio(strategy_frames)
     portfolio_path = engine_dir / "portfolio_returns.csv"
@@ -172,4 +320,5 @@ def run_engine(
         "strategy_frames": strategy_frames,
         "portfolio": portfolio,
         "metrics": metrics,
+        "diagnostics": metrics.get("diagnostics", {}),
     }
