@@ -94,6 +94,134 @@ def test_strategy_positions_values_and_tz() -> None:
     assert set(positions.unique()).issubset({-1, 0, 1})
 
 
+def _strategy_inputs_from_close(close: list[float], high: list[float], low: list[float]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    timestamps = pd.date_range("2024-01-01 00:00", periods=len(close), freq="15min", tz="UTC")
+    bars = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "open": close,
+            "high": high,
+            "low": low,
+            "close": close,
+            "is_gap": [False] * len(close),
+            "gap_len": [0] * len(close),
+        }
+    )
+    features = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "open": close,
+            "high": high,
+            "low": low,
+            "close": close,
+            "rv_pct_2880": [5.0] * len(close),
+            "high_96": [100.0] * len(close),
+            "low_96": [90.0] * len(close),
+            "range_96": [10.0] * len(close),
+            "range_med_480": [20.0] * len(close),
+        }
+    )
+    return bars, features
+
+
+def test_strategy_breakout_confirmation_pass_and_fail() -> None:
+    strategy = VolCompressionV1()
+
+    bars_fail, features_fail = _strategy_inputs_from_close(
+        close=[99.0, 101.0, 99.5, 99.0, 99.0],
+        high=[100.0, 101.5, 100.0, 99.5, 99.5],
+        low=[98.5, 100.5, 99.0, 98.5, 98.5],
+    )
+    fail_positions = strategy.generate_positions(
+        bars_fail,
+        features_fail,
+        {"trade_day_timezone": "UTC", "one_trade_per_day": True, "breakout_confirm_bars": 1},
+    )
+    assert int((fail_positions != 0).sum()) == 0
+
+    bars_pass, features_pass = _strategy_inputs_from_close(
+        close=[99.0, 101.0, 102.0, 101.5, 101.0],
+        high=[100.0, 101.5, 102.5, 102.0, 101.5],
+        low=[98.5, 100.5, 101.0, 101.0, 100.5],
+    )
+    pass_positions = strategy.generate_positions(
+        bars_pass,
+        features_pass,
+        {"trade_day_timezone": "UTC", "one_trade_per_day": True, "breakout_confirm_bars": 1},
+    )
+    assert int((pass_positions != 0).sum()) > 0
+
+
+def test_strategy_no_expansion_timeout_exit_reason() -> None:
+    strategy = VolCompressionV1()
+    bars, features = _strategy_inputs_from_close(
+        close=[99.0, 101.0, 101.2, 101.1, 101.0],
+        high=[100.0, 101.3, 101.6, 101.4, 101.2],
+        low=[98.5, 100.5, 100.8, 100.7, 100.6],
+    )
+    positions = strategy.generate_positions(
+        bars,
+        features,
+        {
+            "trade_day_timezone": "UTC",
+            "one_trade_per_day": True,
+            "expansion_timeout_bars": 2,
+            "expansion_min_r": 0.6,
+            "max_hold_bars": 20,
+        },
+    )
+    signal_events = positions.attrs.get("signal_events", [])
+    assert any(evt.get("reason") == "no_expansion_timeout" for evt in signal_events)
+
+
+def test_strategy_adaptive_trailing_uses_prior_bars_only() -> None:
+    strategy = VolCompressionV1()
+    bars, features = _strategy_inputs_from_close(
+        close=[99.0, 101.0, 103.0, 103.5],
+        high=[100.0, 101.4, 105.0, 104.0],
+        low=[98.5, 100.5, 100.0, 103.0],
+    )
+    positions = strategy.generate_positions(
+        bars,
+        features,
+        {
+            "trade_day_timezone": "UTC",
+            "one_trade_per_day": True,
+            "adaptive_exit_enabled": True,
+            "adaptive_activation_r": 0.2,
+            "adaptive_trail_lookback_bars": 2,
+            "adaptive_trail_buffer_bps": 0.0,
+            "max_hold_bars": 20,
+        },
+    )
+    signal_events = positions.attrs.get("signal_events", [])
+    assert not any(evt.get("reason") == "adaptive_trailing_stop" and evt.get("timestamp") == bars["timestamp"].iat[2].isoformat() for evt in signal_events)
+
+
+def test_strategy_adaptive_exit_reason() -> None:
+    strategy = VolCompressionV1()
+    bars, features = _strategy_inputs_from_close(
+        close=[99.0, 101.0, 103.0, 100.5, 100.0],
+        high=[100.0, 101.4, 105.0, 101.0, 100.5],
+        low=[98.5, 100.5, 100.0, 99.0, 99.0],
+    )
+    positions = strategy.generate_positions(
+        bars,
+        features,
+        {
+            "trade_day_timezone": "UTC",
+            "one_trade_per_day": True,
+            "adaptive_exit_enabled": True,
+            "adaptive_activation_r": 0.2,
+            "adaptive_trail_lookback_bars": 2,
+            "adaptive_trail_buffer_bps": 0.0,
+            "max_hold_bars": 20,
+        },
+    )
+    signal_events = positions.attrs.get("signal_events", [])
+    assert any(evt.get("reason") == "adaptive_trailing_stop" for evt in signal_events)
+
+
 def test_compute_pnl_next_bar_and_cost() -> None:
     close = pd.Series([100.0, 110.0, 121.0], index=pd.date_range("2024-01-01", periods=3, freq="15min", tz="UTC"))
     pos = pd.Series([0, 1, 1], index=close.index)

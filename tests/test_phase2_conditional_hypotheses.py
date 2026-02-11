@@ -7,10 +7,12 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "project"))
+
+from pipelines.research.phase2_conditional_hypotheses import ActionSpec, ConditionSpec, _evaluate_candidate
 
 
-def test_phase2_caps_and_outputs(tmp_path: Path) -> None:
-    run_id = "phase2_test"
+def _write_phase1_fixture(tmp_path: Path, run_id: str) -> None:
     in_dir = tmp_path / "reports" / "vol_shock_relaxation" / run_id
     in_dir.mkdir(parents=True, exist_ok=True)
 
@@ -46,7 +48,24 @@ def test_phase2_caps_and_outputs(tmp_path: Path) -> None:
 
     events.to_csv(in_dir / "vol_shock_relaxation_events.csv", index=False)
     controls.to_csv(in_dir / "vol_shock_relaxation_controls.csv", index=False)
+    (in_dir / "vol_shock_relaxation_summary.json").write_text(
+        json.dumps(
+            {
+                "decision": "promote",
+                "phase1_structure_pass": True,
+                "gates": {
+                    "phase_pass": True,
+                    "sign_pass": True,
+                    "non_degenerate_count": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
+
+def _run_phase2(tmp_path: Path, run_id: str, extra_args: list[str] | None = None) -> None:
+    extra_args = extra_args or []
     env = os.environ.copy()
     env["BACKTEST_DATA_ROOT"] = str(tmp_path)
 
@@ -59,19 +78,141 @@ def test_phase2_caps_and_outputs(tmp_path: Path) -> None:
         "vol_shock_relaxation",
         "--symbols",
         "BTCUSDT,ETHUSDT",
-        "--max_conditions",
-        "20",
-        "--max_actions",
-        "9",
         "--bootstrap_iters",
         "200",
-    ]
+    ] + extra_args
     subprocess.run(cmd, check=True, env=env)
+
+
+def test_phase2_caps_and_outputs(tmp_path: Path) -> None:
+    run_id = "phase2_test"
+    _write_phase1_fixture(tmp_path=tmp_path, run_id=run_id)
+
+    _run_phase2(
+        tmp_path=tmp_path,
+        run_id=run_id,
+        extra_args=[
+            "--max_conditions",
+            "20",
+            "--max_actions",
+            "9",
+        ],
+    )
 
     out_dir = tmp_path / "reports" / "phase2" / run_id / "vol_shock_relaxation"
     assert (out_dir / "phase2_candidates.csv").exists()
     assert (out_dir / "promoted_candidates.json").exists()
     assert (out_dir / "phase2_manifests.json").exists()
+    assert (out_dir / "phase2_summary.md").exists()
+
     manifest = json.loads((out_dir / "phase2_manifests.json").read_text())
+    assert manifest["phase1_pass"] is True
     assert manifest["conditions_evaluated"] <= 20
     assert manifest["actions_evaluated"] <= 9
+    assert manifest["caps"]["condition_cap_pass"] is True
+    assert manifest["caps"]["action_cap_pass"] is True
+
+    candidates = pd.read_csv(out_dir / "phase2_candidates.csv")
+    if not candidates.empty:
+        assert "gate_e_simplicity" in candidates.columns
+        assert "fail_reasons" in candidates.columns
+        assert candidates["gate_e_simplicity"].all()
+
+    promoted = json.loads((out_dir / "promoted_candidates.json").read_text())
+    assert promoted["phase1_pass"] is True
+    assert promoted["promoted_count"] <= 2
+
+
+def test_phase2_simplicity_gate_blocks_when_caps_exceeded(tmp_path: Path) -> None:
+    run_id = "phase2_gate_e_test"
+    _write_phase1_fixture(tmp_path=tmp_path, run_id=run_id)
+
+    _run_phase2(
+        tmp_path=tmp_path,
+        run_id=run_id,
+        extra_args=[
+            "--max_conditions",
+            "3",
+            "--max_actions",
+            "2",
+        ],
+    )
+
+    out_dir = tmp_path / "reports" / "phase2" / run_id / "vol_shock_relaxation"
+    manifest = json.loads((out_dir / "phase2_manifests.json").read_text())
+    assert manifest["caps"]["condition_cap_pass"] is False
+    assert manifest["caps"]["action_cap_pass"] is False
+    assert manifest["caps"]["simplicity_gate_pass"] is False
+
+    promoted = json.loads((out_dir / "promoted_candidates.json").read_text())
+    assert promoted["decision"] == "freeze"
+
+    candidates = pd.read_csv(out_dir / "phase2_candidates.csv")
+    if not candidates.empty:
+        assert (candidates["gate_e_simplicity"] == False).all()  # noqa: E712
+
+
+def _candidate_subframe(opportunity_value_excess: float = 0.03) -> pd.DataFrame:
+    n = 64
+    return pd.DataFrame(
+        {
+            "year": [2022] * (n // 2) + [2023] * (n // 2),
+            "symbol": ["BTCUSDT"] * n,
+            "vol_regime": ["high"] * n,
+            "baseline_mode": ["matched_controls_excess"] * n,
+            "adverse_proxy_excess": [0.02] * n,
+            "opportunity_value_excess": [opportunity_value_excess] * n,
+            "forward_abs_return_h": [opportunity_value_excess] * n,
+            "time_to_secondary_shock": [12.0] * n,
+            "rv_decay_half_life": [20.0] * n,
+        }
+    )
+
+
+def test_phase2_blocks_full_exposure_cut_when_opportunity_cost_not_near_zero() -> None:
+    sub = _candidate_subframe(opportunity_value_excess=0.03)
+    condition = ConditionSpec("all", "all", lambda d: pd.Series(True, index=d.index))
+    action = ActionSpec("risk_throttle_0", "risk_throttle", {"k": 0.0})
+
+    result = _evaluate_candidate(
+        sub=sub,
+        condition=condition,
+        action=action,
+        bootstrap_iters=200,
+        seed=7,
+        cost_floor=0.0,
+        tail_material_threshold=0.0,
+        opportunity_tight_eps=0.0001,
+        opportunity_near_zero_eps=0.001,
+        net_benefit_floor=0.0,
+        simplicity_gate=True,
+    )
+
+    assert result["delta_exposure_mean"] <= -0.9
+    assert result["opportunity_cost_mean"] > 0.001
+    assert result["gate_f_exposure_guard"] is False
+    assert "gate_f_exposure_guard" in result["fail_reasons"]
+
+
+def test_phase2_net_benefit_gate_blocks_negative_economics() -> None:
+    sub = _candidate_subframe(opportunity_value_excess=0.03)
+    condition = ConditionSpec("all", "all", lambda d: pd.Series(True, index=d.index))
+    action = ActionSpec("delay_8", "timing", {"delay_bars": 8})
+
+    result = _evaluate_candidate(
+        sub=sub,
+        condition=condition,
+        action=action,
+        bootstrap_iters=200,
+        seed=11,
+        cost_floor=0.0,
+        tail_material_threshold=0.0,
+        opportunity_tight_eps=0.005,
+        opportunity_near_zero_eps=0.001,
+        net_benefit_floor=0.0,
+        simplicity_gate=True,
+    )
+
+    assert result["net_benefit_mean"] < 0.0
+    assert result["gate_g_net_benefit"] is False
+    assert "gate_g_net_benefit" in result["fail_reasons"]

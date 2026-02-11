@@ -47,6 +47,7 @@ def _empty_trades_frame() -> pd.DataFrame:
         columns=[
             "symbol",
             "direction",
+            "entry_reason",
             "entry_time",
             "exit_time",
             "entry_price",
@@ -61,7 +62,7 @@ def _empty_trades_frame() -> pd.DataFrame:
     )
 
 
-def _extract_trades(frame: pd.DataFrame) -> pd.DataFrame:
+def _extract_trades(frame: pd.DataFrame, max_hold_bars: int = 48) -> pd.DataFrame:
     if frame.empty:
         return _empty_trades_frame()
     if "close" not in frame.columns:
@@ -87,6 +88,7 @@ def _extract_trades(frame: pd.DataFrame) -> pd.DataFrame:
     stop_price: float | None = None
     target_price: float | None = None
     risk_return: float | None = None
+    entry_reason: str = ""
 
     for i in range(len(frame)):
         pos_i = int(pos.iat[i])
@@ -98,6 +100,7 @@ def _extract_trades(frame: pd.DataFrame) -> pd.DataFrame:
                 entry_price = float(close.iat[i]) if pd.notna(close.iat[i]) else float("nan")
                 direction = "long" if pos_i > 0 else "short"
                 stop_price = float(low_96.iat[i]) if direction == "long" else float(high_96.iat[i])
+                entry_reason = str(frame["entry_reason"].iat[i]) if "entry_reason" in frame.columns else ""
                 if pd.notna(entry_price) and pd.notna(stop_price) and entry_price > 0:
                     risk_per_unit = entry_price - stop_price if direction == "long" else stop_price - entry_price
                     if risk_per_unit > 0:
@@ -123,8 +126,11 @@ def _extract_trades(frame: pd.DataFrame) -> pd.DataFrame:
         trade_pnl = float(pnl.iloc[entry_idx : exit_idx + 1].sum()) if entry_idx is not None else 0.0
         r_multiple = trade_pnl / risk_return if risk_return and risk_return > 0 else 0.0
         exit_reason = "position_flip" if pos_i != 0 else "position_exit"
+        signaled_exit_reason = str(frame["exit_signal_reason"].iat[i]) if "exit_signal_reason" in frame.columns else ""
+        if signaled_exit_reason:
+            exit_reason = signaled_exit_reason
         bars_held = int(exit_idx - entry_idx) if entry_idx is not None else 0
-        if pd.notna(stop_price) and pd.notna(target_price):
+        if (not signaled_exit_reason) and pd.notna(stop_price) and pd.notna(target_price):
             high_exit = float(high.iat[exit_idx]) if pd.notna(high.iat[exit_idx]) else float("nan")
             low_exit = float(low.iat[exit_idx]) if pd.notna(low.iat[exit_idx]) else float("nan")
             if direction == "long":
@@ -137,12 +143,13 @@ def _extract_trades(frame: pd.DataFrame) -> pd.DataFrame:
                     exit_reason = "stop"
                 elif pd.notna(low_exit) and low_exit <= target_price:
                     exit_reason = "target"
-        if exit_reason == "position_exit" and bars_held >= 48:
+        if exit_reason == "position_exit" and bars_held >= int(max_hold_bars):
             exit_reason = "time"
         trades.append(
             {
                 "symbol": frame["symbol"].iat[i],
                 "direction": direction,
+                "entry_reason": entry_reason,
                 "entry_time": entry_time,
                 "exit_time": exit_time,
                 "entry_price": entry_price,
@@ -169,6 +176,7 @@ def _extract_trades(frame: pd.DataFrame) -> pd.DataFrame:
             entry_price = float(close.iat[i]) if pd.notna(close.iat[i]) else float("nan")
             direction = "long" if pos_i > 0 else "short"
             stop_price = float(low_96.iat[i]) if direction == "long" else float(high_96.iat[i])
+            entry_reason = str(frame["entry_reason"].iat[i]) if "entry_reason" in frame.columns else ""
             if pd.notna(entry_price) and pd.notna(stop_price) and entry_price > 0:
                 risk_per_unit = entry_price - stop_price if direction == "long" else stop_price - entry_price
                 if risk_per_unit > 0:
@@ -194,6 +202,7 @@ def _extract_trades(frame: pd.DataFrame) -> pd.DataFrame:
             {
                 "symbol": frame["symbol"].iat[exit_idx],
                 "direction": direction,
+                "entry_reason": entry_reason,
                 "entry_time": entry_time,
                 "exit_time": exit_time,
                 "entry_price": entry_price,
@@ -275,9 +284,35 @@ def main() -> int:
             finalize_manifest(manifest, "success", stats={"skipped": True})
             return 0
 
+        strategy_defaults = config.get("strategy_defaults", {}) if isinstance(config.get("strategy_defaults"), dict) else {}
+        vc_defaults = (
+            strategy_defaults.get("vol_compression_v1", {})
+            if isinstance(strategy_defaults.get("vol_compression_v1"), dict)
+            else {}
+        )
+
+        def _param(name: str, default: object) -> object:
+            if name in config:
+                return config[name]
+            if name in vc_defaults:
+                return vc_defaults[name]
+            return default
+
         strategy_params = {
             "trade_day_timezone": trade_day_timezone,
             "one_trade_per_day": True,
+            "compression_rv_pct_max": float(_param("compression_rv_pct_max", 10.0)),
+            "compression_range_ratio_max": float(_param("compression_range_ratio_max", 0.8)),
+            "breakout_confirm_bars": int(_param("breakout_confirm_bars", 0)),
+            "breakout_confirm_buffer_bps": float(_param("breakout_confirm_buffer_bps", 0.0)),
+            "max_hold_bars": int(_param("max_hold_bars", 48)),
+            "volatility_exit_rv_pct": float(_param("volatility_exit_rv_pct", 40.0)),
+            "expansion_timeout_bars": int(_param("expansion_timeout_bars", 0)),
+            "expansion_min_r": float(_param("expansion_min_r", 0.5)),
+            "adaptive_exit_enabled": bool(_param("adaptive_exit_enabled", False)),
+            "adaptive_activation_r": float(_param("adaptive_activation_r", 1.0)),
+            "adaptive_trail_lookback_bars": int(_param("adaptive_trail_lookback_bars", 8)),
+            "adaptive_trail_buffer_bps": float(_param("adaptive_trail_buffer_bps", 0.0)),
         }
         for overlay_name in overlays:
             strategy_params = apply_overlay(overlay_name, strategy_params)
@@ -306,7 +341,9 @@ def main() -> int:
         trades_by_symbol: Dict[str, List[pd.DataFrame]] = {symbol: [] for symbol in symbols}
         for _, frame in engine_results["strategy_frames"].items():
             for symbol, symbol_frame in frame.groupby("symbol", sort=True):
-                trades_by_symbol.setdefault(symbol, []).append(_extract_trades(symbol_frame))
+                trades_by_symbol.setdefault(symbol, []).append(
+                    _extract_trades(symbol_frame, max_hold_bars=int(strategy_params.get("max_hold_bars", 48)))
+                )
 
         all_symbol_trades: List[pd.DataFrame] = []
         symbol_entry_counts: Dict[str, int] = {}

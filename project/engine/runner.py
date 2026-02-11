@@ -147,9 +147,30 @@ def _strategy_returns(
     required_features = getattr(strategy, "required_features", []) or []
 
     positions = strategy.generate_positions(bars, features, params)
+    signal_events = positions.attrs.get("signal_events", []) if hasattr(positions, "attrs") else []
     timestamp_index = pd.DatetimeIndex(bars["timestamp"])
     positions = positions.reindex(timestamp_index).fillna(0).astype(int)
     _validate_positions(positions)
+
+    entry_reason_map: Dict[pd.Timestamp, str] = {}
+    exit_reason_map: Dict[pd.Timestamp, str] = {}
+    if isinstance(signal_events, list):
+        for evt in signal_events:
+            if not isinstance(evt, dict):
+                continue
+            try:
+                ts = pd.Timestamp(evt.get("timestamp"))
+            except Exception:
+                continue
+            if ts.tz is None:
+                ts = ts.tz_localize("UTC")
+            else:
+                ts = ts.tz_convert("UTC")
+            reason = str(evt.get("reason", ""))
+            if evt.get("event") == "entry":
+                entry_reason_map[ts] = reason
+            elif evt.get("event") == "exit":
+                exit_reason_map[ts] = reason
 
     bars_indexed = bars.set_index("timestamp")
     close = bars_indexed["close"].astype(float)
@@ -195,6 +216,8 @@ def _strategy_returns(
             "fp_active": features_aligned["fp_active"].fillna(0).astype(int).values if "fp_active" in features_aligned.columns else np.zeros(len(ret), dtype=int),
             "fp_age_bars": features_aligned["fp_age_bars"].fillna(0).astype(int).values if "fp_age_bars" in features_aligned.columns else np.zeros(len(ret), dtype=int),
             "fp_norm_due": features_aligned["fp_norm_due"].fillna(0).astype(int).values if "fp_norm_due" in features_aligned.columns else np.zeros(len(ret), dtype=int),
+            "entry_reason": [entry_reason_map.get(t, "") for t in ret.index],
+            "exit_signal_reason": [exit_reason_map.get(t, "") for t in ret.index],
         }
     )
     total_bars = int(len(ret))
