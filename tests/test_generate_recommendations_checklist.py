@@ -11,25 +11,38 @@ from pipelines.research import generate_recommendations_checklist
 def test_checklist_promote_when_all_gates_pass(monkeypatch, tmp_path: Path) -> None:
     run_id = "run_pass"
     reports_root = tmp_path / "reports"
-    summary_path = reports_root / "vol_compression_expansion_v1" / run_id / "summary.json"
-    summary_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_path.write_text(
+    edge_path = reports_root / "edge_candidates" / run_id / "edge_candidates_normalized.csv"
+    edge_path.parent.mkdir(parents=True, exist_ok=True)
+    edge_path.write_text(
+        "\n".join(
+            [
+                "run_id,event,candidate_id,status,edge_score,expected_return_proxy,stability_proxy,n_events,source_path",
+                f"{run_id},vol_shock_relaxation,c1,PROMOTED,1.2,0.1,0.8,210,x",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    expectancy_path = reports_root / "expectancy" / run_id / "conditional_expectancy.json"
+    expectancy_path.parent.mkdir(parents=True, exist_ok=True)
+    expectancy_path.write_text(
         json.dumps(
             {
                 "run_id": run_id,
-                "total_trades": 25,
-                "max_drawdown": -0.05,
-                "fee_sensitivity": [{"fee_bps_per_side": 6.0, "net_return": 0.12}],
-                "data_quality": {
-                    "symbols": {
-                        "BTCUSDT": {
-                            "pct_missing_ohlcv": {
-                                "2024-01": {"pct_missing_ohlcv": 0.0001},
-                            }
-                        }
-                    }
-                },
-                "stability_checks": {"sign_consistency": 0.8},
+                "expectancy_exists": True,
+                "expectancy_evidence": [{"condition": "compression", "horizon_bars": 16}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    robustness_path = reports_root / "expectancy" / run_id / "conditional_expectancy_robustness.json"
+    robustness_path.write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "survivors": [{"condition": "compression", "horizon": 16}],
             }
         ),
         encoding="utf-8",
@@ -62,20 +75,28 @@ def test_checklist_promote_when_all_gates_pass(monkeypatch, tmp_path: Path) -> N
 def test_checklist_keep_research_when_gates_fail(monkeypatch, tmp_path: Path) -> None:
     run_id = "run_fail"
     reports_root = tmp_path / "reports"
-    summary_path = reports_root / "vol_compression_expansion_v1" / run_id / "summary.json"
-    summary_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_path.write_text(
+    edge_path = reports_root / "edge_candidates" / run_id / "edge_candidates_normalized.csv"
+    edge_path.parent.mkdir(parents=True, exist_ok=True)
+    edge_path.write_text(
+        "run_id,event,candidate_id,status,edge_score,expected_return_proxy,stability_proxy,n_events,source_path\n",
+        encoding="utf-8",
+    )
+
+    expectancy_path = reports_root / "expectancy" / run_id / "conditional_expectancy.json"
+    expectancy_path.parent.mkdir(parents=True, exist_ok=True)
+    expectancy_path.write_text(
         json.dumps(
             {
                 "run_id": run_id,
-                "total_trades": 3,
-                "max_drawdown": -0.30,
-                "fee_sensitivity": [{"fee_bps_per_side": 6.0, "net_return": -0.02}],
-                "data_quality": {},
+                "expectancy_exists": False,
+                "expectancy_evidence": [],
             }
         ),
         encoding="utf-8",
     )
+
+    robustness_path = reports_root / "expectancy" / run_id / "conditional_expectancy_robustness.json"
+    robustness_path.write_text(json.dumps({"run_id": run_id, "survivors": []}), encoding="utf-8")
 
     out_dir = tmp_path / "out"
     monkeypatch.setattr(
@@ -98,5 +119,5 @@ def test_checklist_keep_research_when_gates_fail(monkeypatch, tmp_path: Path) ->
 
     payload = json.loads((out_dir / "checklist.json").read_text(encoding="utf-8"))
     assert payload["decision"] == "KEEP_RESEARCH"
-    assert any("trade count below threshold" in reason for reason in payload["failure_reasons"])
-    assert any("stability checks are missing" in reason for reason in payload["failure_reasons"])
+    assert any("edge candidates below threshold" in reason for reason in payload["failure_reasons"])
+    assert any("expectancy_exists is false" in reason for reason in payload["failure_reasons"])

@@ -1,9 +1,9 @@
-.PHONY: help run baseline discover-edges discover-hybrid clean-runtime clean-all-data test
+.PHONY: help run discover-edges discover-hybrid clean-runtime clean-all-data test
 
 help:
 	$(MAKE) -f project/Makefile help
 
-run baseline:
+run:
 	$(MAKE) -f project/Makefile run
 
 discover-edges:

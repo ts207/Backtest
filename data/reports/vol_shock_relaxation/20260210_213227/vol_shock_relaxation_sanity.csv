@@ -1,3 +1,0 @@
-symbol,event_count,median_time_to_relax,median_duration,min_duration,max_duration,cooldown_overlap_violations,non_degenerate_count,time_to_relax_in_bounds
-BTCUSDT,78,38.5,39.5,15,147,0,True,True
-ETHUSDT,77,34.0,35.0,12,144,0,True,True

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 from pathlib import Path
@@ -11,9 +12,7 @@ DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT / "data"))
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Generate run-level checklist aligned with docs/recommendations.md promotion gates."
-    )
+    parser = argparse.ArgumentParser(description="Generate a discovery-only run checklist from edge/expectancy artifacts.")
     parser.add_argument("--run_id", required=True)
     parser.add_argument(
         "--reports_root",
@@ -30,68 +29,11 @@ def _parse_args() -> argparse.Namespace:
         default="",
         help="Optional output directory (default: data/runs/<run_id>/research_checklist)",
     )
-    parser.add_argument("--cost_bps", type=float, default=6.0)
-    parser.add_argument("--min_trade_count", type=int, default=20)
-    parser.add_argument("--max_drawdown_pct", type=float, default=20.0)
-    parser.add_argument("--max_missing_ohlcv_pct", type=float, default=1.0)
+    parser.add_argument("--min_edge_candidates", type=int, default=1)
+    parser.add_argument("--min_expectancy_evidence", type=int, default=1)
+    parser.add_argument("--min_robust_survivors", type=int, default=1)
+    parser.add_argument("--require_expectancy_exists", type=int, default=1)
     return parser.parse_args()
-
-
-def _find_summary_json(reports_root: Path, run_id: str) -> Path | None:
-    candidates = [
-        reports_root / "vol_compression_expansion_v1" / run_id / "summary.json",
-        reports_root / "by_run" / run_id / "backtest" / "vol_compression_expansion_v1" / "summary.json",
-    ]
-    for path in candidates:
-        if path.exists():
-            return path
-    return None
-
-
-def _extract_fee_row(summary: dict[str, Any], cost_bps: float) -> dict[str, Any] | None:
-    rows = summary.get("fee_sensitivity", [])
-    if not isinstance(rows, list):
-        return None
-    for row in rows:
-        try:
-            if abs(float(row.get("fee_bps_per_side", -1.0)) - cost_bps) < 1e-9:
-                return row
-        except (TypeError, ValueError):
-            continue
-    return None
-
-
-def _max_missing_ohlcv_pct(summary: dict[str, Any]) -> float | None:
-    quality = summary.get("data_quality", {})
-    if not isinstance(quality, dict):
-        return None
-    symbols = quality.get("symbols", {})
-    if not isinstance(symbols, dict):
-        return None
-
-    observed: list[float] = []
-    for payload in symbols.values():
-        if not isinstance(payload, dict):
-            continue
-        monthly = payload.get("pct_missing_ohlcv", {})
-        if not isinstance(monthly, dict):
-            continue
-        for month_payload in monthly.values():
-            if not isinstance(month_payload, dict):
-                continue
-            value = month_payload.get("pct_missing_ohlcv")
-            if value is None:
-                continue
-            try:
-                observed.append(float(value) * 100.0)
-            except (TypeError, ValueError):
-                continue
-    return max(observed) if observed else None
-
-
-def _stability_checks(summary: dict[str, Any]) -> dict[str, Any]:
-    checks = summary.get("stability_checks", {})
-    return checks if isinstance(checks, dict) else {}
 
 
 def _gate_result(name: str, passed: bool, observed: Any, threshold: Any, note: str = "") -> dict[str, Any]:
@@ -104,102 +46,109 @@ def _gate_result(name: str, passed: bool, observed: Any, threshold: Any, note: s
     }
 
 
-def _build_payload(summary: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+def _read_json(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _edge_candidate_metrics(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"rows": 0, "promoted": 0}
+
+    rows = 0
+    promoted = 0
+    try:
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                rows += 1
+                if str(row.get("status", "")).strip().upper() == "PROMOTED":
+                    promoted += 1
+    except OSError:
+        return {"rows": 0, "promoted": 0}
+    return {"rows": rows, "promoted": promoted}
+
+
+def _build_payload(
+    run_id: str,
+    args: argparse.Namespace,
+    edge_metrics: dict[str, Any],
+    expectancy_payload: dict[str, Any],
+    robustness_payload: dict[str, Any],
+    paths: dict[str, str],
+) -> dict[str, Any]:
     reasons: list[str] = []
     gates: list[dict[str, Any]] = []
 
-    fee_row = _extract_fee_row(summary, float(args.cost_bps))
-    if fee_row is None:
-        gates.append(
-            _gate_result(
-                "positive_net_return_after_costs",
-                False,
-                None,
-                f"> 0.0 at {args.cost_bps} bps",
-                "missing fee sensitivity row for configured cost",
-            )
-        )
-        reasons.append("missing fee sensitivity row for configured cost")
-    else:
-        net_return = float(fee_row.get("net_return", 0.0) or 0.0)
-        passed = net_return > 0.0
-        gates.append(
-            _gate_result(
-                "positive_net_return_after_costs",
-                passed,
-                net_return,
-                "> 0.0",
-            )
-        )
-        if not passed:
-            reasons.append(f"net return not positive at {args.cost_bps} bps ({net_return:.6f})")
+    candidate_rows = int(edge_metrics.get("rows", 0) or 0)
+    candidate_ok = candidate_rows >= int(args.min_edge_candidates)
+    gates.append(_gate_result("edge_candidates_generated", candidate_ok, candidate_rows, int(args.min_edge_candidates)))
+    if not candidate_ok:
+        reasons.append(f"edge candidates below threshold ({candidate_rows} < {args.min_edge_candidates})")
 
-    total_trades = int(summary.get("total_trades", 0) or 0)
-    trade_count_ok = total_trades >= int(args.min_trade_count)
-    gates.append(_gate_result("minimum_trade_count", trade_count_ok, total_trades, args.min_trade_count))
-    if not trade_count_ok:
-        reasons.append(f"trade count below threshold ({total_trades} < {args.min_trade_count})")
-
-    max_drawdown = float(summary.get("max_drawdown", 0.0) or 0.0)
-    max_drawdown_pct = abs(max_drawdown) * 100.0
-    drawdown_ok = max_drawdown_pct <= float(args.max_drawdown_pct)
-    gates.append(_gate_result("max_drawdown_cap", drawdown_ok, max_drawdown_pct, args.max_drawdown_pct))
-    if not drawdown_ok:
-        reasons.append(f"max drawdown exceeds threshold ({max_drawdown_pct:.2f}% > {args.max_drawdown_pct:.2f}%)")
-
-    missing_ohlcv_pct = _max_missing_ohlcv_pct(summary)
-    if missing_ohlcv_pct is None:
-        gates.append(
-            _gate_result(
-                "data_quality_missing_ohlcv",
-                False,
-                None,
-                f"<= {args.max_missing_ohlcv_pct}",
-                "no monthly missing OHLCV diagnostics available",
-            )
-        )
-        reasons.append("missing data quality diagnostics for OHLCV coverage")
-    else:
-        data_quality_ok = missing_ohlcv_pct <= float(args.max_missing_ohlcv_pct)
-        gates.append(
-            _gate_result(
-                "data_quality_missing_ohlcv",
-                data_quality_ok,
-                missing_ohlcv_pct,
-                args.max_missing_ohlcv_pct,
-            )
-        )
-        if not data_quality_ok:
-            reasons.append(
-                f"missing OHLCV exceeds threshold ({missing_ohlcv_pct:.4f}% > {args.max_missing_ohlcv_pct:.4f}%)"
-            )
-
-    stability = _stability_checks(summary)
-    has_stability = bool(stability)
+    expectancy_exists = bool(expectancy_payload.get("expectancy_exists", False))
+    require_expectancy = bool(int(args.require_expectancy_exists))
+    expectancy_gate_ok = expectancy_exists if require_expectancy else True
     gates.append(
         _gate_result(
-            "stability_checks_present",
-            has_stability,
-            sorted(stability.keys()),
-            "non-empty dict",
-            "can be produced by a dedicated research stage",
+            "expectancy_exists",
+            expectancy_gate_ok,
+            expectancy_exists,
+            bool(require_expectancy),
+            "from conditional_expectancy.json",
         )
     )
-    if not has_stability:
-        reasons.append("stability checks are missing")
+    if not expectancy_gate_ok:
+        reasons.append("expectancy_exists is false")
+
+    expectancy_evidence = expectancy_payload.get("expectancy_evidence", [])
+    expectancy_evidence_count = len(expectancy_evidence) if isinstance(expectancy_evidence, list) else 0
+    evidence_ok = expectancy_evidence_count >= int(args.min_expectancy_evidence)
+    gates.append(
+        _gate_result(
+            "expectancy_evidence_count",
+            evidence_ok,
+            expectancy_evidence_count,
+            int(args.min_expectancy_evidence),
+        )
+    )
+    if not evidence_ok:
+        reasons.append(
+            f"expectancy evidence below threshold ({expectancy_evidence_count} < {args.min_expectancy_evidence})"
+        )
+
+    survivors = robustness_payload.get("survivors", [])
+    survivor_count = len(survivors) if isinstance(survivors, list) else 0
+    survivors_ok = survivor_count >= int(args.min_robust_survivors)
+    gates.append(_gate_result("robust_survivor_count", survivors_ok, survivor_count, int(args.min_robust_survivors)))
+    if not survivors_ok:
+        reasons.append(f"robust survivors below threshold ({survivor_count} < {args.min_robust_survivors})")
 
     decision = "PROMOTE" if all(gate["passed"] for gate in gates) else "KEEP_RESEARCH"
     return {
-        "run_id": summary.get("run_id"),
+        "run_id": run_id,
         "decision": decision,
         "gates": gates,
         "failure_reasons": reasons,
         "config": {
-            "cost_bps": float(args.cost_bps),
-            "min_trade_count": int(args.min_trade_count),
-            "max_drawdown_pct": float(args.max_drawdown_pct),
-            "max_missing_ohlcv_pct": float(args.max_missing_ohlcv_pct),
+            "min_edge_candidates": int(args.min_edge_candidates),
+            "min_expectancy_evidence": int(args.min_expectancy_evidence),
+            "min_robust_survivors": int(args.min_robust_survivors),
+            "require_expectancy_exists": bool(int(args.require_expectancy_exists)),
         },
+        "metrics": {
+            "edge_candidate_rows": candidate_rows,
+            "edge_candidate_promoted": int(edge_metrics.get("promoted", 0) or 0),
+            "expectancy_exists": expectancy_exists,
+            "expectancy_evidence_count": expectancy_evidence_count,
+            "robust_survivor_count": survivor_count,
+        },
+        "inputs": paths,
     }
 
 
@@ -219,15 +168,19 @@ def _render_markdown(payload: dict[str, Any]) -> str:
             f"- **{gate.get('name')}**: {status} (observed={gate.get('observed')}, threshold={gate.get('threshold')})"
         )
         if gate.get("note"):
-            lines.append(f"  - note: {gate.get('note')}")
+            lines.append(f"  note: {gate.get('note')}")
 
-    reasons = payload.get("failure_reasons", [])
+    lines.extend(["", "## Inputs", ""])
+    for name, path in sorted((payload.get("inputs") or {}).items()):
+        lines.append(f"- `{name}`: `{path}`")
+
+    lines.extend(["", "## Metrics", ""])
+    for name, value in sorted((payload.get("metrics") or {}).items()):
+        lines.append(f"- `{name}`: `{value}`")
+
+    reasons = payload.get("failure_reasons") or []
     lines.extend(["", "## Failure Reasons", ""])
-    if reasons:
-        for reason in reasons:
-            lines.append(f"- {reason}")
-    else:
-        lines.append("- None")
+    lines.extend([f"- {reason}" for reason in reasons] if reasons else ["- None"])
 
     return "\n".join(lines) + "\n"
 
@@ -235,13 +188,26 @@ def _render_markdown(payload: dict[str, Any]) -> str:
 def main() -> int:
     args = _parse_args()
     reports_root = Path(args.reports_root)
-    summary_path = _find_summary_json(reports_root, args.run_id)
-    if summary_path is None:
-        print(f"summary.json not found for run_id={args.run_id}")
-        return 1
+    edge_candidates_path = reports_root / "edge_candidates" / args.run_id / "edge_candidates_normalized.csv"
+    expectancy_path = reports_root / "expectancy" / args.run_id / "conditional_expectancy.json"
+    robustness_path = reports_root / "expectancy" / args.run_id / "conditional_expectancy_robustness.json"
 
-    summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    payload = _build_payload(summary, args)
+    edge_metrics = _edge_candidate_metrics(edge_candidates_path)
+    expectancy_payload = _read_json(expectancy_path)
+    robustness_payload = _read_json(robustness_path)
+
+    payload = _build_payload(
+        run_id=args.run_id,
+        args=args,
+        edge_metrics=edge_metrics,
+        expectancy_payload=expectancy_payload,
+        robustness_payload=robustness_payload,
+        paths={
+            "edge_candidates": str(edge_candidates_path),
+            "conditional_expectancy": str(expectancy_path),
+            "conditional_expectancy_robustness": str(robustness_path),
+        },
+    )
 
     out_dir = Path(args.out_dir) if args.out_dir else Path(args.runs_root) / args.run_id / "research_checklist"
     out_dir.mkdir(parents=True, exist_ok=True)

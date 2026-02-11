@@ -1,3 +1,0 @@
-run_id,event,candidate_id,status,edge_score,expected_return_proxy,stability_proxy,n_events,source_path
-20260210_213227,vol_shock_relaxation,vol_shock_relaxation_0,PROMOTED,0.4519680413182437,-0.0036775852272817877,1.0,47,/home/tstuv/snap/Backtest/data/reports/phase2/20260210_213227/vol_shock_relaxation/promoted_candidates.json
-20260210_213227,vol_shock_relaxation,vol_shock_relaxation_1,PROMOTED,0.44323069920287195,-0.001785052940098632,1.0,47,/home/tstuv/snap/Backtest/data/reports/phase2/20260210_213227/vol_shock_relaxation/promoted_candidates.json

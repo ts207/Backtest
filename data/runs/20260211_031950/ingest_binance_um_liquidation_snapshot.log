@@ -1,2 +1,0 @@
-2026-02-10 22:29:48,546 INFO Liquidation ingest symbol=BTCUSDT cm_contract=BTCUSD_PERP provider=binance_data_vision_cm rows=53236 written_rows=53236 written_partitions=17 requested_days=1866 considered_days=471 downloads_ok=471 not_found=0 parsed_rows=53236
-2026-02-10 22:33:55,443 INFO Liquidation ingest symbol=ETHUSDT cm_contract=ETHUSD_PERP provider=binance_data_vision_cm rows=27935 written_rows=27935 written_partitions=17 requested_days=1866 considered_days=472 downloads_ok=472 not_found=0 parsed_rows=27935

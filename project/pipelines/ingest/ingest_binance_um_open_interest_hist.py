@@ -300,6 +300,34 @@ def _fetch_open_interest_hist_api(
     return out, api_calls
 
 
+def _fetch_open_interest_hist(
+    session: requests.Session,
+    api_base: str,
+    symbol: str,
+    period: str,
+    start: datetime,
+    end_exclusive: datetime,
+    limit: int,
+    sleep_sec: float,
+) -> Tuple[pd.DataFrame, int]:
+    """
+    Backward-compatible wrapper retained for tests and older callers.
+    """
+    return _fetch_open_interest_hist_api(
+        session=session,
+        api_base=api_base,
+        symbol=symbol,
+        period=period,
+        start=start,
+        end_exclusive=end_exclusive,
+        limit=limit,
+        sleep_sec=sleep_sec,
+        max_retries=5,
+        retry_backoff_sec=2.0,
+        timeout_sec=30,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Ingest Binance USD-M open interest history (archive metrics + API tail in auto mode)"

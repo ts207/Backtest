@@ -77,7 +77,7 @@ def test_run_all_includes_phase2_chain_when_enabled(monkeypatch) -> None:
     assert "phase2_conditional_hypotheses" in stage_names
     assert stage_names.index("build_features_v1") < stage_names.index("analyze_vol_shock_relaxation")
     assert stage_names.index("analyze_vol_shock_relaxation") < stage_names.index("phase2_conditional_hypotheses")
-    assert stage_names.index("phase2_conditional_hypotheses") < stage_names.index("backtest_vol_compression_v1")
+    assert stage_names.index("phase2_conditional_hypotheses") < stage_names.index("generate_recommendations_checklist")
 
     phase2_args = next(base_args for stage, _, base_args, _ in captured if stage == "phase2_conditional_hypotheses")
     assert "--max_conditions" in phase2_args

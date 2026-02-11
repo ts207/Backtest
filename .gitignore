@@ -3,6 +3,21 @@
 __pycache__/
 *.pyc
 
-# Local data lake, runs, reports, and generated artifacts
-data/
+# Generated runtime artifacts
+data/*
+!data/.gitkeep
+!data/lake/
+data/lake/*
+!data/lake/.gitkeep
+!data/runs/
+data/runs/*
+!data/runs/.gitkeep
+!data/reports/
+data/reports/*
+!data/reports/.gitkeep
+
+# Alternate local data roots
 .data/
+
+# Local run outputs
+project/runs/

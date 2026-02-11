@@ -14,7 +14,14 @@ DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from features.funding_persistence import DEFAULT_FP_CONFIG, build_funding_persistence_state
-from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet, write_parquet
+from pipelines._lib.io_utils import (
+    choose_partition_dir,
+    ensure_dir,
+    list_parquet_files,
+    read_parquet,
+    run_scoped_lake_path,
+    write_parquet,
+)
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 
 
@@ -42,13 +49,13 @@ def main() -> int:
     args = parser.parse_args()
 
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
-    start = pd.Timestamp(args.start, tz="UTC")
-    end = pd.Timestamp(args.end, tz="UTC")
+    start = pd.Timestamp(args.start, tz="UTC").floor("D")
+    end_exclusive = pd.Timestamp(args.end, tz="UTC").floor("D") + pd.Timedelta(days=1)
 
     output_root = (
         Path(args.out_dir)
         if args.out_dir
-        else DATA_ROOT / "features" / "context" / "funding_persistence"
+        else run_scoped_lake_path(DATA_ROOT, args.run_id, "context", "funding_persistence")
     )
 
     log_handlers = [logging.StreamHandler(sys.stdout)]
@@ -63,7 +70,8 @@ def main() -> int:
         "symbols": symbols,
         "timeframe": args.timeframe,
         "start": start.isoformat(),
-        "end": end.isoformat(),
+        "end": pd.Timestamp(args.end, tz="UTC").isoformat(),
+        "end_exclusive": end_exclusive.isoformat(),
         "out_dir": str(output_root),
         "force": int(args.force),
         "fp_def_version": DEFAULT_FP_CONFIG.def_version,
@@ -72,16 +80,63 @@ def main() -> int:
     stats: Dict[str, object] = {"symbols": {}}
 
     try:
+        def _skip_existing(existing_df: pd.DataFrame, expected: pd.DataFrame) -> bool:
+            if existing_df.empty or len(existing_df) != len(expected):
+                return False
+            if "timestamp" not in existing_df.columns or "fp_def_version" not in existing_df.columns:
+                return False
+            existing_ts = pd.to_datetime(existing_df["timestamp"], utc=True, errors="coerce")
+            expected_ts = pd.to_datetime(expected["timestamp"], utc=True, errors="coerce")
+            if existing_ts.isna().any() or expected_ts.isna().any():
+                return False
+            if list(existing_ts) != list(expected_ts):
+                return False
+            versions = set(existing_df["fp_def_version"].astype(str).dropna().unique().tolist())
+            return versions == {DEFAULT_FP_CONFIG.def_version}
+
         for symbol in symbols:
-            bars_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / f"bars_{args.timeframe}"
-            bars = read_parquet(list_parquet_files(bars_dir))
+            bars_candidates = [
+                run_scoped_lake_path(DATA_ROOT, args.run_id, "cleaned", "perp", symbol, f"bars_{args.timeframe}"),
+                DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / f"bars_{args.timeframe}",
+            ]
+            bars_dir = choose_partition_dir(bars_candidates)
+            bars = read_parquet(list_parquet_files(bars_dir)) if bars_dir else pd.DataFrame()
             if bars.empty:
                 raise ValueError(f"No cleaned bars found for {symbol} at timeframe={args.timeframe}")
             bars["timestamp"] = pd.to_datetime(bars["timestamp"], utc=True)
             bars = bars.sort_values("timestamp").reset_index(drop=True)
-            bars = bars[(bars["timestamp"] >= start) & (bars["timestamp"] <= end)].copy()
+            bars = bars[(bars["timestamp"] >= start) & (bars["timestamp"] < end_exclusive)].copy()
             if bars.empty:
                 raise ValueError(f"No bars in requested range for {symbol}")
+
+            if "funding_rate_scaled" not in bars.columns:
+                funding_candidates = [
+                    run_scoped_lake_path(
+                        DATA_ROOT,
+                        args.run_id,
+                        "cleaned",
+                        "perp",
+                        symbol,
+                        f"funding_{args.timeframe}",
+                    ),
+                    DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / f"funding_{args.timeframe}",
+                ]
+                funding_dir = choose_partition_dir(funding_candidates)
+                funding = read_parquet(list_parquet_files(funding_dir)) if funding_dir else pd.DataFrame()
+                if funding.empty:
+                    raise ValueError(f"Missing funding_rate_scaled for {symbol} at timeframe={args.timeframe}")
+                funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
+                funding = (
+                    funding[["timestamp", "funding_rate_scaled"]]
+                    .dropna(subset=["timestamp"])
+                    .sort_values("timestamp")
+                    .drop_duplicates(subset=["timestamp"], keep="last")
+                )
+                bars = bars.merge(funding, on="timestamp", how="left", validate="one_to_one")
+                bars["funding_rate_scaled"] = pd.to_numeric(bars["funding_rate_scaled"], errors="coerce")
+                if bars["funding_rate_scaled"].isna().all():
+                    raise ValueError(f"Unable to align funding_rate_scaled for {symbol}")
+                bars["funding_rate_scaled"] = bars["funding_rate_scaled"].ffill().fillna(0.0)
 
             inputs.append({"path": str(bars_dir), **_collect_stats(bars)})
             fp = build_funding_persistence_state(bars, symbol=symbol, config=DEFAULT_FP_CONFIG)
@@ -89,7 +144,7 @@ def main() -> int:
             out_path = output_root / symbol / f"{args.timeframe}.parquet"
             if out_path.exists() and not args.force:
                 existing = read_parquet([out_path])
-                if len(existing) == len(fp):
+                if _skip_existing(existing, fp):
                     logging.info("Skipping existing context file for %s: %s", symbol, out_path)
                     outputs.append({"path": str(out_path), "rows": int(len(existing)), "storage_format": out_path.suffix})
                     continue

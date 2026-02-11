@@ -4,5 +4,7 @@ stages:
   - ingest
   - clean
   - features
-  - backtest
-  - report
+  - context
+  - research
+  - expectancy
+  - checklist

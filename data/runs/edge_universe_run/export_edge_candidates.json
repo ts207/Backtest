@@ -1,18 +1,18 @@
 {
   "error": null,
-  "finished_at": "2026-02-11T03:38:59.212829+00:00",
+  "finished_at": "2026-02-11T21:19:42.655182+00:00",
   "inputs": [],
   "outputs": [
     {
       "end_ts": null,
-      "path": "/tmp/pytest-of-tstuv/pytest-35/test_collects_unified_multi_ev0/reports/edge_candidates/edge_universe_run/edge_candidates_normalized.csv",
-      "rows": 3,
+      "path": "/tmp/pytest-of-tstuv/pytest-7/test_collects_unified_multi_ev0/reports/edge_candidates/edge_universe_run/edge_candidates_normalized.csv",
+      "rows": 2,
       "start_ts": null
     },
     {
       "end_ts": null,
-      "path": "/tmp/pytest-of-tstuv/pytest-35/test_collects_unified_multi_ev0/reports/edge_candidates/edge_universe_run/edge_candidates_normalized.json",
-      "rows": 3,
+      "path": "/tmp/pytest-of-tstuv/pytest-7/test_collects_unified_multi_ev0/reports/edge_candidates/edge_universe_run/edge_candidates_normalized.json",
+      "rows": 2,
       "start_ts": null
     }
   ],
@@ -26,9 +26,9 @@
   },
   "run_id": "edge_universe_run",
   "stage": "export_edge_candidates",
-  "started_at": "2026-02-11T03:38:59.198709+00:00",
+  "started_at": "2026-02-11T21:19:42.648903+00:00",
   "stats": {
-    "candidate_count": 3
+    "candidate_count": 2
   },
   "status": "success"
 }

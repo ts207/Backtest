@@ -214,37 +214,6 @@ def _collect_phase2_candidates(run_id: str) -> List[Dict[str, object]]:
     return rows
 
 
-def _collect_summary_candidates(run_id: str) -> List[Dict[str, object]]:
-    rows: List[Dict[str, object]] = []
-    reports_root = DATA_ROOT / "reports"
-    if not reports_root.exists():
-        return rows
-
-    for event_root in sorted([p for p in reports_root.iterdir() if p.is_dir()]):
-        if event_root.name in {"phase2", "by_run", "overlay_promotion", "edge_candidates"}:
-            continue
-        summary_json = event_root / run_id / "summary.json"
-        if not summary_json.exists():
-            continue
-
-        payload = json.loads(summary_json.read_text(encoding="utf-8"))
-        rows.append(
-            {
-                "run_id": run_id,
-                "event": event_root.name,
-                "candidate_id": f"{event_root.name}_summary_candidate",
-                "status": "DRAFT",
-                "edge_score": float(payload.get("net_total_return", 0.0) or 0.0),
-                "expected_return_proxy": float(payload.get("net_total_return", 0.0) or 0.0),
-                "stability_proxy": float(payload.get("sharpe_annualized", 0.0) or 0.0),
-                "n_events": int(payload.get("total_trades", 0) or 0),
-                "source_path": str(summary_json),
-            }
-        )
-
-    return rows
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Expand and normalize edge candidate universe")
     parser.add_argument("--run_id", required=True)
@@ -285,7 +254,6 @@ def main() -> int:
             )
 
         rows = _collect_phase2_candidates(args.run_id)
-        rows.extend(_collect_summary_candidates(args.run_id))
 
         out_dir = DATA_ROOT / "reports" / "edge_candidates" / args.run_id
         ensure_dir(out_dir)

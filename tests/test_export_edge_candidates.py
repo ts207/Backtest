@@ -68,12 +68,6 @@ def test_collects_unified_multi_event_phase2_candidates(tmp_path: Path, monkeypa
         ]
     ).to_csv(liq_dir / "phase2_candidates.csv", index=False)
 
-    (tmp_path / "reports" / "vol_compression_expansion_v1" / run_id).mkdir(parents=True, exist_ok=True)
-    (tmp_path / "reports" / "vol_compression_expansion_v1" / run_id / "summary.json").write_text(
-        json.dumps({"net_total_return": 0.2, "sharpe_annualized": 1.1, "total_trades": 18}),
-        encoding="utf-8",
-    )
-
     monkeypatch.setattr(
         sys,
         "argv",
@@ -95,7 +89,6 @@ def test_collects_unified_multi_event_phase2_candidates(tmp_path: Path, monkeypa
     assert set(out_df["event"].tolist()) >= {
         "vol_shock_relaxation",
         "liquidity_absence_window",
-        "vol_compression_expansion_v1",
     }
 
     promoted = out_df[out_df["event"] == "vol_shock_relaxation"].iloc[0]
