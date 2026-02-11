@@ -13,6 +13,7 @@ from pipelines.research import export_edge_candidates
 
 def test_collects_unified_multi_event_phase2_candidates(tmp_path: Path, monkeypatch) -> None:
     run_id = "edge_universe_run"
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
     monkeypatch.setattr(export_edge_candidates, "DATA_ROOT", tmp_path)
 
     phase2_root = tmp_path / "reports" / "phase2" / run_id

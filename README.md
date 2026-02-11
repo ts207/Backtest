@@ -73,4 +73,5 @@ export BACKTEST_DATA_ROOT=/abs/path/to/data
 ```bash
 project/scripts/clean_data.sh runtime
 project/scripts/clean_data.sh all
+project/scripts/clean_data.sh repo
 ```

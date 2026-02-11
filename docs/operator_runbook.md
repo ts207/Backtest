@@ -15,7 +15,7 @@ Expected outputs:
 - `data/runs/<run_id>/*.json|*.log`
 - `data/lake/runs/<run_id>/cleaned/...`
 - `data/lake/runs/<run_id>/features/...`
-- `data/features/context/funding_persistence/...`
+- `data/lake/runs/<run_id>/context/funding_persistence/...`
 
 ## 2) Generate non-leaking hypothesis queue
 ```bash
@@ -85,4 +85,5 @@ Expected outputs:
 ```bash
 project/scripts/clean_data.sh runtime
 project/scripts/clean_data.sh all
+project/scripts/clean_data.sh repo
 ```
