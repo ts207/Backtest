@@ -21,7 +21,6 @@ Documentation is split into two stable layers:
 
 ## Report docs (`docs/report/`)
 
-- `report/full_project_audit_deep_report.md` — comprehensive technical audit with risks and prioritized actions.
 - `report/latest_run_deep_report.md` — latest deep run analysis and prioritized actions.
 - `report/project_report_detailed.md` — change-focused implementation report.
 
