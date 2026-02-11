@@ -73,7 +73,7 @@ def main() -> int:
     parser.add_argument("--strategies", default=None)
     parser.add_argument("--overlays", default="")
     parser.add_argument("--run_phase2_conditional", type=int, default=0)
-    parser.add_argument("--phase2_event_type", default="vol_shock_relaxation", choices=["vol_shock_relaxation"])
+    parser.add_argument("--phase2_event_type", default="vol_shock_relaxation", choices=["vol_shock_relaxation", "directional_exhaustion_after_forced_flow", "liquidity_refill_lag_window"])
     parser.add_argument("--phase2_max_conditions", type=int, default=20)
     parser.add_argument("--phase2_max_actions", type=int, default=9)
     parser.add_argument("--phase2_bootstrap_iters", type=int, default=1000)
@@ -265,8 +265,8 @@ def main() -> int:
         stages[insert_at:insert_at] = phase1_aftershock_stage
 
     if int(args.run_phase2_conditional):
-        phase2_stages = [
-            (
+        phase1_analyzers = {
+            "vol_shock_relaxation": (
                 "analyze_vol_shock_relaxation",
                 PROJECT_ROOT / "pipelines" / "research" / "analyze_vol_shock_relaxation.py",
                 [
@@ -278,6 +278,29 @@ def main() -> int:
                     "15m",
                 ],
             ),
+            "directional_exhaustion_after_forced_flow": (
+                "analyze_directional_exhaustion_after_forced_flow",
+                PROJECT_ROOT / "pipelines" / "research" / "analyze_directional_exhaustion_after_forced_flow.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                ],
+            ),
+            "liquidity_refill_lag_window": (
+                "analyze_liquidity_refill_lag_window",
+                PROJECT_ROOT / "pipelines" / "research" / "analyze_liquidity_refill_lag_window.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                ],
+            ),
+        }
+        phase2_stages = [
+            phase1_analyzers[args.phase2_event_type],
             (
                 "phase2_conditional_hypotheses",
                 PROJECT_ROOT / "pipelines" / "research" / "phase2_conditional_hypotheses.py",
