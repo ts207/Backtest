@@ -141,3 +141,40 @@ def test_run_all_can_disable_recommendations_checklist(monkeypatch) -> None:
 
     assert run_all.main() == 0
     assert "generate_recommendations_checklist" not in captured
+
+def test_run_all_can_include_promoted_edge_audits_stage(monkeypatch) -> None:
+    captured = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, base_args))
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_promoted_audits",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_promoted_edge_audits",
+            "1",
+            "--promoted_edge_audit_top_n",
+            "2",
+            "--promoted_edge_audit_horizon_bars",
+            "1",
+        ],
+    )
+
+    assert run_all.main() == 0
+    stage_names = [s for s, _ in captured]
+    assert "run_promoted_edge_audits" in stage_names
+    args = next(a for s, a in captured if s == "run_promoted_edge_audits")
+    assert "--top_n" in args
+    assert "--horizon_bars" in args
