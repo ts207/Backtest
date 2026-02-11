@@ -240,6 +240,7 @@ def main() -> int:
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--out_dir", default=None)
+    parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "cross_venue_desync" / args.run_id

@@ -2,8 +2,10 @@
 
 This runbook contains three reference workflows:
 1) baseline pipeline run
-2) Phase 2 research run
+2) Phase 2 research run (single mechanism)
 3) multi-edge validation run
+4) discovery-first run (all mechanisms)
+5) dataset-seeded hypothesis generation (non-leaking)
 
 ## 1) Baseline run (ingest -> report)
 
@@ -36,6 +38,84 @@ Expected outputs:
 - `data/reports/phase2/<run_id>/vol_shock_relaxation/phase2_candidates.csv`
 - `data/reports/phase2/<run_id>/vol_shock_relaxation/phase2_summary.md`
 - `data/reports/phase2/<run_id>/vol_shock_relaxation/promoted_candidates.json`
+
+## 4) Discovery-first run (all mechanisms)
+
+```bash
+python3 project/pipelines/run_all.py \
+  --symbols BTCUSDT,ETHUSDT \
+  --start 2020-06-01 \
+  --end 2025-07-10 \
+  --run_backtest_baseline 0 \
+  --run_make_report 0 \
+  --run_phase2_conditional 1 \
+  --phase2_event_type all \
+  --run_edge_candidate_universe 1
+```
+
+Expected outputs:
+- `data/reports/phase2/<run_id>/<event_type>/phase2_candidates.csv`
+- `data/reports/edge_candidates/<run_id>/edge_candidates_normalized.csv`
+
+## 5) Dataset-seeded hypothesis generation (non-leaking)
+
+```bash
+python3 project/pipelines/research/generate_hypothesis_queue.py \
+  --run_id 20260210_000001 \
+  --symbols BTCUSDT,ETHUSDT \
+  --datasets auto \
+  --max_fused 24
+```
+
+Expected outputs:
+- `data/reports/hypothesis_generator/<run_id>/dataset_introspection.json`
+- `data/reports/hypothesis_generator/<run_id>/template_hypotheses.json`
+- `data/reports/hypothesis_generator/<run_id>/fusion_hypotheses.json`
+- `data/reports/hypothesis_generator/<run_id>/phase1_hypothesis_queue.jsonl`
+
+## Optional sensor ingest (Binance CM liquidationSnapshot + Binance OI)
+
+```bash
+python3 project/pipelines/ingest/ingest_binance_um_liquidation_snapshot.py \
+  --run_id 20260210_000001 \
+  --symbols BTCUSDT,ETHUSDT \
+  --start 2020-06-01 \
+  --end 2025-07-10
+
+python3 project/pipelines/ingest/ingest_binance_um_open_interest_hist.py \
+  --run_id 20260210_000001 \
+  --symbols BTCUSDT,ETHUSDT \
+  --start 2020-06-01 \
+  --end 2025-07-10 \
+  --period 5m
+```
+
+Hybrid one-command run:
+
+```bash
+python3 project/pipelines/run_all.py \
+  --symbols BTCUSDT,ETHUSDT \
+  --start 2020-06-01 \
+  --end 2025-07-10 \
+  --run_backtest_baseline 0 \
+  --run_make_report 0 \
+  --run_ingest_liquidation_snapshot 1 \
+  --run_ingest_open_interest_hist 1 \
+  --run_hypothesis_generator 1 \
+  --run_phase2_conditional 1 \
+  --phase2_event_type all \
+  --run_edge_candidate_universe 1
+```
+
+## Data cleanup commands
+
+```bash
+# Remove run/report artifacts only
+project/scripts/clean_data.sh runtime
+
+# Remove all local data artifacts (raw/cleaned/features/trades/runs/reports)
+project/scripts/clean_data.sh all
+```
 
 ## 3) Multi-edge validation run
 

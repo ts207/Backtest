@@ -104,7 +104,7 @@ def _infer_epoch_unit(ts_series: pd.Series) -> str:
 
 def _snap_to_8h_grid(ts: pd.Series) -> pd.Series:
     ts = pd.to_datetime(ts, utc=True).dt.round("1s")
-    secs = (ts.view("int64") // 1_000_000_000).astype("int64")
+    secs = (ts.astype("int64", copy=False) // 1_000_000_000).astype("int64")
     snap = ((secs + 4 * 3600) // (8 * 3600)) * (8 * 3600)
     return pd.to_datetime(snap, unit="s", utc=True)
 
@@ -341,7 +341,12 @@ def main() -> int:
 
                 if not args.force and _partition_complete(out_path, expected_ts_month):
                     partitions_skipped.append(str(out_path))
-                    df_month = read_parquet([out_path]).sort_values("timestamp")
+                    existing_path = out_path if out_path.exists() else out_path.with_suffix(".csv")
+                    df_month = read_parquet([existing_path])
+                    if "timestamp" not in df_month.columns:
+                        raise ValueError(f"Missing timestamp column in existing partition: {existing_path}")
+                    df_month["timestamp"] = pd.to_datetime(df_month["timestamp"], utc=True, errors="coerce")
+                    df_month = df_month.dropna(subset=["timestamp"]).sort_values("timestamp")
                     df_month = df_month[(df_month["timestamp"] >= range_start) & (df_month["timestamp"] < range_end_exclusive)]
                     month_frames.append(df_month)
                     continue

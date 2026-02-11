@@ -95,6 +95,8 @@ def test_multi_edge_backtest_writes_metrics(tmp_path: Path, monkeypatch: pytest.
     assert "family_competition_diagnostics" in payload
     assert "pairwise" in payload["family_competition_diagnostics"]
     assert "skipped_edge_ids" in payload
-    assert "tsmom_trend" in payload["selected_edge_ids"]
-    assert "carry_funding" in payload["selected_edge_ids"]
-    assert "intraday_reversion_core" in payload["selected_edge_ids"]
+    selected = set(payload["selected_edge_ids"])
+    assert "vc_core" in selected
+    assert "tsmom_trend" not in selected
+    assert "carry_funding" not in selected
+    assert "intraday_reversion_core" not in selected

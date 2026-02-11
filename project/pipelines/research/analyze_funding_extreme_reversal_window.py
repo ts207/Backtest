@@ -5,7 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -32,19 +32,22 @@ def _load_feature_frame(run_id: str, symbol: str, timeframe: str = "15m") -> pd.
     features_dir = choose_partition_dir(candidates)
     if features_dir is None:
         return pd.DataFrame()
+
     frame = read_parquet(list_parquet_files(features_dir))
     if frame.empty:
         return frame
+
     frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
     frame = frame.sort_values("timestamp").reset_index(drop=True)
-
     close = frame["close"].astype(float)
     frame["ret_1"] = close.pct_change(fill_method=None)
     frame["logret_1"] = np.log(close).diff()
     frame["rv"] = frame["rv_96"].astype(float) if "rv_96" in frame.columns else frame["logret_1"].rolling(96, min_periods=32).std()
-    frame["range_frac"] = (frame["high"].astype(float) - frame["low"].astype(float)) / close.replace(0.0, np.nan)
-    frame["range_base"] = frame["range_frac"].rolling(96, min_periods=32).median()
     frame["tail_move"] = frame["ret_1"].abs()
+    frame["funding_rate_scaled"] = pd.to_numeric(frame.get("funding_rate_scaled"), errors="coerce").fillna(0.0)
+    frame["funding_abs"] = frame["funding_rate_scaled"].abs()
+    frame["anchor_hour"] = frame["timestamp"].dt.hour.astype(int)
+    frame["rv_rank"] = frame["rv"].rank(pct=True)
     return frame
 
 
@@ -58,7 +61,7 @@ def _hazard(times: pd.Series, horizon: int) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _event_metrics(core: pd.DataFrame, start_idx: int, end_idx: int, tail_threshold: float) -> Dict[str, float]:
+def _window_metrics(core: pd.DataFrame, start_idx: int, end_idx: int, tail_threshold: float) -> Dict[str, float]:
     win = core.iloc[start_idx : end_idx + 1]
     if win.empty:
         return {}
@@ -72,7 +75,7 @@ def _event_metrics(core: pd.DataFrame, start_idx: int, end_idx: int, tail_thresh
     if np.isfinite(tail_threshold):
         for k in range(start_idx, end_idx + 1):
             if pd.notna(core["tail_move"].iat[k]) and float(core["tail_move"].iat[k]) >= tail_threshold:
-                t_tail = float(k - start_idx + 1)
+                t_tail = float(k - start_idx)
                 break
 
     return {
@@ -84,161 +87,137 @@ def _event_metrics(core: pd.DataFrame, start_idx: int, end_idx: int, tail_thresh
     }
 
 
-def _anchor_candidates(core: pd.DataFrame, anchor_mode: str, anchor_quantile: float) -> pd.DataFrame:
-    if anchor_mode == "taker_imbalance":
-        if "taker_base_volume" in core.columns and "volume" in core.columns:
-            imbalance = core["taker_base_volume"].astype(float) / core["volume"].replace(0.0, np.nan)
-            hi = imbalance.quantile(anchor_quantile)
-            lo = imbalance.quantile(1.0 - anchor_quantile)
-            anchors = core.assign(anchor_score=imbalance, direction=np.where(imbalance >= hi, 1, np.where(imbalance <= lo, -1, 0)))
-            return anchors[anchors["direction"] != 0]
-
-        if "tail_move" in core.columns and "ret_1" in core.columns:
-            threshold = core["tail_move"].quantile(anchor_quantile)
-            anchors = core.assign(anchor_score=core["tail_move"], direction=np.sign(core["ret_1"].fillna(0.0)))
-            anchors = anchors[anchors["anchor_score"] >= threshold]
-            return anchors[anchors["direction"] != 0]
-        return pd.DataFrame()
-
-    if anchor_mode == "liquidation_cluster":
-        for col in ("liquidation_volume", "liq_volume", "liquidation_notional"):
-            if col in core.columns:
-                metric = core[col].astype(float)
-                threshold = metric.quantile(anchor_quantile)
-                anchors = core.assign(anchor_score=metric, direction=np.sign(core["ret_1"].fillna(0.0)))
-                anchors = anchors[anchors["anchor_score"] >= threshold]
-                return anchors[anchors["direction"] != 0]
-        return pd.DataFrame()
-
-    return pd.DataFrame()
+def _sign_label(v: float) -> str:
+    if v > 0:
+        return "pos_funding"
+    if v < 0:
+        return "neg_funding"
+    return "flat_funding"
 
 
-def _build_event_and_control_rows(
-    symbol: str,
-    core: pd.DataFrame,
-    window_end: int,
-    anchor_mode: str,
-    anchor_quantile: float,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+def _vol_regime(v: float) -> str:
+    if not np.isfinite(v):
+        return "unknown"
+    if v >= 0.66:
+        return "high"
+    if v <= 0.33:
+        return "low"
+    return "mid"
+
+
+def _build_event_rows(symbol: str, core: pd.DataFrame, funding_abs_quantile: float, horizon: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
     if core.empty:
         return pd.DataFrame(), pd.DataFrame()
 
-    tail_threshold = float(core["tail_move"].quantile(0.95)) if core["tail_move"].notna().any() else np.nan
-    anchors = _anchor_candidates(core, anchor_mode, anchor_quantile)
-    if anchors.empty:
+    threshold = float(core["funding_abs"].quantile(funding_abs_quantile)) if core["funding_abs"].notna().any() else np.nan
+    if not np.isfinite(threshold):
         return pd.DataFrame(), pd.DataFrame()
 
-    rows_event: List[Dict[str, object]] = []
-    rows_ctrl: List[Dict[str, object]] = []
+    tail_threshold = float(core["tail_move"].quantile(0.95)) if core["tail_move"].notna().any() else np.nan
+    event_idx = core.index[core["funding_abs"] >= threshold].tolist()
+    control_pool = core[core["funding_abs"] < threshold].copy()
 
-    non_event_pool = core.copy()
-    non_event_pool = non_event_pool.assign(rv_rank=non_event_pool["rv"].rank(pct=True)) if not non_event_pool.empty else non_event_pool
-
+    events: List[Dict[str, object]] = []
+    controls: List[Dict[str, object]] = []
     seen_until = -1
-    for idx, row in anchors.iterrows():
+    for idx in event_idx:
         if idx <= seen_until:
             continue
-        end_idx = min(len(core) - 1, idx + window_end)
+        end_idx = min(len(core) - 1, idx + horizon)
         seen_until = end_idx
 
-        direction = int(row.get("direction", 0))
-        if direction == 0:
-            continue
-        anchor_high = float(core["high"].iat[idx])
-        anchor_low = float(core["low"].iat[idx])
-        window = core.iloc[idx : end_idx + 1]
-        if direction > 0:
-            failed_new_extreme = float(window["high"].max()) <= anchor_high
-        else:
-            failed_new_extreme = float(window["low"].min()) >= anchor_low
-        if not failed_new_extreme:
-            continue
-
-        metrics = _event_metrics(core, idx, end_idx, tail_threshold)
+        funding = float(core["funding_rate_scaled"].iat[idx]) if pd.notna(core["funding_rate_scaled"].iat[idx]) else 0.0
+        rv_rank = float(core["rv_rank"].iat[idx]) if pd.notna(core["rv_rank"].iat[idx]) else np.nan
+        metrics = _window_metrics(core, idx, end_idx, tail_threshold)
         if not metrics:
             continue
-        event_id = f"deff_{symbol}_{idx:06d}"
-        rv_rank = float(core["rv"].rank(pct=True).iat[idx]) if pd.notna(core["rv"].iat[idx]) else np.nan
-        rows_event.append(
+
+        event_id = f"ferw_{symbol}_{idx:06d}"
+        events.append(
             {
-                "event_type": "directional_exhaustion_after_forced_flow",
+                "event_type": "funding_extreme_reversal_window",
                 "event_id": event_id,
                 "symbol": symbol,
                 "anchor_ts": core["timestamp"].iat[idx],
+                "anchor_hour": int(core["anchor_hour"].iat[idx]),
                 "start_idx": idx,
                 "end_idx": end_idx,
                 "year": int(pd.Timestamp(core["timestamp"].iat[idx]).year),
-                "anchor_mode": anchor_mode,
-                "anchor_quantile": anchor_quantile,
-                "direction": direction,
+                "funding_rate_scaled": funding,
+                "funding_abs": abs(funding),
+                "funding_abs_threshold": threshold,
+                "funding_sign": _sign_label(funding),
                 "rv_rank": rv_rank,
+                "vol_regime": _vol_regime(rv_rank),
+                "bull_bear": "bull" if funding > 0 else "bear",
                 **metrics,
             }
         )
 
-        pool = non_event_pool
+        if control_pool.empty:
+            continue
+        pool = control_pool[control_pool["anchor_hour"] == int(core["anchor_hour"].iat[idx])]
+        if pool.empty:
+            pool = control_pool
         if np.isfinite(rv_rank):
             pool = pool.assign(match_dist=(pool["rv_rank"] - rv_rank).abs()).nsmallest(200, "match_dist")
         if pool.empty:
             continue
+
         pick = pool.sample(n=1, random_state=idx).iloc[0]
         c_idx = int(pick.name)
-        c_end = min(len(core) - 1, c_idx + window_end)
-        c_metrics = _event_metrics(core, c_idx, c_end, tail_threshold)
+        c_end = min(len(core) - 1, c_idx + horizon)
+        c_metrics = _window_metrics(core, c_idx, c_end, tail_threshold)
         if not c_metrics:
             continue
-        rows_ctrl.append(
+
+        controls.append(
             {
                 "event_id": event_id,
                 "symbol": symbol,
+                "anchor_hour": int(pick["anchor_hour"]),
+                "control_idx": c_idx,
                 "start_idx": c_idx,
                 "end_idx": c_end,
+                "funding_rate_scaled": float(pick["funding_rate_scaled"]) if pd.notna(pick["funding_rate_scaled"]) else 0.0,
+                "funding_abs": float(pick["funding_abs"]) if pd.notna(pick["funding_abs"]) else 0.0,
                 "rv_rank": float(pick["rv_rank"]) if pd.notna(pick["rv_rank"]) else np.nan,
                 **c_metrics,
             }
         )
-
-    return pd.DataFrame(rows_event), pd.DataFrame(rows_ctrl)
+    return pd.DataFrame(events), pd.DataFrame(controls)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Phase-1 analyzer for directional exhaustion after forced flow (structure only)")
+    parser = argparse.ArgumentParser(description="Phase-1 analyzer for funding-extreme reversal windows")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
-    parser.add_argument("--window_end", type=int, default=32)
-    parser.add_argument("--anchor_mode", default="taker_imbalance", choices=["taker_imbalance", "liquidation_cluster"])
-    parser.add_argument("--anchor_quantile", type=float, default=0.99)
+    parser.add_argument("--window_end", type=int, default=96)
+    parser.add_argument("--funding_abs_quantile", type=float, default=0.98)
     parser.add_argument("--out_dir", default=None)
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
 
-    out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "directional_exhaustion_after_forced_flow" / args.run_id
+    out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "funding_extreme_reversal_window" / args.run_id
     ensure_dir(out_dir)
 
     event_parts: List[pd.DataFrame] = []
-    ctrl_parts: List[pd.DataFrame] = []
+    control_parts: List[pd.DataFrame] = []
     for symbol in [s.strip() for s in args.symbols.split(",") if s.strip()]:
         core = _load_feature_frame(args.run_id, symbol)
         if core.empty:
             continue
-        ev, ct = _build_event_and_control_rows(
-            symbol=symbol,
-            core=core,
-            window_end=args.window_end,
-            anchor_mode=args.anchor_mode,
-            anchor_quantile=args.anchor_quantile,
-        )
+        ev, ct = _build_event_rows(symbol, core, funding_abs_quantile=args.funding_abs_quantile, horizon=args.window_end)
         event_parts.append(ev)
-        ctrl_parts.append(ct)
+        control_parts.append(ct)
 
     events = pd.concat(event_parts, ignore_index=True) if event_parts else pd.DataFrame()
-    controls = pd.concat(ctrl_parts, ignore_index=True) if ctrl_parts else pd.DataFrame()
+    controls = pd.concat(control_parts, ignore_index=True) if control_parts else pd.DataFrame()
 
     deltas = pd.DataFrame()
     hazards = pd.DataFrame()
     phase = pd.DataFrame()
     sign = pd.DataFrame()
-
     if not events.empty:
         merged = events.merge(controls, on=["event_id", "symbol"], how="left", suffixes=("", "_ctrl"))
         deltas = pd.DataFrame(
@@ -246,43 +225,49 @@ def main() -> int:
                 "event_id": merged["event_id"],
                 "symbol": merged["symbol"],
                 "year": merged["year"],
+                "funding_sign": merged["funding_sign"],
                 "delta_realized_vol_mean": merged["realized_vol_mean"] - merged["realized_vol_mean_ctrl"],
                 "delta_range_expansion": merged["range_expansion"] - merged["range_expansion_ctrl"],
                 "delta_tail_move_probability": merged["tail_move_probability"] - merged["tail_move_probability_ctrl"],
                 "delta_tail_move_within": merged["tail_move_within"] - merged["tail_move_within_ctrl"],
             }
         )
-        hazards = _hazard(events["time_to_tail_move"], args.window_end).assign(cohort="events")
-        if not controls.empty:
-            hazards = pd.concat([hazards, _hazard(controls["time_to_tail_move"], args.window_end).assign(cohort="controls")], ignore_index=True)
+        hazards = pd.concat(
+            [
+                _hazard(events["time_to_tail_move"], args.window_end).assign(cohort="events"),
+                _hazard(controls["time_to_tail_move"], args.window_end).assign(cohort="controls") if not controls.empty else pd.DataFrame(),
+            ],
+            ignore_index=True,
+        )
         phase = (
-            deltas.groupby("symbol", as_index=False)
+            deltas.groupby(["funding_sign"], as_index=False)
             .agg(
                 n=("event_id", "size"),
                 delta_realized_vol_mean=("delta_realized_vol_mean", "mean"),
                 delta_range_expansion=("delta_range_expansion", "mean"),
                 delta_tail_move_probability=("delta_tail_move_probability", "mean"),
+                delta_tail_move_within=("delta_tail_move_within", "mean"),
             )
-            .sort_values("symbol")
+            .sort_values("funding_sign")
         )
         sign = (
-            deltas.groupby(["symbol", "year"], as_index=False)
+            deltas.groupby(["year", "funding_sign"], as_index=False)
             .agg(
                 n=("event_id", "size"),
                 sign_tail_prob=("delta_tail_move_probability", lambda s: float(np.sign(np.nanmean(s)))),
                 sign_vol=("delta_realized_vol_mean", lambda s: float(np.sign(np.nanmean(s)))),
             )
-            .sort_values(["symbol", "year"])
+            .sort_values(["year", "funding_sign"])
         )
 
-    events_path = out_dir / "directional_exhaustion_after_forced_flow_events.csv"
-    controls_path = out_dir / "directional_exhaustion_after_forced_flow_controls.csv"
-    deltas_path = out_dir / "directional_exhaustion_after_forced_flow_matched_deltas.csv"
-    hazards_path = out_dir / "directional_exhaustion_after_forced_flow_hazards.csv"
-    phase_path = out_dir / "directional_exhaustion_after_forced_flow_phase_stability.csv"
-    sign_path = out_dir / "directional_exhaustion_after_forced_flow_sign_stability.csv"
-    summary_md_path = out_dir / "directional_exhaustion_after_forced_flow_summary.md"
-    summary_json_path = out_dir / "directional_exhaustion_after_forced_flow_summary.json"
+    events_path = out_dir / "funding_extreme_reversal_window_events.csv"
+    controls_path = out_dir / "funding_extreme_reversal_window_controls.csv"
+    deltas_path = out_dir / "funding_extreme_reversal_window_matched_deltas.csv"
+    hazards_path = out_dir / "funding_extreme_reversal_window_hazards.csv"
+    phase_path = out_dir / "funding_extreme_reversal_window_phase_stability.csv"
+    sign_path = out_dir / "funding_extreme_reversal_window_sign_stability.csv"
+    summary_md_path = out_dir / "funding_extreme_reversal_window_summary.md"
+    summary_json_path = out_dir / "funding_extreme_reversal_window_summary.json"
 
     events.to_csv(events_path, index=False)
     controls.to_csv(controls_path, index=False)
@@ -292,11 +277,10 @@ def main() -> int:
     sign.to_csv(sign_path, index=False)
 
     summary = {
-        "event_type": "directional_exhaustion_after_forced_flow",
+        "event_type": "funding_extreme_reversal_window",
         "phase": 1,
         "window": {"x": 0, "y": args.window_end},
-        "anchor_mode": args.anchor_mode,
-        "anchor_quantile": args.anchor_quantile,
+        "funding_abs_quantile": args.funding_abs_quantile,
         "actions_generated": 0,
         "events": int(len(events)),
         "controls": int(len(controls)),
@@ -312,12 +296,11 @@ def main() -> int:
     summary_json_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
 
     lines = [
-        "# Directional Exhaustion After Forced Flow (Phase 1)",
+        "# Funding Extreme Reversal Window (Phase 1)",
         "",
         f"Run ID: `{args.run_id}`",
         f"Window: [0, {args.window_end}]",
-        f"Anchor mode: {args.anchor_mode}",
-        f"Anchor quantile: {args.anchor_quantile}",
+        f"Funding |rate| quantile: {args.funding_abs_quantile}",
         "",
         f"- Events: {len(events)}",
         f"- Controls: {len(controls)}",
@@ -327,17 +310,11 @@ def main() -> int:
         _table_text(deltas.head(12)) if not deltas.empty else "No matched deltas",
         "",
         "## Hazards (head)",
-        _table_text(hazards.head(20)) if not hazards.empty else "No hazards",
-        "",
-        "## Phase stability",
-        _table_text(phase) if not phase.empty else "No phase stability rows",
-        "",
-        "## Sign stability",
-        _table_text(sign) if not sign.empty else "No sign stability rows",
+        _table_text(hazards.head(24)) if not hazards.empty else "No hazards",
     ]
     summary_md_path.write_text("\n".join(lines), encoding="utf-8")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

@@ -1,0 +1,69 @@
+version: 1
+generated_for: discovery_expansion
+mechanisms:
+  - name: funding_sign_flip_shock_window
+    status: proposed
+    category: funding
+    description: Large funding sign flip and magnitude jump, then conditional tail/mean-reversion window.
+    required_columns:
+      - funding_rate_scaled
+      - close
+      - rv_96
+
+  - name: funding_carry_crowding_window
+    status: proposed
+    category: funding
+    description: Persistent elevated carry (same-sign funding) followed by crowding unwind risk.
+    required_columns:
+      - funding_rate_scaled
+      - close
+      - rv_96
+
+  - name: vol_of_vol_transition_window
+    status: proposed
+    category: volatility
+    description: Low vol-of-vol to high vol-of-vol regime transition and post-transition hazard profile.
+    required_columns:
+      - rv_96
+      - close
+
+  - name: range_regime_flip_window
+    status: proposed
+    category: volatility
+    description: Compression regime followed by confirmed expansion regime within bounded horizon.
+    required_columns:
+      - range_96
+      - range_med_480
+      - close
+
+  - name: tail_cluster_decay_window
+    status: proposed
+    category: volatility
+    description: Consecutive tail moves and the decay path of secondary-shock risk.
+    required_columns:
+      - close
+      - rv_96
+
+  - name: session_handoff_dislocation_window
+    status: proposed
+    category: microstructure
+    description: Session handoff dislocation around UTC 00/08/16 and subsequent normalization risk.
+    required_columns:
+      - timestamp
+      - close
+      - rv_96
+
+  - name: cross_symbol_beta_break_window
+    status: proposed
+    category: cross_asset
+    description: Symbol residual dislocation versus dynamic market beta and re-coupling hazard.
+    required_columns:
+      - close
+
+  - name: funding_price_divergence_window
+    status: proposed
+    category: funding
+    description: Funding pressure diverges from rolling price trend, then unwind/continuation branching.
+    required_columns:
+      - funding_rate_scaled
+      - close

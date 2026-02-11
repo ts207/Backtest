@@ -67,7 +67,7 @@ multi_edge_portfolio:
       score: 1.0
     - edge_id: vc_momentum
       strategy: vol_compression_momentum_v1
-      status: APPROVED
+      status: DRAFT
       family_id: vol_compression
       relative_rank_within_family: 2
       dominated_by:
@@ -94,7 +94,7 @@ multi_edge_portfolio:
       score: 0.85
     - edge_id: vc_reversion
       strategy: vol_compression_reversion_v1
-      status: APPROVED
+      status: DRAFT
       family_id: vol_compression
       relative_rank_within_family: 3
       dominated_by:
@@ -121,7 +121,7 @@ multi_edge_portfolio:
 
     - edge_id: tsmom_trend
       strategy: tsmom_v1
-      status: APPROVED
+      status: DRAFT
       family_id: trend
       relative_rank_within_family: 1
       dominated_by: []
@@ -146,7 +146,7 @@ multi_edge_portfolio:
       score: 0.90
     - edge_id: carry_funding
       strategy: funding_carry_v1
-      status: APPROVED
+      status: DRAFT
       family_id: carry
       relative_rank_within_family: 1
       dominated_by: []
@@ -172,7 +172,7 @@ multi_edge_portfolio:
 
     - edge_id: intraday_reversion_core
       strategy: intraday_reversion_v1
-      status: APPROVED
+      status: DRAFT
       family_id: reversion
       relative_rank_within_family: 1
       dominated_by: []

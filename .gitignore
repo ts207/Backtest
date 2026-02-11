@@ -1,9 +1,8 @@
 .venv/
+.pytest_cache/
 __pycache__/
 *.pyc
-.data/
-data/
 
-# python cache
-__pycache__/
-*.pyc
+# Local data lake, runs, reports, and generated artifacts
+data/
+.data/
