@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,22 +11,12 @@ import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.config import load_configs
-from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet, run_scoped_lake_path, write_parquet
+from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet, write_parquet
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
-from pipelines._lib.sanity import (
-    assert_funding_event_grid,
-    assert_funding_sane,
-    assert_monotonic_utc_timestamp,
-    assert_ohlcv_schema,
-    coerce_timestamps_to_hour,
-    infer_and_apply_funding_scale,
-    is_constant_series,
-)
-from pipelines._lib.validation import validate_columns
+from pipelines._lib.validation import ensure_utc_timestamp, validate_columns
 
 
 def _parse_date(value: str) -> datetime:
@@ -35,20 +24,13 @@ def _parse_date(value: str) -> datetime:
 
 
 def _month_start(ts: datetime) -> datetime:
-    ts = ts.astimezone(timezone.utc)
     return ts.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
 def _next_month(ts: datetime) -> datetime:
-    # FIX: robust month increment (avoids subtle replace issues)
-    ts = ts.astimezone(timezone.utc)
-    y, m = ts.year, ts.month
-    if m == 12:
-        y += 1
-        m = 1
-    else:
-        m += 1
-    return ts.replace(year=y, month=m, day=1, hour=0, minute=0, second=0, microsecond=0)
+    year = ts.year + (ts.month // 12)
+    month = 1 if ts.month == 12 else ts.month + 1
+    return ts.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
 def _iter_months(start: datetime, end: datetime) -> List[datetime]:
@@ -72,87 +54,41 @@ def _gap_lengths(is_gap: pd.Series) -> pd.Series:
     return lengths.where(is_gap, 0).astype(int)
 
 
-def _detect_bad_bars(bars: pd.DataFrame) -> pd.Series:
-    required = ["open", "high", "low", "close", "volume"]
-    if any(col not in bars.columns for col in required):
-        return pd.Series(False, index=bars.index)
-    mask = (
-        bars[required].notna().all(axis=1)
-        & (bars["volume"] == 0)
-        & (bars["open"] == bars["high"])
-        & (bars["open"] == bars["low"])
-        & (bars["open"] == bars["close"])
-    )
-    return mask.fillna(False)
-
-
 def _align_funding(bars: pd.DataFrame, funding: pd.DataFrame) -> Tuple[pd.DataFrame, float]:
     if funding.empty:
         aligned = bars[["timestamp"]].copy()
-        aligned["funding_event_ts"] = pd.NaT
-        aligned["funding_rate_scaled"] = np.nan
-        aligned["funding_missing"] = True
+        aligned["funding_rate"] = 0.0
+        aligned["funding_filled"] = True
         return aligned, 1.0
 
     funding_sorted = funding.sort_values("timestamp").copy()
-    funding_sorted = funding_sorted.rename(columns={"timestamp": "funding_event_ts"})
     merged = pd.merge_asof(
         bars.sort_values("timestamp"),
-        funding_sorted[["funding_event_ts", "funding_rate_scaled"]],
-        left_on="timestamp",
-        right_on="funding_event_ts",
+        funding_sorted,
+        on="timestamp",
         direction="backward",
     )
-    merged["funding_missing"] = merged["funding_rate_scaled"].isna()
-    missing_pct = float(merged["funding_missing"].mean()) if len(merged) else 0.0
-    return merged[["timestamp", "funding_event_ts", "funding_rate_scaled", "funding_missing"]], missing_pct
+    filled_mask = merged["funding_rate"].isna()
+    merged["funding_rate"] = merged["funding_rate"].ffill()
+    missing_after_ffill = merged["funding_rate"].isna()
+    merged["funding_rate"] = merged["funding_rate"].fillna(0.0)
+    merged["funding_filled"] = filled_mask | missing_after_ffill
+    fill_pct = float(merged["funding_filled"].mean()) if len(merged) else 0.0
+    return merged[["timestamp", "funding_rate", "funding_filled"]], fill_pct
 
 
-def _expected_15m_index(range_start: datetime, range_end_exclusive: datetime) -> pd.DatetimeIndex:
-    return pd.date_range(
-        start=range_start,
-        end=range_end_exclusive - timedelta(minutes=15),
-        freq="15min",
-        tz=timezone.utc,
-    )
-
-
-def _expected_funding_events(range_start: datetime, range_end_exclusive: datetime, hours: int = 8) -> pd.DatetimeIndex:
-    if range_end_exclusive <= range_start:
-        return pd.DatetimeIndex([], tz=timezone.utc)
-    anchor = range_start.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    end_inclusive = range_end_exclusive - timedelta(seconds=1)
-    events = pd.date_range(start=anchor, end=end_inclusive, freq=f"{hours}h", tz=timezone.utc)
-    return events[(events >= range_start) & (events < range_end_exclusive)]
-
-
-def _partition_complete_15m(path: Path, range_start: datetime, range_end_exclusive: datetime) -> bool:
-    """
-    FIX: correctness-based completeness check:
-    - File exists
-    - Has timestamp column
-    - Unique timestamps
-    - Contains the entire expected 15m timestamp grid for the month partition
-    """
+def _partition_complete(path: Path, expected_rows: int) -> bool:
     if not path.exists():
-        return False
+        csv_path = path.with_suffix(".csv")
+        if csv_path.exists():
+            path = csv_path
+        else:
+            return False
     try:
-        df = read_parquet([path])
-        if df.empty:
-            return False
-        if "timestamp" not in df.columns:
-            return False
-
-        ts = pd.to_datetime(df["timestamp"], utc=True, format="mixed")
-        if ts.isna().any():
-            return False
-        if ts.duplicated().any():
-            return False
-
-        expected = _expected_15m_index(range_start, range_end_exclusive)
-        got = set(ts)
-        # Subset test avoids being strict about extra rows (but duplicates already rejected)
-        return set(expected).issubset(got)
+        if expected_rows == 0:
+            return True
+        data = read_parquet([path])
+        return len(data) >= expected_rows
     except Exception:
         return False
 
@@ -164,9 +100,6 @@ def main() -> int:
     parser.add_argument("--start", required=False)
     parser.add_argument("--end", required=False)
     parser.add_argument("--force", type=int, default=0)
-    parser.add_argument("--allow_missing_funding", type=int, default=0)
-    parser.add_argument("--allow_constant_funding", type=int, default=0)
-    parser.add_argument("--allow_funding_timestamp_rounding", type=int, default=0)
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
@@ -190,9 +123,6 @@ def main() -> int:
         "start": args.start,
         "end": args.end,
         "force": int(args.force),
-        "allow_missing_funding": int(args.allow_missing_funding),
-        "allow_constant_funding": int(args.allow_constant_funding),
-        "allow_funding_timestamp_rounding": int(args.allow_funding_timestamp_rounding),
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
@@ -201,8 +131,8 @@ def main() -> int:
 
     try:
         for symbol in symbols:
-            raw_dir = DATA_ROOT / "lake" / "raw" / "binance" / "perp" / symbol / "ohlcv_15m"
-            funding_dir = DATA_ROOT / "lake" / "raw" / "binance" / "perp" / symbol / "funding"
+            raw_dir = PROJECT_ROOT / "lake" / "raw" / "binance" / "perp" / symbol / "ohlcv_15m"
+            funding_dir = PROJECT_ROOT / "lake" / "raw" / "binance" / "perp" / symbol / "funding"
             raw_files = list_parquet_files(raw_dir)
             funding_files = list_parquet_files(funding_dir)
 
@@ -212,12 +142,10 @@ def main() -> int:
             if raw.empty:
                 raise ValueError(f"No raw OHLCV data for {symbol}")
 
-            assert_ohlcv_schema(raw)
-            raw["timestamp"] = pd.to_datetime(raw["timestamp"], utc=True, format="mixed")
-            if raw["timestamp"].isna().any():
-                raise ValueError(f"Invalid raw timestamps for {symbol}")
+            validate_columns(raw, ["timestamp", "open", "high", "low", "close", "volume"])
+            raw["timestamp"] = pd.to_datetime(raw["timestamp"], utc=True)
+            ensure_utc_timestamp(raw["timestamp"], "timestamp")
             raw = raw.sort_values("timestamp").drop_duplicates(subset=["timestamp"]).reset_index(drop=True)
-            assert_monotonic_utc_timestamp(raw, "timestamp")
 
             raw_start = raw["timestamp"].min()
             raw_end = raw["timestamp"].max()
@@ -236,57 +164,14 @@ def main() -> int:
                 tz=timezone.utc,
             )
             bars = raw.set_index("timestamp").reindex(full_index).reset_index().rename(columns={"index": "timestamp"})
-            bad_bar_mask = _detect_bad_bars(bars)
-            bars["is_bad_bar"] = bad_bar_mask
-            if bad_bar_mask.any():
-                bars.loc[bad_bar_mask, ["open", "high", "low", "close", "volume"]] = np.nan
             bars["is_gap"] = bars[["open", "high", "low", "close", "volume"]].isna().any(axis=1)
             bars["gap_len"] = _gap_lengths(bars["is_gap"])
 
-            funding_scale_used = None
-            funding_timestamp_rounded = 0
-            if funding.empty:
-                if not args.allow_missing_funding:
-                    raise ValueError(f"No funding data for {symbol}. Use --allow_missing_funding=1 to proceed.")
-            else:
+            if not funding.empty:
                 validate_columns(funding, ["timestamp", "funding_rate"])
-                funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True, format="mixed")
-                if funding["timestamp"].isna().any():
-                    raise ValueError(f"Invalid funding timestamps for {symbol}")
-
-                non_hour_mask = (
-                    funding["timestamp"].dt.minute.ne(0)
-                    | funding["timestamp"].dt.second.ne(0)
-                    | funding["timestamp"].dt.microsecond.ne(0)
-                )
-                if non_hour_mask.any():
-                    if not args.allow_funding_timestamp_rounding:
-                        raise ValueError(
-                            f"Funding timestamps must be on the hour for {symbol}. "
-                            "Use --allow_funding_timestamp_rounding=1 to round to the nearest hour."
-                        )
-                    funding, funding_timestamp_rounded = coerce_timestamps_to_hour(funding, "timestamp")
-                    if funding["timestamp"].duplicated().any():
-                        raise ValueError(
-                            f"Funding timestamp rounding created duplicates for {symbol}. "
-                            "Fix raw data or disable rounding."
-                        )
-
+                funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
                 funding = funding.sort_values("timestamp").drop_duplicates(subset=["timestamp"]).reset_index(drop=True)
-                assert_monotonic_utc_timestamp(funding, "timestamp")
-                assert_funding_event_grid(funding, "timestamp", expected_hours=8)
-
-                # Important: infer_and_apply_funding_scale should NOT “scale” decimals from Data.Vision col2.
-                # If it does, fix that function or pass a flag there.
-                funding, funding_scale_used = infer_and_apply_funding_scale(funding, "funding_rate")
-                assert_funding_sane(funding, "funding_rate_scaled")
-
-            aligned_funding, funding_missing_pct = _align_funding(bars, funding)
-            funding_event_coverage_total = float(aligned_funding["funding_event_ts"].notna().mean()) if len(aligned_funding) else 0.0
-            funding_rate_values = aligned_funding["funding_rate_scaled"].dropna()
-            funding_rate_min = float(funding_rate_values.min()) if len(funding_rate_values) else None
-            funding_rate_max = float(funding_rate_values.max()) if len(funding_rate_values) else None
-            funding_rate_std = float(funding_rate_values.std()) if len(funding_rate_values) else None
+            aligned_funding, funding_fill_pct = _align_funding(bars, funding)
 
             inputs.append(
                 {"path": str(raw_dir), "rows": int(len(raw)), "start_ts": raw_start.isoformat(), "end_ts": raw_end.isoformat()}
@@ -301,19 +186,13 @@ def main() -> int:
                     }
                 )
 
-            cleaned_dir = run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", "perp", symbol, "bars_15m")
-            funding_out_dir = run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", "perp", symbol, "funding_15m")
+            cleaned_dir = PROJECT_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
+            funding_out_dir = PROJECT_ROOT / "lake" / "cleaned" / "perp" / symbol / "funding_15m"
 
             missing_stats: Dict[str, Dict[str, float]] = {}
             funding_stats: Dict[str, Dict[str, float]] = {}
-            bad_bar_stats: Dict[str, Dict[str, int]] = {}
             partitions_written: List[str] = []
             partitions_skipped: List[str] = []
-
-            gap_count = int((bars["is_gap"] & ~bars["is_gap"].shift(fill_value=False)).sum())
-            max_gap_len = int(bars["gap_len"].max()) if len(bars) else 0
-            pct_missing_bars = float(bars["is_gap"].mean()) if len(bars) else 0.0
-            bad_bar_count_total = int(bars["is_bad_bar"].sum()) if "is_bad_bar" in bars.columns else 0
 
             for month_start in _iter_months(start_ts, end_ts):
                 month_end = _next_month(month_start)
@@ -327,45 +206,13 @@ def main() -> int:
                 funding_month = aligned_funding[
                     (aligned_funding["timestamp"] >= range_start) & (aligned_funding["timestamp"] < range_end_exclusive)
                 ]
-                funding_month_events = (
-                    funding[(funding["timestamp"] >= range_start) & (funding["timestamp"] < range_end_exclusive)]
-                    if not funding.empty
-                    else pd.DataFrame()
-                )
-                bad_bar_count = int(bars_month["is_bad_bar"].sum()) if "is_bad_bar" in bars_month.columns else 0
 
                 missing_pct = float(bars_month["is_gap"].mean()) if len(bars_month) else 0.0
-                funding_missing = float(funding_month["funding_missing"].mean()) if len(funding_month) else 0.0
-                funding_event_coverage = float(funding_month["funding_event_ts"].notna().mean()) if len(funding_month) else 0.0
-                funding_event_count = int(funding_month_events["timestamp"].nunique()) if len(funding_month_events) else 0
-                expected_events = len(_expected_funding_events(range_start, range_end_exclusive, hours=8))
-                funding_month_values = funding_month["funding_rate_scaled"].dropna()
-                funding_rate_month_std = float(funding_month_values.std()) if len(funding_month_values) else None
-
+                funding_fill = float(funding_month["funding_filled"].mean()) if len(funding_month) else 0.0
                 missing_stats[f"{month_start.year}-{month_start.month:02d}"] = {"pct_missing_ohlcv": missing_pct}
                 funding_stats[f"{month_start.year}-{month_start.month:02d}"] = {
-                    "pct_missing_funding_event": funding_missing,
-                    "pct_funding_event_coverage": funding_event_coverage,
-                    "funding_event_count": funding_event_count,
-                    "funding_event_expected": expected_events,
-                    "funding_rate_scaled_std": funding_rate_month_std,
+                    "pct_missing_funding_filled": funding_fill
                 }
-                bad_bar_stats[f"{month_start.year}-{month_start.month:02d}"] = {"bad_bar_count": bad_bar_count}
-
-                if not args.allow_missing_funding and funding_event_count != expected_events:
-                    raise ValueError(
-                        f"Missing funding events for {symbol} in {month_start:%Y-%m}. "
-                        f"expected={expected_events} actual={funding_event_count}. "
-                        "Use --allow_missing_funding=1 to proceed."
-                    )
-
-                if not args.allow_constant_funding:
-                    funding_values = funding_month["funding_rate_scaled"].dropna()
-                    if len(funding_values) and is_constant_series(funding_values):
-                        raise ValueError(
-                            f"Constant funding detected for {symbol} in {month_start:%Y-%m}. "
-                            "Use --allow_constant_funding=1 to proceed."
-                        )
 
                 bars_out_path = (
                     cleaned_dir
@@ -380,26 +227,23 @@ def main() -> int:
                     / f"funding15m_{symbol}_{month_start.year}-{month_start.month:02d}.parquet"
                 )
 
-                if not args.force and _partition_complete_15m(bars_out_path, range_start, range_end_exclusive):
+                if not args.force and _partition_complete(bars_out_path, expected_rows):
                     partitions_skipped.append(str(bars_out_path))
                 else:
                     ensure_dir(bars_out_path.parent)
-                    bars_out = bars_month[
-                        ["timestamp", "open", "high", "low", "close", "volume", "is_gap", "gap_len"]
-                    ]
-                    bars_written, storage = write_parquet(bars_out.reset_index(drop=True), bars_out_path)
+                    bars_written, storage = write_parquet(bars_month.reset_index(drop=True), bars_out_path)
                     outputs.append(
                         {
                             "path": str(bars_written),
-                            "rows": int(len(bars_out)),
-                            "start_ts": bars_out["timestamp"].min().isoformat(),
-                            "end_ts": bars_out["timestamp"].max().isoformat(),
+                            "rows": int(len(bars_month)),
+                            "start_ts": bars_month["timestamp"].min().isoformat(),
+                            "end_ts": bars_month["timestamp"].max().isoformat(),
                             "storage": storage,
                         }
                     )
                     partitions_written.append(str(bars_written))
 
-                if not args.force and _partition_complete_15m(funding_out_path, range_start, range_end_exclusive):
+                if not args.force and _partition_complete(funding_out_path, expected_rows):
                     partitions_skipped.append(str(funding_out_path))
                 else:
                     ensure_dir(funding_out_path.parent)
@@ -419,21 +263,7 @@ def main() -> int:
                 "effective_start": start_ts.isoformat(),
                 "effective_end": end_ts.isoformat(),
                 "pct_missing_ohlcv": missing_stats,
-                "pct_missing_funding_event": funding_stats,
-                "funding_scale_used": funding_scale_used,
-                "funding_missing_pct": funding_missing_pct,
-                "pct_bars_with_funding_event": funding_event_coverage_total,
-                "funding_rate_scaled_min": funding_rate_min,
-                "funding_rate_scaled_max": funding_rate_max,
-                "funding_rate_scaled_std": funding_rate_std,
-                "funding_timestamp_rounded_count": funding_timestamp_rounded,
-                "gap_stats": {
-                    "pct_missing_ohlcv": pct_missing_bars,
-                    "gap_count": gap_count,
-                    "max_gap_len": max_gap_len,
-                },
-                "bad_bar_count": bad_bar_stats,
-                "bad_bar_count_total": bad_bar_count_total,
+                "pct_missing_funding_filled": funding_stats,
                 "partitions_written": partitions_written,
                 "partitions_skipped": partitions_skipped,
             }

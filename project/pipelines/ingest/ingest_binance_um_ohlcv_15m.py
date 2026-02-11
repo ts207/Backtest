@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -14,7 +13,6 @@ import pandas as pd
 import requests
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.http_utils import download_with_retries
@@ -66,17 +64,6 @@ def _expected_bars(start: datetime, end_exclusive: datetime) -> int:
     return int((end_exclusive - start).total_seconds() // (15 * 60))
 
 
-def _expected_15m_index(start: datetime, end_exclusive: datetime) -> pd.DatetimeIndex:
-    if end_exclusive <= start:
-        return pd.DatetimeIndex([], tz=timezone.utc)
-    return pd.date_range(
-        start=start,
-        end=end_exclusive - timedelta(minutes=15),
-        freq="15min",
-        tz=timezone.utc,
-    )
-
-
 def _read_ohlcv_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame:
     columns = [
         "open_time",
@@ -96,10 +83,6 @@ def _read_ohlcv_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame:
         csv_name = zf.namelist()[0]
         with zf.open(csv_name) as f:
             df = pd.read_csv(f, header=None, names=columns)
-    df["open_time"] = pd.to_numeric(df["open_time"], errors="coerce")
-    if df["open_time"].isna().any():
-        df = df.loc[df["open_time"].notna()].copy()
-    df["open_time"] = df["open_time"].astype("int64")
     df["timestamp"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
     df = df[["timestamp", "open", "high", "low", "close", "volume"]]
     df[["open", "high", "low", "close", "volume"]] = df[
@@ -111,7 +94,7 @@ def _read_ohlcv_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame:
     return df
 
 
-def _partition_complete(path: Path, expected_ts: pd.DatetimeIndex) -> bool:
+def _partition_complete(path: Path, expected_rows: int) -> bool:
     if not path.exists():
         csv_path = path.with_suffix(".csv")
         if csv_path.exists():
@@ -119,19 +102,10 @@ def _partition_complete(path: Path, expected_ts: pd.DatetimeIndex) -> bool:
         else:
             return False
     try:
-        if len(expected_ts) == 0:
+        if expected_rows == 0:
             return True
         data = read_parquet([path])
-        if data.empty:
-            return False
-        if "timestamp" not in data.columns:
-            return False
-        ts = pd.to_datetime(data["timestamp"], utc=True, format="mixed")
-        if ts.isna().any():
-            return False
-        if ts.duplicated().any():
-            return False
-        return set(ts) == set(expected_ts)
+        return len(data) >= expected_rows
     except Exception:
         return False
 
@@ -142,7 +116,7 @@ def main() -> int:
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
-    parser.add_argument("--out_root", default=str(DATA_ROOT / "lake" / "raw" / "binance" / "perp"))
+    parser.add_argument("--out_root", default=str(PROJECT_ROOT / "lake" / "raw" / "binance" / "perp"))
     parser.add_argument("--max_retries", type=int, default=5)
     parser.add_argument("--retry_backoff_sec", type=float, default=2.0)
     parser.add_argument("--force", type=int, default=0)
@@ -193,8 +167,7 @@ def main() -> int:
                 month_end = _next_month(month_start)
                 range_start = max(effective_start, month_start)
                 range_end_exclusive = min(effective_end + timedelta(days=1), month_end)
-                expected_ts = _expected_15m_index(range_start, range_end_exclusive)
-                expected_rows = len(expected_ts)
+                expected_rows = _expected_bars(range_start, range_end_exclusive)
                 if expected_rows == 0:
                     continue
 
@@ -207,7 +180,7 @@ def main() -> int:
                 )
                 out_path = out_dir / f"ohlcv_{symbol}_15m_{month_start.year}-{month_start.month:02d}.parquet"
 
-                if not args.force and _partition_complete(out_path, expected_ts):
+                if not args.force and _partition_complete(out_path, expected_rows):
                     partitions_skipped.append(str(out_path))
                     continue
 

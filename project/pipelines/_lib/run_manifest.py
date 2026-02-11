@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -13,8 +12,7 @@ def _utc_now_iso() -> str:
 
 def _manifest_path(run_id: str, stage: str) -> Path:
     project_root = Path(__file__).resolve().parents[2]
-    data_root = Path(os.getenv("BACKTEST_DATA_ROOT", project_root.parent / "data"))
-    out_dir = data_root / "runs" / run_id
+    out_dir = project_root / "runs" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir / f"{stage}.json"
 

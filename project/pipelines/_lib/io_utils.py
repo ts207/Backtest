@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Iterable, List, Tuple
 
 import pandas as pd
 
@@ -24,26 +23,15 @@ def ensure_dir(path: Path) -> None:
 
 def list_parquet_files(path: Path) -> List[Path]:
     """
-    Recursively list partition files under a directory, supporting parquet and csv.
-    If both parquet and csv exist for the same partition file stem, parquet is preferred.
+    Recursively list all parquet files under a directory.
+    If no parquet files exist, fall back to CSV files.
     """
     if not path.exists():
         return []
-    parquet_files = [p for p in path.rglob("*.parquet") if p.is_file()]
-    csv_files = [p for p in path.rglob("*.csv") if p.is_file()]
-    if not parquet_files and not csv_files:
-        return []
-
-    by_stem = {}
-    for file_path in parquet_files + csv_files:
-        stem_key = str(file_path.with_suffix(""))
-        chosen = by_stem.get(stem_key)
-        if chosen is None:
-            by_stem[stem_key] = file_path
-            continue
-        if chosen.suffix != ".parquet" and file_path.suffix == ".parquet":
-            by_stem[stem_key] = file_path
-    return sorted(by_stem.values())
+    parquet_files = sorted([p for p in path.rglob("*.parquet") if p.is_file()])
+    if parquet_files:
+        return parquet_files
+    return sorted([p for p in path.rglob("*.csv") if p.is_file()])
 
 
 def read_parquet(files: Iterable[Path]) -> pd.DataFrame:
@@ -80,38 +68,3 @@ def write_parquet(df: pd.DataFrame, path: Path) -> Tuple[Path, str]:
     df.to_csv(temp_path, index=False)
     temp_path.replace(csv_path)
     return csv_path, "csv"
-
-
-def run_lake_root(data_root: Path, run_id: str) -> Path:
-    """
-    Root directory for run-scoped lake artifacts.
-    """
-    return data_root / "lake" / "runs" / run_id
-
-
-def run_scoped_lake_path(data_root: Path, run_id: str, *parts: str) -> Path:
-    """
-    Build a run-scoped lake path under data/lake/runs/<run_id>/...
-    """
-    return run_lake_root(data_root, run_id) / Path(*parts)
-
-
-def _has_partition_files(path: Path) -> bool:
-    return bool(list_parquet_files(path))
-
-
-def choose_partition_dir(candidates: Sequence[Path]) -> Optional[Path]:
-    """
-    Return the first candidate directory that has parquet/csv partitions.
-    """
-    for candidate in candidates:
-        if _has_partition_files(candidate):
-            return candidate
-    return None
-
-
-def env_data_root(default_root: Path) -> Path:
-    """
-    Resolve data root at call time, allowing monkeypatches to BACKTEST_DATA_ROOT.
-    """
-    return Path(os.getenv("BACKTEST_DATA_ROOT", str(default_root)))
