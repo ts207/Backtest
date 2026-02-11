@@ -25,6 +25,28 @@ from pipelines._lib.io_utils import (
 )
 
 
+
+
+PHASE1_ARTIFACTS_BY_EVENT = {
+    "vol_shock_relaxation": {
+        "phase1_dir": "vol_shock_relaxation",
+        "events_csv": "vol_shock_relaxation_events.csv",
+        "controls_csv": "vol_shock_relaxation_controls.csv",
+        "summary_json": "vol_shock_relaxation_summary.json",
+    },
+    "directional_exhaustion_after_forced_flow": {
+        "phase1_dir": "directional_exhaustion_after_forced_flow",
+        "events_csv": "directional_exhaustion_after_forced_flow_events.csv",
+        "controls_csv": "directional_exhaustion_after_forced_flow_controls.csv",
+        "summary_json": "directional_exhaustion_after_forced_flow_summary.json",
+    },
+    "liquidity_refill_lag_window": {
+        "phase1_dir": "liquidity_refill_lag_window",
+        "events_csv": "liquidity_refill_lag_window_events.csv",
+        "controls_csv": "liquidity_refill_lag_window_controls.csv",
+        "summary_json": "liquidity_refill_lag_window_summary.json",
+    },
+}
 PRIMARY_OUTPUT_COLUMNS = [
     "condition",
     "condition_desc",
@@ -134,14 +156,16 @@ def _build_conditions(events: pd.DataFrame) -> List[ConditionSpec]:
             ]
         )
 
-    conds.extend(
-        [
-            ConditionSpec("age_bucket_0_8", "t_rv_peak in [0,8]", lambda d: d["t_rv_peak"].fillna(10**9).between(0, 8, inclusive="both")),
-            ConditionSpec("age_bucket_9_30", "t_rv_peak in [9,30]", lambda d: d["t_rv_peak"].fillna(10**9).between(9, 30, inclusive="both")),
-            ConditionSpec("age_bucket_31_96", "t_rv_peak in [31,96]", lambda d: d["t_rv_peak"].fillna(10**9).between(31, 96, inclusive="both")),
-            ConditionSpec("near_half_life", "rv_decay_half_life <= 30", lambda d: d["rv_decay_half_life"].fillna(10**9) <= 30),
-        ]
-    )
+    if "t_rv_peak" in events.columns:
+        conds.extend(
+            [
+                ConditionSpec("age_bucket_0_8", "t_rv_peak in [0,8]", lambda d: d["t_rv_peak"].fillna(10**9).between(0, 8, inclusive="both")),
+                ConditionSpec("age_bucket_9_30", "t_rv_peak in [9,30]", lambda d: d["t_rv_peak"].fillna(10**9).between(9, 30, inclusive="both")),
+                ConditionSpec("age_bucket_31_96", "t_rv_peak in [31,96]", lambda d: d["t_rv_peak"].fillna(10**9).between(31, 96, inclusive="both")),
+            ]
+        )
+    if "rv_decay_half_life" in events.columns:
+        conds.append(ConditionSpec("near_half_life", "rv_decay_half_life <= 30", lambda d: d["rv_decay_half_life"].fillna(10**9) <= 30))
     if {"t_rv_peak", "duration_bars"}.issubset(events.columns):
         conds.extend(
             [
@@ -514,7 +538,7 @@ def _evaluate_candidate(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Phase 2 Conditional Edge Hypothesis (non-optimization)")
     parser.add_argument("--run_id", required=True)
-    parser.add_argument("--event_type", required=True, choices=["vol_shock_relaxation"])
+    parser.add_argument("--event_type", required=True, choices=sorted(PHASE1_ARTIFACTS_BY_EVENT.keys()))
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--max_conditions", type=int, default=20)
     parser.add_argument("--max_actions", type=int, default=9)
@@ -540,12 +564,10 @@ def main() -> int:
 
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
 
-    if args.event_type != "vol_shock_relaxation":
-        raise ValueError("Phase 2 currently supports only vol_shock_relaxation")
-
-    phase1_dir = DATA_ROOT / "reports" / "vol_shock_relaxation" / args.run_id
-    events_path = phase1_dir / "vol_shock_relaxation_events.csv"
-    controls_path = phase1_dir / "vol_shock_relaxation_controls.csv"
+    artifacts = PHASE1_ARTIFACTS_BY_EVENT[args.event_type]
+    phase1_dir = DATA_ROOT / "reports" / str(artifacts["phase1_dir"]) / args.run_id
+    events_path = phase1_dir / str(artifacts["events_csv"])
+    controls_path = phase1_dir / str(artifacts["controls_csv"])
     if not events_path.exists():
         raise ValueError(f"Missing Phase 1 events: {events_path}")
 
@@ -554,7 +576,15 @@ def main() -> int:
         raise ValueError("No events in Phase 1 output; Phase 2 cannot proceed")
     if "symbol" in events.columns:
         events = events[events["symbol"].astype(str).isin(symbols)].copy()
-    events["enter_ts"] = pd.to_datetime(events["enter_ts"], utc=True, errors="coerce")
+    enter_series = None
+    for ts_col in ["enter_ts", "anchor_ts", "exit_ts"]:
+        if ts_col in events.columns:
+            enter_series = pd.to_datetime(events[ts_col], utc=True, errors="coerce")
+            if enter_series.notna().any():
+                break
+    if enter_series is None:
+        raise ValueError("Phase 1 events missing timestamp columns: expected one of enter_ts/anchor_ts/exit_ts")
+    events["enter_ts"] = enter_series
     events["year"] = events["enter_ts"].dt.year.fillna(0).astype(int)
 
     # ensure required metric columns exist
@@ -573,7 +603,7 @@ def main() -> int:
     )
     events = _prepare_baseline(events, controls)
 
-    phase1_summary_path = phase1_dir / "vol_shock_relaxation_summary.json"
+    phase1_summary_path = phase1_dir / str(artifacts["summary_json"])
     phase1_pass = True
     phase1_structure_pass = True
     phase1_decision = "unknown"
@@ -589,12 +619,18 @@ def main() -> int:
                 gates = phase1_payload.get("gates", {}) if isinstance(phase1_payload, dict) else {}
                 if "phase1_structure_pass" in phase1_payload:
                     phase1_structure_pass = bool(phase1_payload.get("phase1_structure_pass"))
-                else:
+                elif isinstance(gates, dict) and gates:
                     phase1_structure_pass = bool(
                         gates.get("phase_pass", False)
                         and gates.get("sign_pass", False)
                         and gates.get("non_degenerate_count", False)
                     )
+                else:
+                    # Legacy phase1 summaries (e.g. DEFF/LRL) do not emit decision gates.
+                    # In that case, require only that event rows were generated.
+                    phase1_structure_pass = bool(int(phase1_payload.get("events", 0) or 0) > 0)
+                    if phase1_decision == "unknown":
+                        phase1_decision = "unscored"
                 phase1_pass = phase1_structure_pass
             except json.JSONDecodeError:
                 phase1_pass = False

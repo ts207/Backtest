@@ -5,7 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import pandas as pd
 
@@ -83,14 +83,41 @@ def _collapse_promoted_variants(event_type: str, promoted: List[Dict[str, object
     return sorted(promoted, key=lambda x: float(x.get("edge_score", 0.0) or 0.0), reverse=True)[:1]
 
 
-def _event_direction(event_type: str, row: object, bars: pd.DataFrame) -> int:
+def _safe_int(value: object) -> int | None:
+    try:
+        out = int(value)
+        return out if out >= 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_event_window(row: object, bars: pd.DataFrame) -> Tuple[pd.Timestamp, int | None, int | None]:
+    start_idx = _safe_int(getattr(row, "start_idx", None))
+    end_idx = _safe_int(getattr(row, "end_idx", None))
+    if start_idx is not None and end_idx is not None and not bars.empty:
+        if start_idx < len(bars) and end_idx < len(bars) and end_idx >= start_idx:
+            return pd.Timestamp(bars.at[end_idx, "timestamp"]), start_idx, end_idx
+
+    event_end = getattr(row, "exit_ts", None)
+    if event_end is None:
+        event_end = getattr(row, "enter_ts", None)
+    if event_end is None:
+        event_end = getattr(row, "anchor_ts", None)
+    return pd.to_datetime(event_end, utc=True, errors="coerce"), start_idx, end_idx
+
+
+def _event_direction(event_type: str, row: object, bars: pd.DataFrame, start_idx: int | None, end_idx: int | None) -> tuple[int, float]:
     if event_type == "directional_exhaustion_after_forced_flow":
         raw = getattr(row, "direction", 0)
         try:
             base = int(raw)
         except (TypeError, ValueError):
             base = 0
-        return -base if base else 0
+        return (-base if base else 0), 0.0
+
+    if start_idx is not None and end_idx is not None and not bars.empty and start_idx < len(bars) and end_idx < len(bars) and end_idx >= start_idx:
+        impulse = float(bars.at[end_idx, "close"]) - float(bars.at[start_idx, "open"])
+        return (-1 if impulse > 0 else 1), float(impulse)
 
     event_end = getattr(row, "exit_ts", None)
     if event_end is None:
@@ -99,18 +126,18 @@ def _event_direction(event_type: str, row: object, bars: pd.DataFrame) -> int:
         event_end = getattr(row, "anchor_ts", None)
     event_end = pd.to_datetime(event_end, utc=True, errors="coerce")
     if pd.isna(event_end) or bars.empty:
-        return 0
+        return 0, 0.0
 
     prev_idx = bars.index[bars["timestamp"] <= event_end]
     if len(prev_idx) == 0:
         next_idx = bars.index[bars["timestamp"] >= event_end]
         if len(next_idx) == 0:
-            return 0
+            return 0, 0.0
         i = int(next_idx[0])
     else:
         i = int(prev_idx[-1])
     impulse = float(bars.at[i, "close"]) - float(bars.at[i, "open"])
-    return -1 if impulse > 0 else 1
+    return (-1 if impulse > 0 else 1), float(impulse)
 
 
 def _is_invalidated(event_type: str, row: object, event_end: pd.Timestamp) -> bool:
@@ -134,9 +161,10 @@ def _simulate_candidate(
     horizon_bars: int,
     fee_bps_per_side: float,
     spread_bps_per_side: float,
-) -> tuple[pd.DataFrame, Dict[str, int], pd.DataFrame]:
+) -> tuple[pd.DataFrame, Dict[str, int], pd.DataFrame, pd.DataFrame]:
     out: List[Dict[str, object]] = []
     used_events: List[Dict[str, object]] = []
+    mapping_rows: List[Dict[str, object]] = []
     stats = {
         "events_loaded": int(len(events)),
         "events_with_symbol": 0,
@@ -149,7 +177,7 @@ def _simulate_candidate(
         "events_traded": 0,
     }
     if events.empty:
-        return pd.DataFrame(out), stats, pd.DataFrame(used_events)
+        return pd.DataFrame(out), stats, pd.DataFrame(used_events), pd.DataFrame(mapping_rows)
 
     for row in events.itertuples(index=False):
         symbol = getattr(row, "symbol", None)
@@ -163,12 +191,7 @@ def _simulate_candidate(
             continue
         stats["events_with_bars"] += 1
 
-        event_end = getattr(row, "exit_ts", None)
-        if event_end is None:
-            event_end = getattr(row, "enter_ts", None)
-        if event_end is None:
-            event_end = getattr(row, "anchor_ts", None)
-        event_end = pd.to_datetime(event_end, utc=True, errors="coerce")
+        event_end, start_idx, end_idx = _resolve_event_window(row, bars)
         if pd.isna(event_end):
             continue
         stats["events_with_valid_end"] += 1
@@ -177,12 +200,12 @@ def _simulate_candidate(
             continue
         stats["events_after_invalidation"] += 1
 
-        direction = _event_direction(event_type, row, bars)
+        direction, impulse_used = _event_direction(event_type, row, bars, start_idx, end_idx)
         if direction == 0:
             continue
         stats["events_with_direction"] += 1
 
-        entry_idx = bars.index[bars["timestamp"] >= event_end]
+        entry_idx = bars.index[bars["timestamp"] > event_end]
         if len(entry_idx) == 0:
             continue
         i = int(entry_idx[0])
@@ -230,8 +253,21 @@ def _simulate_candidate(
                 "exit_ts": bars.at[j, "timestamp"].isoformat(),
             }
         )
+        mapping_rows.append(
+            {
+                "event_id": getattr(row, "event_id", None),
+                "symbol": symbol,
+                "event_end_used": event_end.isoformat(),
+                "start_idx": start_idx,
+                "end_idx": end_idx,
+                "impulse_used": float(impulse_used),
+                "direction": int(direction),
+                "entry_ts": bars.at[i, "timestamp"].isoformat(),
+                "exit_ts": bars.at[j, "timestamp"].isoformat(),
+            }
+        )
 
-    return pd.DataFrame(out), stats, pd.DataFrame(used_events)
+    return pd.DataFrame(out), stats, pd.DataFrame(used_events), pd.DataFrame(mapping_rows)
 
 
 def _overlap_within_15m(a: pd.DataFrame, b: pd.DataFrame) -> tuple[int, pd.DataFrame]:
@@ -264,14 +300,27 @@ def run_promoted_edge_audits(
     top_n: int = 3,
     fee_bps_per_side: float = 8.0,
     spread_bps_per_side: float = 2.0,
+    phase2_root: str | None = None,
 ) -> Dict[str, object]:
-    phase2_root = DATA_ROOT / "reports" / "phase2" / run_id
+    phase2_base = Path(phase2_root) if phase2_root else DATA_ROOT / "reports" / "phase2"
+    phase2_root_path = phase2_base / run_id if phase2_base.name != run_id else phase2_base
     out_root = DATA_ROOT / "reports" / "promotion_audits" / run_id
     out_root.mkdir(parents=True, exist_ok=True)
 
-    horizon_bars = 1
     total_cost_per_side_bps = float(fee_bps_per_side) + float(spread_bps_per_side)
-    event_dirs = sorted([p for p in phase2_root.iterdir() if p.is_dir()]) if phase2_root.exists() else []
+    event_dirs = sorted([p for p in phase2_root_path.iterdir() if p.is_dir()]) if phase2_root_path.exists() else []
+    warnings: List[str] = []
+    if not phase2_root_path.exists():
+        msg = (
+            f"phase2 root not found: {phase2_root_path}. "
+            "Run Phase-2 for this run_id or provide --phase2_root pointing to the artifact root."
+        )
+        warnings.append(msg)
+        print(f"[run_promoted_edge_audits] WARNING: {msg}", file=sys.stderr)
+    elif not event_dirs:
+        msg = f"phase2 root exists but has no event-family directories: {phase2_root_path}"
+        warnings.append(msg)
+        print(f"[run_promoted_edge_audits] WARNING: {msg}", file=sys.stderr)
 
     family_summaries: List[Dict[str, object]] = []
 
@@ -280,15 +329,33 @@ def run_promoted_edge_audits(
     for event_name in PRIMARY_STRATEGY_ORDER:
         if event_name in by_name:
             selected_dirs.append(by_name[event_name])
+    if event_dirs and not selected_dirs:
+        msg = (
+            f"no configured primary strategy directories found under phase2 root: {phase2_root_path}. "
+            f"Available dirs: {[p.name for p in event_dirs]}"
+        )
+        warnings.append(msg)
+        print(f"[run_promoted_edge_audits] WARNING: {msg}", file=sys.stderr)
+
+    promoted_files_found = 0
 
     for event_dir in selected_dirs:
         event_type = event_dir.name
         prom_path = event_dir / "promoted_candidates.json"
         if not prom_path.exists():
             continue
+        promoted_files_found += 1
 
         promoted = _read_promoted(prom_path)
         if not promoted:
+            family_summaries.append(
+                {
+                    "event_type": event_type,
+                    "status": "no_promoted_candidates",
+                    "promoted_candidates": 0,
+                    "source_path": str(prom_path),
+                }
+            )
             continue
 
         promoted = _collapse_promoted_variants(event_type, promoted)
@@ -327,7 +394,7 @@ def run_promoted_edge_audits(
 
         rows = []
         for cand in promoted:
-            trades, event_counts, used_events = _simulate_candidate(event_type, events, bars_by_symbol, horizon_bars, fee_bps_per_side, spread_bps_per_side)
+            trades, event_counts, used_events, mapping_debug = _simulate_candidate(event_type, events, bars_by_symbol, horizon_bars, fee_bps_per_side, spread_bps_per_side)
             if trades.empty:
                 rows.append(
                     {
@@ -346,6 +413,7 @@ def run_promoted_edge_audits(
                     }
                 )
                 (event_out / f"events_used_{cand.get('candidate_id','candidate')}.csv").write_text("", encoding="utf-8")
+                (event_out / f"mapping_debug_{cand.get('candidate_id','candidate')}.csv").write_text("", encoding="utf-8")
                 continue
 
             eq = trades["net_return"].cumsum()
@@ -388,6 +456,7 @@ def run_promoted_edge_audits(
 
             trades.to_csv(event_out / f"trades_{cand.get('candidate_id','candidate')}.csv", index=False)
             used_events.to_csv(event_out / f"events_used_{cand.get('candidate_id','candidate')}.csv", index=False)
+            mapping_debug.to_csv(event_out / f"mapping_debug_{cand.get('candidate_id','candidate')}.csv", index=False)
 
         summary_df = pd.DataFrame(rows)
         summary_df.to_csv(event_out / "candidate_audit_summary.csv", index=False)
@@ -430,6 +499,11 @@ def run_promoted_edge_audits(
                 "events_path": str(events_csv),
             }
         )
+
+    if selected_dirs and promoted_files_found == 0:
+        msg = f"no promoted_candidates.json found under selected dirs in {phase2_root_path}"
+        warnings.append(msg)
+        print(f"[run_promoted_edge_audits] WARNING: {msg}", file=sys.stderr)
 
     surviving = [x for x in family_summaries if x.get("status") == "ok"]
     overlap_report: List[Dict[str, object]] = []
@@ -477,6 +551,8 @@ def run_promoted_edge_audits(
         "horizon_bars": int(horizon_bars),
         "total_cost_per_side_bps": float(total_cost_per_side_bps),
         "independence": overlap_report,
+        "phase2_root": str(phase2_root_path),
+        "warnings": warnings,
     }
     (out_root / "summary.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -493,6 +569,9 @@ def run_promoted_edge_audits(
         top_md.append(_table_text(pd.DataFrame(family_summaries)))
     else:
         top_md.append("No phase2 promoted candidate families found.")
+    if warnings:
+        top_md.extend(["", "## Warnings", ""])
+        top_md.extend([f"- {w}" for w in warnings])
     (out_root / "summary.md").write_text("\n".join(top_md), encoding="utf-8")
     return payload
 
@@ -505,6 +584,7 @@ def main() -> int:
     parser.add_argument("--top_n", type=int, default=3)
     parser.add_argument("--fee_bps_per_side", type=float, default=8.0)
     parser.add_argument("--spread_bps_per_side", type=float, default=2.0)
+    parser.add_argument("--phase2_root", default=None, help="Optional override path to phase2 root (either .../phase2 or .../phase2/<run_id>)")
     args = parser.parse_args()
 
     payload = run_promoted_edge_audits(
@@ -514,6 +594,7 @@ def main() -> int:
         top_n=args.top_n,
         fee_bps_per_side=args.fee_bps_per_side,
         spread_bps_per_side=args.spread_bps_per_side,
+        phase2_root=args.phase2_root,
     )
     print(json.dumps({"status": "ok", "run_id": args.run_id, "family_count": payload["family_count"]}))
     return 0
