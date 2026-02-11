@@ -32,23 +32,20 @@ class VolCompressionV1:
         """
         Generate positions for the vol compression -> expansion strategy.
         """
-        strategy_overrides = params.get("strategy_overrides", {})
-        if isinstance(strategy_overrides, dict):
-            strategy_params = strategy_overrides.get(self.name, {})
-            if not isinstance(strategy_params, dict):
-                strategy_params = {}
-        else:
-            strategy_params = {}
-
-        local_params = dict(params)
-        local_params.update(strategy_params)
-
-        one_trade_per_day = bool(local_params.get("one_trade_per_day", True))
-        trade_day_timezone = str(local_params.get("trade_day_timezone", "UTC"))
-        compression_rv_pct_max = float(local_params.get("compression_rv_pct_max", 10.0))
-        compression_range_mult = float(local_params.get("compression_range_mult", 0.8))
-        exit_rv_pct_revert = float(local_params.get("exit_rv_pct_revert", 40.0))
-        max_hold_bars = int(local_params.get("max_hold_bars", 48))
+        one_trade_per_day = bool(params.get("one_trade_per_day", True))
+        trade_day_timezone = str(params.get("trade_day_timezone", "UTC"))
+        compression_rv_pct_max = float(params.get("compression_rv_pct_max", 10.0))
+        compression_range_ratio_max = float(params.get("compression_range_ratio_max", 0.8))
+        breakout_confirm_bars = max(0, int(params.get("breakout_confirm_bars", 0)))
+        breakout_confirm_buffer_bps = float(params.get("breakout_confirm_buffer_bps", 0.0)) / 10_000.0
+        max_hold_bars = max(1, int(params.get("max_hold_bars", 48)))
+        volatility_exit_rv_pct = float(params.get("volatility_exit_rv_pct", 40.0))
+        expansion_timeout_bars = max(0, int(params.get("expansion_timeout_bars", 0)))
+        expansion_min_r = float(params.get("expansion_min_r", 0.5))
+        adaptive_exit_enabled = bool(params.get("adaptive_exit_enabled", False))
+        adaptive_activation_r = float(params.get("adaptive_activation_r", 1.0))
+        adaptive_trail_lookback_bars = max(1, int(params.get("adaptive_trail_lookback_bars", 8)))
+        adaptive_trail_buffer_bps = float(params.get("adaptive_trail_buffer_bps", 0.0)) / 10_000.0
 
         bars = bars.copy()
         features = features.copy()
@@ -76,12 +73,17 @@ class VolCompressionV1:
         in_position = False
         position: Dict[str, object] = {}
         last_trade_day: Optional[pd.Timestamp] = None
+        long_breakout_streak = 0
+        short_breakout_streak = 0
+        signal_events: List[Dict[str, object]] = []
 
         for idx, row in merged.iterrows():
             ts = row["timestamp"]
             day = ts.tz_convert(trade_day_timezone).normalize()
 
             if row[required_fields].isna().any() or row["is_gap"] or row["gap_len"] > 0:
+                long_breakout_streak = 0
+                short_breakout_streak = 0
                 positions.append(1 if in_position and position.get("direction") == "long" else -1 if in_position else 0)
                 continue
 
@@ -91,19 +93,75 @@ class VolCompressionV1:
 
                 if position["direction"] == "long" and row["low"] <= position["stop_price"]:
                     exit_triggered = True
+                    exit_reason = "stop"
                 elif position["direction"] == "short" and row["high"] >= position["stop_price"]:
                     exit_triggered = True
+                    exit_reason = "stop"
                 else:
                     if position["direction"] == "long" and row["high"] >= position["target_price"]:
                         exit_triggered = True
+                        exit_reason = "target"
                     elif position["direction"] == "short" and row["low"] <= position["target_price"]:
                         exit_triggered = True
+                        exit_reason = "target"
                     elif bars_held >= max_hold_bars:
                         exit_triggered = True
-                    elif row["rv_pct_2880"] > exit_rv_pct_revert:
+                        exit_reason = "time"
+                    elif row["rv_pct_2880"] > volatility_exit_rv_pct:
                         exit_triggered = True
+                        exit_reason = "volatility_expansion"
+
+                risk_per_unit = float(position.get("risk_per_unit", 0.0) or 0.0)
+                if risk_per_unit > 0:
+                    if position["direction"] == "long":
+                        mfe_price = float(row["high"]) - float(position["entry_price"])
+                    else:
+                        mfe_price = float(position["entry_price"]) - float(row["low"])
+                    mfe_r = mfe_price / risk_per_unit
+                    position["mfe_r"] = max(float(position.get("mfe_r", 0.0) or 0.0), float(mfe_r))
+
+                if (
+                    not exit_triggered
+                    and expansion_timeout_bars > 0
+                    and bars_held >= expansion_timeout_bars
+                    and float(position.get("mfe_r", 0.0) or 0.0) < expansion_min_r
+                ):
+                    exit_triggered = True
+                    exit_reason = "no_expansion_timeout"
+
+                if (
+                    not exit_triggered
+                    and adaptive_exit_enabled
+                    and risk_per_unit > 0
+                    and float(position.get("mfe_r", 0.0) or 0.0) >= adaptive_activation_r
+                ):
+                    lookback_end_idx = idx - 1
+                    if lookback_end_idx >= 0:
+                        start_idx = max(0, lookback_end_idx - adaptive_trail_lookback_bars + 1)
+                        if position["direction"] == "long":
+                            lookback_low = float(merged.loc[start_idx:lookback_end_idx, "low"].min())
+                            adaptive_stop = lookback_low * (1.0 - adaptive_trail_buffer_bps)
+                            position["stop_price"] = max(float(position["stop_price"]), adaptive_stop)
+                            if row["low"] <= position["stop_price"]:
+                                exit_triggered = True
+                                exit_reason = "adaptive_trailing_stop"
+                        else:
+                            lookback_high = float(merged.loc[start_idx:lookback_end_idx, "high"].max())
+                            adaptive_stop = lookback_high * (1.0 + adaptive_trail_buffer_bps)
+                            position["stop_price"] = min(float(position["stop_price"]), adaptive_stop)
+                            if row["high"] >= position["stop_price"]:
+                                exit_triggered = True
+                                exit_reason = "adaptive_trailing_stop"
 
                 if exit_triggered:
+                    signal_events.append(
+                        {
+                            "timestamp": ts.isoformat(),
+                            "event": "exit",
+                            "reason": exit_reason,
+                            "direction": position.get("direction"),
+                        }
+                    )
                     in_position = False
                     position = {}
                     positions.append(0)
@@ -113,14 +171,31 @@ class VolCompressionV1:
                 positions.append(1 if in_position and position.get("direction") == "long" else -1 if in_position else 0)
                 continue
 
-            compression = row["rv_pct_2880"] <= compression_rv_pct_max and row["range_96"] <= compression_range_mult * row["range_med_480"]
+            compression = row["rv_pct_2880"] <= compression_rv_pct_max and row["range_96"] <= (
+                compression_range_ratio_max * row["range_med_480"]
+            )
             if not compression:
+                long_breakout_streak = 0
+                short_breakout_streak = 0
                 positions.append(0)
                 continue
 
-            if row["close"] > row["prior_high_96"]:
+            long_threshold = row["prior_high_96"] * (1.0 + breakout_confirm_buffer_bps)
+            short_threshold = row["prior_low_96"] * (1.0 - breakout_confirm_buffer_bps)
+
+            if row["close"] > long_threshold:
+                long_breakout_streak += 1
+            else:
+                long_breakout_streak = 0
+
+            if row["close"] < short_threshold:
+                short_breakout_streak += 1
+            else:
+                short_breakout_streak = 0
+
+            if long_breakout_streak >= breakout_confirm_bars + 1:
                 direction = "long"
-            elif row["close"] < row["prior_low_96"]:
+            elif short_breakout_streak >= breakout_confirm_bars + 1:
                 direction = "short"
             else:
                 positions.append(0)
@@ -137,13 +212,27 @@ class VolCompressionV1:
             position = {
                 "direction": direction,
                 "entry_index": idx,
+                "entry_price": entry_price,
                 "stop_price": stop_price,
                 "target_price": target_price,
+                "risk_per_unit": risk_per_unit,
+                "mfe_r": 0.0,
             }
             in_position = True
             last_trade_day = day
+            long_breakout_streak = 0
+            short_breakout_streak = 0
+            signal_events.append(
+                {
+                    "timestamp": ts.isoformat(),
+                    "event": "entry",
+                    "reason": f"breakout_confirmed_{direction}",
+                    "direction": direction,
+                }
+            )
             positions.append(1 if direction == "long" else -1)
 
         positions_series = pd.Series(positions, index=merged["timestamp"], name="position")
         positions_series = positions_series.astype(int)
+        positions_series.attrs["signal_events"] = signal_events
         return positions_series

@@ -1,18 +1,29 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
+from functools import lru_cache
 from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 
 
 def _run_id_default() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+@lru_cache(maxsize=None)
+def _script_supports_log_path(script_path: Path) -> bool:
+    try:
+        return "--log_path" in script_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
 
 
 def _run_stage(
@@ -21,14 +32,18 @@ def _run_stage(
     base_args: List[str],
     run_id: str,
 ) -> bool:
-    runs_dir = PROJECT_ROOT / "runs" / run_id
+    runs_dir = DATA_ROOT / "runs" / run_id
     runs_dir.mkdir(parents=True, exist_ok=True)
     log_path = runs_dir / f"{stage}.log"
     manifest_path = runs_dir / f"{stage}.json"
 
-    cmd = [sys.executable, str(script_path)] + base_args + ["--log_path", str(log_path)]
+    cmd = [sys.executable, str(script_path)] + base_args
+    if _script_supports_log_path(script_path):
+        cmd.extend(["--log_path", str(log_path)])
     result = subprocess.run(cmd)
-    if result.returncode != 0:
+    allowed_nonzero = {"generate_recommendations_checklist": {1}}
+    accepted_codes = {0} | allowed_nonzero.get(stage, set())
+    if result.returncode not in accepted_codes:
         print(f"Stage failed: {stage}", file=sys.stderr)
         print(f"Stage log: {log_path}", file=sys.stderr)
         print(f"Stage manifest: {manifest_path}", file=sys.stderr)
@@ -48,9 +63,26 @@ def main() -> int:
     parser.add_argument("--force", type=int, default=0)
     parser.add_argument("--skip_ingest_ohlcv", type=int, default=0)
     parser.add_argument("--skip_ingest_funding", type=int, default=0)
+    parser.add_argument("--allow_missing_funding", type=int, default=0)
+    parser.add_argument("--allow_constant_funding", type=int, default=0)
+    parser.add_argument("--allow_funding_timestamp_rounding", type=int, default=0)
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--fees_bps", type=float, default=None)
     parser.add_argument("--slippage_bps", type=float, default=None)
+    parser.add_argument("--cost_bps", type=float, default=None)
+    parser.add_argument("--strategies", default=None)
+    parser.add_argument("--overlays", default="")
+    parser.add_argument("--run_phase2_conditional", type=int, default=0)
+    parser.add_argument("--phase2_event_type", default="vol_shock_relaxation", choices=["vol_shock_relaxation"])
+    parser.add_argument("--phase2_max_conditions", type=int, default=20)
+    parser.add_argument("--phase2_max_actions", type=int, default=9)
+    parser.add_argument("--phase2_bootstrap_iters", type=int, default=1000)
+    parser.add_argument("--phase2_cost_floor", type=float, default=0.01)
+    parser.add_argument("--phase2_require_phase1_pass", type=int, default=1)
+    parser.add_argument("--run_phase1_aftershock", type=int, default=0)
+    parser.add_argument("--aftershock_window_start", type=int, default=0)
+    parser.add_argument("--aftershock_window_end", type=int, default=96)
+    parser.add_argument("--run_recommendations_checklist", type=int, default=1)
     args = parser.parse_args()
 
     run_id = args.run_id or _run_id_default()
@@ -58,6 +90,9 @@ def main() -> int:
     start = args.start
     end = args.end
     force_flag = str(int(args.force))
+    allow_missing_funding_flag = str(int(args.allow_missing_funding))
+    allow_constant_funding_flag = str(int(args.allow_constant_funding))
+    allow_funding_timestamp_rounding_flag = str(int(args.allow_funding_timestamp_rounding))
 
     stages: List[Tuple[str, Path, List[str]]] = []
     if not args.skip_ingest_ohlcv:
@@ -115,6 +150,12 @@ def main() -> int:
                     end,
                     "--force",
                     force_flag,
+                    "--allow_missing_funding",
+                    allow_missing_funding_flag,
+                    "--allow_constant_funding",
+                    allow_constant_funding_flag,
+                    "--allow_funding_timestamp_rounding",
+                    allow_funding_timestamp_rounding_flag,
                 ],
             ),
             (
@@ -125,6 +166,26 @@ def main() -> int:
                     run_id,
                     "--symbols",
                     symbols,
+                    "--force",
+                    force_flag,
+                    "--allow_missing_funding",
+                    allow_missing_funding_flag,
+                ],
+            ),
+            (
+                "build_context_features",
+                PROJECT_ROOT / "pipelines" / "features" / "build_context_features.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--timeframe",
+                    "15m",
+                    "--start",
+                    start,
+                    "--end",
+                    end,
                     "--force",
                     force_flag,
                 ],
@@ -149,9 +210,79 @@ def main() -> int:
         ]
     )
 
+    if int(args.run_recommendations_checklist):
+        stages.append(
+            (
+                "generate_recommendations_checklist",
+                PROJECT_ROOT / "pipelines" / "research" / "generate_recommendations_checklist.py",
+                ["--run_id", run_id],
+            )
+        )
+
+    if int(args.run_phase1_aftershock):
+        phase1_aftershock_stage = [
+            (
+                "analyze_vol_aftershock_window",
+                PROJECT_ROOT / "pipelines" / "research" / "analyze_vol_aftershock_window.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--window_start",
+                    str(args.aftershock_window_start),
+                    "--window_end",
+                    str(args.aftershock_window_end),
+                ],
+            )
+        ]
+        insert_at = next((i for i, (name, _, _) in enumerate(stages) if name == "build_context_features"), len(stages))
+        stages[insert_at:insert_at] = phase1_aftershock_stage
+
+    if int(args.run_phase2_conditional):
+        phase2_stages = [
+            (
+                "analyze_vol_shock_relaxation",
+                PROJECT_ROOT / "pipelines" / "research" / "analyze_vol_shock_relaxation.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--timeframe",
+                    "15m",
+                ],
+            ),
+            (
+                "phase2_conditional_hypotheses",
+                PROJECT_ROOT / "pipelines" / "research" / "phase2_conditional_hypotheses.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--event_type",
+                    args.phase2_event_type,
+                    "--symbols",
+                    symbols,
+                    "--max_conditions",
+                    str(args.phase2_max_conditions),
+                    "--max_actions",
+                    str(args.phase2_max_actions),
+                    "--bootstrap_iters",
+                    str(args.phase2_bootstrap_iters),
+                    "--cost_floor",
+                    str(args.phase2_cost_floor),
+                    "--require_phase1_pass",
+                    str(int(args.phase2_require_phase1_pass)),
+                ],
+            ),
+        ]
+        insert_at = next((i for i, (name, _, _) in enumerate(stages) if name == "build_context_features"), len(stages))
+        stages[insert_at:insert_at] = phase2_stages
+
     stages_with_config = {
         "build_cleaned_15m",
         "build_features_v1",
+        "build_context_features",
         "backtest_vol_compression_v1",
         "make_report",
     }
@@ -164,12 +295,18 @@ def main() -> int:
                 base_args.extend(["--fees_bps", str(args.fees_bps)])
             if args.slippage_bps is not None:
                 base_args.extend(["--slippage_bps", str(args.slippage_bps)])
+            if args.cost_bps is not None:
+                base_args.extend(["--cost_bps", str(args.cost_bps)])
+            if args.strategies is not None:
+                base_args.extend(["--strategies", str(args.strategies)])
+            if args.overlays:
+                base_args.extend(["--overlays", str(args.overlays)])
 
     for stage, script, base_args in stages:
         if not _run_stage(stage, script, base_args, run_id):
             return 1
 
-    report_path = PROJECT_ROOT / "reports" / "vol_compression_expansion_v1" / run_id / "summary.md"
+    report_path = DATA_ROOT / "reports" / "vol_compression_expansion_v1" / run_id / "summary.md"
     print(f"Report generated: {report_path}")
     return 0
 

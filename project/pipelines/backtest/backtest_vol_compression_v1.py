@@ -3,297 +3,222 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.config import load_configs
-from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet
+from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
-from pipelines._lib.validation import ensure_utc_timestamp
+from engine.pnl import compute_pnl
+from engine.runner import run_engine
+from strategies.overlay_registry import apply_overlay
 
-# Default constants; will be overridden by config.
-FEE_RATE = 0.0004
-SLIP_RATE = 0.0002
-RISK_PCT = 0.005
 INITIAL_EQUITY = 1_000_000.0
-
-
-@dataclass
-class Trade:
-    symbol: str
-    direction: str
-    entry_time: pd.Timestamp
-    exit_time: pd.Timestamp
-    entry_price: float
-    exit_price: float
-    qty: float
-    pnl: float
-    r_multiple: float
-    exit_reason: str
-    stop_price: float
-    target_price: float
-
-
-def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
-    if df.empty:
-        return {"rows": 0, "start_ts": None, "end_ts": None}
-    return {
-        "rows": int(len(df)),
-        "start_ts": df["timestamp"].min().isoformat(),
-        "end_ts": df["timestamp"].max().isoformat(),
-    }
-
-
-def _apply_slippage(price: float, direction: str, side: str) -> float:
-    """
-    Apply slippage to an entry or exit price based on the trade direction.
-    """
-    if direction == "long":
-        return price * (1 + SLIP_RATE) if side == "entry" else price * (1 - SLIP_RATE)
-    return price * (1 - SLIP_RATE) if side == "entry" else price * (1 + SLIP_RATE)
-
-
-def _calculate_fees(entry_price: float, exit_price: float, qty: float) -> float:
-    """
-    Calculate total fees for a trade, based on entry and exit prices.
-    """
-    return (entry_price + exit_price) * qty * FEE_RATE
+BARS_PER_YEAR_15M = 365 * 24 * 4
 
 
 def _compute_drawdown(equity_curve: pd.Series) -> float:
-    """
-    Compute the maximum drawdown of an equity curve.
-    """
     peak = equity_curve.cummax()
     drawdown = (equity_curve - peak) / peak
     return float(drawdown.min()) if not drawdown.empty else 0.0
 
 
-def _exit_trade(
-    direction: str,
-    entry_price: float,
-    exit_price: float,
-    qty: float,
-    risk_dollars: float,
-) -> Dict[str, float]:
-    """
-    Compute PnL and R-multiple on exit.
-    """
-    pnl = (exit_price - entry_price) * qty if direction == "long" else (entry_price - exit_price) * qty
-    fees = _calculate_fees(entry_price, exit_price, qty)
-    pnl -= fees
-    r_multiple = pnl / risk_dollars if risk_dollars != 0 else 0.0
-    return {"pnl": pnl, "r_multiple": r_multiple}
+def _annualized_sharpe(returns: pd.Series, periods_per_year: int = BARS_PER_YEAR_15M) -> float:
+    returns = returns.dropna()
+    if returns.empty:
+        return 0.0
+    std = float(returns.std())
+    if std == 0.0:
+        return 0.0
+    return float((returns.mean() / std) * np.sqrt(periods_per_year))
 
 
-def _prepare_data(symbol: str) -> pd.DataFrame:
-    """
-    Load and merge features and cleaned bars for a symbol.
-    """
-    features_dir = PROJECT_ROOT / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
-    bars_dir = PROJECT_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
-    feature_files = list_parquet_files(features_dir)
-    bars_files = list_parquet_files(bars_dir)
-    features = read_parquet(feature_files)
-    bars = read_parquet(bars_files)
-    if features.empty or bars.empty:
-        raise ValueError(f"Missing data for {symbol}")
-
-    features["timestamp"] = pd.to_datetime(features["timestamp"], utc=True)
-    bars["timestamp"] = pd.to_datetime(bars["timestamp"], utc=True)
-    ensure_utc_timestamp(features["timestamp"], "timestamp")
-    ensure_utc_timestamp(bars["timestamp"], "timestamp")
-
-    merged = pd.merge(
-        features,
-        bars[["timestamp", "close", "high", "low", "is_gap", "gap_len"]],
-        on="timestamp",
-        suffixes=("", "_bar"),
-    )
-    merged = merged.sort_values("timestamp").reset_index(drop=True)
-    return merged
-
-
-def _run_backtest(symbol: str, data: pd.DataFrame, trade_day_timezone: str) -> List[Trade]:
-    """
-    Execute the backtest for a single symbol.
-    """
-    trades: List[Trade] = []
-    equity = INITIAL_EQUITY
-    in_position = False
-    position: Dict[str, object] = {}
-    last_trade_day: Optional[pd.Timestamp] = None
-
-    data = data.copy()
-    data["prior_high_96"] = data["high_96"].shift(1)
-    data["prior_low_96"] = data["low_96"].shift(1)
-
-    for idx, row in data.iterrows():
-        ts = row["timestamp"]
-        # Normalize to configured time zone for one-trade-per-day rule.
-        day = ts.tz_convert(trade_day_timezone).normalize()
-
-        required_fields = [
-            "rv_pct_17280",
-            "range_96",
-            "range_med_2880",
-            "prior_high_96",
-            "prior_low_96",
-            "low_96",
-            "high_96",
-            "close",
-            "is_gap",
-            "gap_len",
+def _empty_trades_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        columns=[
+            "symbol",
+            "direction",
+            "entry_reason",
+            "entry_time",
+            "exit_time",
+            "entry_price",
+            "exit_price",
+            "qty",
+            "pnl",
+            "r_multiple",
+            "exit_reason",
+            "stop_price",
+            "target_price",
         ]
-        if row[required_fields].isna().any() or row["is_gap"] or row["gap_len"] > 0:
+    )
+
+
+def _extract_trades(frame: pd.DataFrame, max_hold_bars: int = 48) -> pd.DataFrame:
+    if frame.empty:
+        return _empty_trades_frame()
+    if "close" not in frame.columns:
+        logging.warning("Strategy frame missing close prices; skipping trade extraction.")
+        return _empty_trades_frame()
+
+    frame = frame.sort_values("timestamp").reset_index(drop=True)
+    pos = frame["pos"].fillna(0).astype(int)
+    pnl = frame["pnl"].fillna(0.0).astype(float)
+    close = frame["close"].astype(float)
+    high = frame["high"].astype(float) if "high" in frame.columns else pd.Series([float("nan")] * len(frame))
+    low = frame["low"].astype(float) if "low" in frame.columns else pd.Series([float("nan")] * len(frame))
+    high_96 = frame["high_96"].astype(float) if "high_96" in frame.columns else pd.Series([float("nan")] * len(frame))
+    low_96 = frame["low_96"].astype(float) if "low_96" in frame.columns else pd.Series([float("nan")] * len(frame))
+    ts = frame["timestamp"]
+
+    trades: List[Dict[str, object]] = []
+    current_pos = 0
+    entry_idx: int | None = None
+    entry_time: object | None = None
+    entry_price: float | None = None
+    direction: str | None = None
+    stop_price: float | None = None
+    target_price: float | None = None
+    risk_return: float | None = None
+    entry_reason: str = ""
+
+    for i in range(len(frame)):
+        pos_i = int(pos.iat[i])
+        if current_pos == 0:
+            if pos_i != 0:
+                current_pos = pos_i
+                entry_idx = i
+                entry_time = ts.iat[i]
+                entry_price = float(close.iat[i]) if pd.notna(close.iat[i]) else float("nan")
+                direction = "long" if pos_i > 0 else "short"
+                stop_price = float(low_96.iat[i]) if direction == "long" else float(high_96.iat[i])
+                entry_reason = str(frame["entry_reason"].iat[i]) if "entry_reason" in frame.columns else ""
+                if pd.notna(entry_price) and pd.notna(stop_price) and entry_price > 0:
+                    risk_per_unit = entry_price - stop_price if direction == "long" else stop_price - entry_price
+                    if risk_per_unit > 0:
+                        target_price = (
+                            entry_price + 2 * risk_per_unit if direction == "long" else entry_price - 2 * risk_per_unit
+                        )
+                        risk_return = risk_per_unit / entry_price
+                    else:
+                        target_price = float("nan")
+                        risk_return = None
+                else:
+                    stop_price = float("nan")
+                    target_price = float("nan")
+                    risk_return = None
             continue
 
-        if in_position:
-            bars_held = int(idx - position["entry_index"])
-            exit_price: Optional[float] = None
-            exit_reason: Optional[str] = None
-
-            if position["direction"] == "long" and row["low"] <= position["stop_price"]:
-                exit_price = position["stop_price"]
-                exit_reason = "stop"
-            elif position["direction"] == "short" and row["high"] >= position["stop_price"]:
-                exit_price = position["stop_price"]
-                exit_reason = "stop"
-            else:
-                if position["direction"] == "long" and row["high"] >= position["target_price"]:
-                    exit_price = position["target_price"]
-                    exit_reason = "target_2r"
-                elif position["direction"] == "short" and row["low"] <= position["target_price"]:
-                    exit_price = position["target_price"]
-                    exit_reason = "target_2r"
-                elif bars_held >= 48:
-                    exit_price = row["close"]
-                    exit_reason = "time_stop"
-                elif row["rv_pct_17280"] > 40:
-                    exit_price = row["close"]
-                    exit_reason = "rv_exit"
-
-            if exit_price is not None:
-                exit_price = _apply_slippage(exit_price, position["direction"], "exit")
-                results = _exit_trade(
-                    position["direction"],
-                    position["entry_price"],
-                    exit_price,
-                    position["qty"],
-                    position["risk_dollars"],
-                )
-                equity += results["pnl"]
-                trades.append(
-                    Trade(
-                        symbol=symbol,
-                        direction=position["direction"],
-                        entry_time=position["entry_time"],
-                        exit_time=ts,
-                        entry_price=position["entry_price"],
-                        exit_price=exit_price,
-                        qty=position["qty"],
-                        pnl=results["pnl"],
-                        r_multiple=results["r_multiple"],
-                        exit_reason=exit_reason,
-                        stop_price=position["stop_price"],
-                        target_price=position["target_price"],
-                    )
-                )
-                in_position = False
-                position = {}
-                continue
-
-        # Only one trade per day.
-        if in_position or (last_trade_day is not None and day == last_trade_day):
+        if pos_i == current_pos:
             continue
 
-        compression = row["rv_pct_17280"] <= 10 and row["range_96"] <= 0.8 * row["range_med_2880"]
-        if not compression:
-            continue
+        exit_idx = i
+        exit_time = ts.iat[i]
+        exit_price = float(close.iat[i]) if pd.notna(close.iat[i]) else float("nan")
+        trade_pnl = float(pnl.iloc[entry_idx : exit_idx + 1].sum()) if entry_idx is not None else 0.0
+        r_multiple = trade_pnl / risk_return if risk_return and risk_return > 0 else 0.0
+        exit_reason = "position_flip" if pos_i != 0 else "position_exit"
+        signaled_exit_reason = str(frame["exit_signal_reason"].iat[i]) if "exit_signal_reason" in frame.columns else ""
+        if signaled_exit_reason:
+            exit_reason = signaled_exit_reason
+        bars_held = int(exit_idx - entry_idx) if entry_idx is not None else 0
+        if (not signaled_exit_reason) and pd.notna(stop_price) and pd.notna(target_price):
+            high_exit = float(high.iat[exit_idx]) if pd.notna(high.iat[exit_idx]) else float("nan")
+            low_exit = float(low.iat[exit_idx]) if pd.notna(low.iat[exit_idx]) else float("nan")
+            if direction == "long":
+                if pd.notna(low_exit) and low_exit <= stop_price:
+                    exit_reason = "stop"
+                elif pd.notna(high_exit) and high_exit >= target_price:
+                    exit_reason = "target"
+            elif direction == "short":
+                if pd.notna(high_exit) and high_exit >= stop_price:
+                    exit_reason = "stop"
+                elif pd.notna(low_exit) and low_exit <= target_price:
+                    exit_reason = "target"
+        if exit_reason == "position_exit" and bars_held >= int(max_hold_bars):
+            exit_reason = "time"
+        trades.append(
+            {
+                "symbol": frame["symbol"].iat[i],
+                "direction": direction,
+                "entry_reason": entry_reason,
+                "entry_time": entry_time,
+                "exit_time": exit_time,
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "qty": 1.0,
+                "pnl": trade_pnl,
+                "r_multiple": r_multiple,
+                "exit_reason": exit_reason,
+                "stop_price": stop_price,
+                "target_price": target_price,
+            }
+        )
 
-        if row["close"] > row["prior_high_96"]:
-            direction = "long"
-        elif row["close"] < row["prior_low_96"]:
-            direction = "short"
+        if pos_i == 0:
+            current_pos = 0
+            entry_idx = None
+            entry_time = None
+            entry_price = None
+            direction = None
         else:
-            continue
+            current_pos = pos_i
+            entry_idx = i
+            entry_time = ts.iat[i]
+            entry_price = float(close.iat[i]) if pd.notna(close.iat[i]) else float("nan")
+            direction = "long" if pos_i > 0 else "short"
+            stop_price = float(low_96.iat[i]) if direction == "long" else float(high_96.iat[i])
+            entry_reason = str(frame["entry_reason"].iat[i]) if "entry_reason" in frame.columns else ""
+            if pd.notna(entry_price) and pd.notna(stop_price) and entry_price > 0:
+                risk_per_unit = entry_price - stop_price if direction == "long" else stop_price - entry_price
+                if risk_per_unit > 0:
+                    target_price = (
+                        entry_price + 2 * risk_per_unit if direction == "long" else entry_price - 2 * risk_per_unit
+                    )
+                    risk_return = risk_per_unit / entry_price
+                else:
+                    target_price = float("nan")
+                    risk_return = None
+            else:
+                stop_price = float("nan")
+                target_price = float("nan")
+                risk_return = None
 
-        if pd.isna(row["low_96"]) or pd.isna(row["high_96"]):
-            continue
+    if current_pos != 0 and entry_idx is not None:
+        exit_idx = len(frame) - 1
+        exit_time = ts.iat[exit_idx]
+        exit_price = float(close.iat[exit_idx]) if pd.notna(close.iat[exit_idx]) else float("nan")
+        trade_pnl = float(pnl.iloc[entry_idx : exit_idx + 1].sum())
+        r_multiple = trade_pnl / risk_return if risk_return and risk_return > 0 else 0.0
+        trades.append(
+            {
+                "symbol": frame["symbol"].iat[exit_idx],
+                "direction": direction,
+                "entry_reason": entry_reason,
+                "entry_time": entry_time,
+                "exit_time": exit_time,
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "qty": 1.0,
+                "pnl": trade_pnl,
+                "r_multiple": r_multiple,
+                "exit_reason": "eod",
+                "stop_price": stop_price,
+                "target_price": target_price,
+            }
+        )
 
-        entry_price = _apply_slippage(row["close"], direction, "entry")
-        stop_price = row["low_96"] if direction == "long" else row["high_96"]
-        risk_per_unit = entry_price - stop_price if direction == "long" else stop_price - entry_price
-        if risk_per_unit <= 0:
-            continue
-        risk_dollars = equity * RISK_PCT
-        qty = risk_dollars / risk_per_unit
-        target_price = entry_price + 2 * risk_per_unit if direction == "long" else entry_price - 2 * risk_per_unit
-
-        position = {
-            "direction": direction,
-            "entry_time": ts,
-            "entry_price": entry_price,
-            "stop_price": stop_price,
-            "target_price": target_price,
-            "qty": qty,
-            "risk_dollars": risk_dollars,
-            "entry_index": idx,
-        }
-        in_position = True
-        last_trade_day = day
-
-    return trades
-
-
-def _metrics_from_trades(trades: List[Trade]) -> Dict[str, object]:
-    """
-    Compute summary metrics from a list of trades.
-    """
     if not trades:
-        return {
-            "total_trades": 0,
-            "win_rate": 0.0,
-            "avg_r": 0.0,
-            "max_drawdown": 0.0,
-            "ending_equity": INITIAL_EQUITY,
-        }
-
-    df = pd.DataFrame([t.__dict__ for t in trades])
-    wins = df[df["pnl"] > 0]
-    win_rate = float(len(wins) / len(df))
-    avg_r = float(df["r_multiple"].mean())
-
-    equity = INITIAL_EQUITY + df["pnl"].cumsum()
-    max_dd = _compute_drawdown(equity)
-
-    return {
-        "total_trades": int(len(df)),
-        "win_rate": win_rate,
-        "avg_r": avg_r,
-        "max_drawdown": max_dd,
-        "ending_equity": float(equity.iloc[-1]),
-    }
-
-
-def _run_scenario(
-    symbols: List[str],
-    data_map: Dict[str, pd.DataFrame],
-    trade_day_timezone: str,
-) -> List[Trade]:
-    trades: List[Trade] = []
-    for symbol in symbols:
-        symbol_trades = _run_backtest(symbol, data_map[symbol], trade_day_timezone)
-        trades.extend(symbol_trades)
-    return trades
+        return _empty_trades_frame()
+    return pd.DataFrame(trades, columns=_empty_trades_frame().columns)
 
 
 def main() -> int:
@@ -302,6 +227,9 @@ def main() -> int:
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--fees_bps", type=float, default=None)
     parser.add_argument("--slippage_bps", type=float, default=None)
+    parser.add_argument("--cost_bps", type=float, default=None)
+    parser.add_argument("--strategies", default=None)
+    parser.add_argument("--overlays", default="")
     parser.add_argument("--force", type=int, default=0)
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--log_path", default=None)
@@ -324,16 +252,24 @@ def main() -> int:
     slippage_bps = (
         float(args.slippage_bps) if args.slippage_bps is not None else float(config.get("slippage_bps_per_fill", 2))
     )
-    risk_pct = float(config.get("risk_per_trade_pct", 0.5))
     trade_day_timezone = str(config.get("trade_day_timezone", "UTC"))
+    cost_bps = float(args.cost_bps) if args.cost_bps is not None else float(fee_bps + slippage_bps)
+    strategies = (
+        [s.strip() for s in args.strategies.split(",") if s.strip()]
+        if args.strategies
+        else ["vol_compression_v1"]
+    )
 
+    overlays = [o.strip() for o in str(args.overlays).split(",") if o.strip()]
     params = {
         "fee_bps_per_side": fee_bps,
         "slippage_bps_per_fill": slippage_bps,
-        "risk_per_trade_pct": risk_pct,
         "trade_day_timezone": trade_day_timezone,
         "symbols": symbols,
         "force": int(args.force),
+        "cost_bps": cost_bps,
+        "strategies": strategies,
+        "overlays": overlays,
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
@@ -341,76 +277,175 @@ def main() -> int:
     stats: Dict[str, object] = {"symbols": {}}
 
     try:
-        trades_dir = PROJECT_ROOT / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id
+        trades_dir = DATA_ROOT / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id
         trades_dir.mkdir(parents=True, exist_ok=True)
 
         if not args.force and (trades_dir / "metrics.json").exists():
             finalize_manifest(manifest, "success", stats={"skipped": True})
             return 0
 
-        data_map: Dict[str, pd.DataFrame] = {}
+        strategy_defaults = config.get("strategy_defaults", {}) if isinstance(config.get("strategy_defaults"), dict) else {}
+        vc_defaults = (
+            strategy_defaults.get("vol_compression_v1", {})
+            if isinstance(strategy_defaults.get("vol_compression_v1"), dict)
+            else {}
+        )
+
+        def _param(name: str, default: object) -> object:
+            if name in config:
+                return config[name]
+            if name in vc_defaults:
+                return vc_defaults[name]
+            return default
+
+        strategy_params = {
+            "trade_day_timezone": trade_day_timezone,
+            "one_trade_per_day": True,
+            "compression_rv_pct_max": float(_param("compression_rv_pct_max", 10.0)),
+            "compression_range_ratio_max": float(_param("compression_range_ratio_max", 0.8)),
+            "breakout_confirm_bars": int(_param("breakout_confirm_bars", 0)),
+            "breakout_confirm_buffer_bps": float(_param("breakout_confirm_buffer_bps", 0.0)),
+            "max_hold_bars": int(_param("max_hold_bars", 48)),
+            "volatility_exit_rv_pct": float(_param("volatility_exit_rv_pct", 40.0)),
+            "expansion_timeout_bars": int(_param("expansion_timeout_bars", 0)),
+            "expansion_min_r": float(_param("expansion_min_r", 0.5)),
+            "adaptive_exit_enabled": bool(_param("adaptive_exit_enabled", False)),
+            "adaptive_activation_r": float(_param("adaptive_activation_r", 1.0)),
+            "adaptive_trail_lookback_bars": int(_param("adaptive_trail_lookback_bars", 8)),
+            "adaptive_trail_buffer_bps": float(_param("adaptive_trail_buffer_bps", 0.0)),
+        }
+        for overlay_name in overlays:
+            strategy_params = apply_overlay(overlay_name, strategy_params)
+
+        engine_results = run_engine(
+            run_id=run_id,
+            symbols=symbols,
+            strategies=strategies,
+            params=strategy_params,
+            cost_bps=cost_bps,
+            data_root=DATA_ROOT,
+        )
+
+        for strategy_name in strategies:
+            strategy_path = engine_results["engine_dir"] / f"strategy_returns_{strategy_name}.csv"
+            strategy_rows = len(engine_results["strategy_frames"].get(strategy_name, pd.DataFrame()))
+            outputs.append({"path": str(strategy_path), "rows": strategy_rows, "start_ts": None, "end_ts": None})
+
+        portfolio = engine_results["portfolio"]
+        portfolio_path = engine_results["engine_dir"] / "portfolio_returns.csv"
+        outputs.append({"path": str(portfolio_path), "rows": len(portfolio), "start_ts": None, "end_ts": None})
+
+        if len(strategies) > 1:
+            logging.warning("Multiple strategies detected; trades will be combined without strategy attribution.")
+
+        trades_by_symbol: Dict[str, List[pd.DataFrame]] = {symbol: [] for symbol in symbols}
+        for _, frame in engine_results["strategy_frames"].items():
+            for symbol, symbol_frame in frame.groupby("symbol", sort=True):
+                trades_by_symbol.setdefault(symbol, []).append(
+                    _extract_trades(symbol_frame, max_hold_bars=int(strategy_params.get("max_hold_bars", 48)))
+                )
+
+        all_symbol_trades: List[pd.DataFrame] = []
+        symbol_entry_counts: Dict[str, int] = {}
         for symbol in symbols:
-            data = _prepare_data(symbol)
-            data_map[symbol] = data
-            inputs.append({"path": f"features+bars:{symbol}", **_collect_stats(data)})
-
-        global FEE_RATE, SLIP_RATE, RISK_PCT
-        FEE_RATE = fee_bps / 10_000
-        SLIP_RATE = slippage_bps / 10_000
-        RISK_PCT = risk_pct / 100
-
-        base_trades = _run_scenario(symbols, data_map, trade_day_timezone)
-        all_trades: List[Trade] = []
-
-        for symbol in symbols:
-            symbol_trades = [t for t in base_trades if t.symbol == symbol]
-            all_trades.extend(symbol_trades)
-            trades_df = pd.DataFrame([t.__dict__ for t in symbol_trades])
+            trades_frames = [frame for frame in trades_by_symbol.get(symbol, []) if not frame.empty]
+            symbol_trades = pd.concat(trades_frames, ignore_index=True) if trades_frames else _empty_trades_frame()
+            symbol_entry_counts[symbol] = int(len(symbol_trades))
             trades_path = trades_dir / f"trades_{symbol}.csv"
-            trades_df.to_csv(trades_path, index=False)
-            outputs.append({"path": str(trades_path), "rows": len(trades_df), "start_ts": None, "end_ts": None})
+            symbol_trades.to_csv(trades_path, index=False)
+            if not symbol_trades.empty:
+                all_symbol_trades.append(symbol_trades)
+            outputs.append({"path": str(trades_path), "rows": len(symbol_trades), "start_ts": None, "end_ts": None})
 
-        sorted_trades = sorted(all_trades, key=lambda trade: (trade.exit_time, trade.entry_time))
-        metrics = _metrics_from_trades(sorted_trades)
+        all_trades = pd.concat(all_symbol_trades, ignore_index=True) if all_symbol_trades else _empty_trades_frame()
+        total_trades = int(len(all_trades))
+        if total_trades:
+            win_rate = float((all_trades["pnl"] > 0).mean())
+            avg_r = float(all_trades["r_multiple"].mean())
+        else:
+            win_rate = 0.0
+            avg_r = 0.0
+
         metrics_path = trades_dir / "metrics.json"
-        with metrics_path.open("w", encoding="utf-8") as f:
-            json.dump(metrics, f, indent=2, sort_keys=True)
+        if portfolio.empty:
+            ending_equity = INITIAL_EQUITY
+            max_drawdown = 0.0
+            sharpe_annualized = 0.0
+        else:
+            cumulative_return = portfolio["portfolio_pnl"].cumsum()
+            equity_series = INITIAL_EQUITY * (1.0 + cumulative_return)
+            ending_equity = float(equity_series.iloc[-1])
+            max_drawdown = _compute_drawdown(equity_series)
+            sharpe_annualized = _annualized_sharpe(portfolio["portfolio_pnl"])
+        metrics_payload = {
+            "total_trades": total_trades,
+            "win_rate": win_rate,
+            "avg_r": avg_r,
+            "max_drawdown": max_drawdown,
+            "ending_equity": ending_equity,
+            "sharpe_annualized": sharpe_annualized,
+        }
+        metrics_path.write_text(json.dumps(metrics_payload, indent=2, sort_keys=True), encoding="utf-8")
         outputs.append({"path": str(metrics_path), "rows": 1, "start_ts": None, "end_ts": None})
 
-        equity_curve = pd.DataFrame(
-            {
-                "timestamp": [t.exit_time for t in sorted_trades],
-                "equity": INITIAL_EQUITY + pd.Series([t.pnl for t in sorted_trades]).cumsum(),
-            }
-        )
+        if portfolio.empty:
+            equity_curve = pd.DataFrame(columns=["timestamp", "equity"])
+        else:
+            equity_curve = pd.DataFrame(
+                {
+                    "timestamp": portfolio["timestamp"],
+                    "equity": INITIAL_EQUITY * (1.0 + portfolio["portfolio_pnl"].cumsum()),
+                }
+            )
         equity_curve_path = trades_dir / "equity_curve.csv"
         equity_curve.to_csv(equity_curve_path, index=False)
         outputs.append({"path": str(equity_curve_path), "rows": len(equity_curve), "start_ts": None, "end_ts": None})
 
         fee_scenarios = [0, 2, 5, 10]
-        if fee_bps not in fee_scenarios:
-            fee_scenarios.insert(0, fee_bps)
-        fee_sensitivity: Dict[str, Dict[str, object]] = {}
+        if cost_bps not in fee_scenarios:
+            fee_scenarios.insert(0, cost_bps)
 
-        for scenario_fee in fee_scenarios:
-            FEE_RATE = float(scenario_fee) / 10_000
-            scenario_trades = _run_scenario(symbols, data_map, trade_day_timezone)
-            scenario_sorted = sorted(scenario_trades, key=lambda trade: (trade.exit_time, trade.entry_time))
-            scenario_metrics = _metrics_from_trades(scenario_sorted)
-            fee_sensitivity[str(scenario_fee)] = {
-                "fee_bps_per_side": scenario_fee,
-                "net_return": scenario_metrics["ending_equity"] - INITIAL_EQUITY,
-                "avg_r": scenario_metrics["avg_r"],
-                "max_drawdown": scenario_metrics["max_drawdown"],
-                "trades": scenario_metrics["total_trades"],
+        fee_sensitivity: Dict[str, Dict[str, object]] = {}
+        for scenario_cost in fee_scenarios:
+            scenario_pnl_frames: List[pd.Series] = []
+            scenario_trade_frames: List[pd.DataFrame] = []
+            entry_count = 0
+            for _, frame in engine_results["strategy_frames"].items():
+                for _, symbol_frame in frame.groupby("symbol", sort=True):
+                    indexed = symbol_frame.set_index("timestamp")
+                    pos = indexed["pos"]
+                    ret = indexed["ret"]
+                    pnl = compute_pnl(pos, ret, scenario_cost)
+                    scenario_pnl_frames.append(pnl)
+                    prior = pos.shift(1).fillna(0)
+                    entry_count += int(((prior == 0) & (pos != 0)).sum())
+                    temp_frame = symbol_frame.copy()
+                    temp_frame = temp_frame.set_index("timestamp")
+                    temp_frame["pnl"] = pnl
+                    temp_frame = temp_frame.reset_index()
+                    scenario_trade_frames.append(_extract_trades(temp_frame))
+            scenario_pnl = (
+                pd.concat(scenario_pnl_frames, axis=1).sum(axis=1) if scenario_pnl_frames else pd.Series(dtype=float)
+            )
+            scenario_equity = INITIAL_EQUITY * (1.0 + scenario_pnl.cumsum())
+            if scenario_trade_frames:
+                scenario_trades = pd.concat(scenario_trade_frames, ignore_index=True)
+                avg_r = float(scenario_trades["r_multiple"].mean()) if not scenario_trades.empty else 0.0
+            else:
+                avg_r = 0.0
+            fee_sensitivity[str(scenario_cost)] = {
+                "fee_bps_per_side": scenario_cost,
+                "net_return": float(scenario_pnl.sum()),
+                "avg_r": avg_r,
+                "max_drawdown": _compute_drawdown(scenario_equity) if not scenario_equity.empty else 0.0,
+                "trades": entry_count,
             }
 
         fee_path = trades_dir / "fee_sensitivity.json"
-        with fee_path.open("w", encoding="utf-8") as f:
-            json.dump(fee_sensitivity, f, indent=2, sort_keys=True)
+        fee_path.write_text(json.dumps(fee_sensitivity, indent=2, sort_keys=True), encoding="utf-8")
         outputs.append({"path": str(fee_path), "rows": len(fee_sensitivity), "start_ts": None, "end_ts": None})
 
-        stats["symbols"] = {symbol: {"trades": len([t for t in base_trades if t.symbol == symbol])} for symbol in symbols}
+        stats["symbols"] = {symbol: {"entries": int(symbol_entry_counts.get(symbol, 0))} for symbol in symbols}
         finalize_manifest(manifest, "success", stats=stats)
         return 0
     except Exception as exc:

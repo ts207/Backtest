@@ -39,12 +39,18 @@ PRIMARY_OUTPUT_COLUMNS = [
     "delta_opportunity_ci_low",
     "delta_opportunity_ci_high",
     "delta_exposure_mean",
+    "opportunity_forward_mean",
+    "opportunity_tail_mean",
+    "opportunity_composite_mean",
+    "opportunity_cost_mean",
+    "net_benefit_mean",
     "gate_a_ci_separated",
     "gate_b_time_stable",
     "gate_b_year_signs",
     "gate_c_regime_stable",
     "gate_d_friction_floor",
     "gate_f_exposure_guard",
+    "gate_g_net_benefit",
     "gate_e_simplicity",
     "gate_pass",
     "gate_all",
@@ -402,6 +408,8 @@ def _evaluate_candidate(
     cost_floor: float,
     tail_material_threshold: float,
     opportunity_tight_eps: float,
+    opportunity_near_zero_eps: float,
+    net_benefit_floor: float,
     simplicity_gate: bool,
 ) -> Dict[str, object]:
     adverse_delta_vec, opp_delta_vec, exposure_delta_vec = _apply_action_proxy(sub, action)
@@ -421,13 +429,37 @@ def _evaluate_candidate(
     risk_reduction = float(-mean_adv) if np.isfinite(mean_adv) else np.nan
     material_tail = bool(np.isfinite(risk_reduction) and risk_reduction >= tail_material_threshold)
     gate_d = bool(np.isfinite(risk_reduction) and risk_reduction >= cost_floor) or material_tail
+
+    opportunity_forward = (
+        float(np.nanmean(sub["forward_abs_return_h"].to_numpy(dtype=float)))
+        if "forward_abs_return_h" in sub.columns and len(sub) > 0
+        else np.nan
+    )
+    opportunity_tail = (
+        float(np.nanmean(sub["opportunity_value_excess"].to_numpy(dtype=float)))
+        if "opportunity_value_excess" in sub.columns and len(sub) > 0
+        else np.nan
+    )
+    opportunity_composite = float(np.nanmean([opportunity_forward, opportunity_tail]))
+    if not np.isfinite(opportunity_composite):
+        opportunity_composite = 0.0
+
+    opportunity_cost = float(max(0.0, -mean_opp)) if np.isfinite(mean_opp) else np.nan
+    net_benefit = float(risk_reduction - opportunity_cost) if np.isfinite(risk_reduction) and np.isfinite(opportunity_cost) else np.nan
+
     opportunity_ci_tight_overlap = bool(
         np.isfinite(ci_low_opp)
         and np.isfinite(ci_high_opp)
         and (ci_low_opp <= 0.0 <= ci_high_opp)
         and (max(abs(ci_low_opp), abs(ci_high_opp)) <= opportunity_tight_eps)
     )
-    gate_f = not (np.isfinite(mean_exp) and mean_exp <= -0.9 and not opportunity_ci_tight_overlap)
+    opportunity_near_zero = bool(
+        (np.isfinite(opportunity_cost) and opportunity_cost <= opportunity_near_zero_eps)
+        or opportunity_ci_tight_overlap
+    )
+    full_block_exposure = bool(np.isfinite(mean_exp) and mean_exp <= -0.9)
+    gate_f = not (full_block_exposure and not opportunity_near_zero)
+    gate_g = bool(np.isfinite(net_benefit) and net_benefit >= net_benefit_floor)
     gate_e = bool(simplicity_gate)
 
     fail_reasons = []
@@ -441,6 +473,8 @@ def _evaluate_candidate(
         fail_reasons.append("gate_d_friction")
     if not gate_f:
         fail_reasons.append("gate_f_exposure_guard")
+    if not gate_g:
+        fail_reasons.append("gate_g_net_benefit")
     if not gate_e:
         fail_reasons.append("gate_e_simplicity")
 
@@ -463,10 +497,16 @@ def _evaluate_candidate(
         "gate_b_year_signs": year_signs,
         "gate_c_regime_stable": gate_c,
         "gate_d_friction_floor": gate_d,
+        "opportunity_forward_mean": opportunity_forward,
+        "opportunity_tail_mean": opportunity_tail,
+        "opportunity_composite_mean": opportunity_composite,
+        "opportunity_cost_mean": opportunity_cost,
+        "net_benefit_mean": net_benefit,
         "gate_f_exposure_guard": gate_f,
+        "gate_g_net_benefit": gate_g,
         "gate_e_simplicity": gate_e,
-        "gate_pass": bool(gate_a and gate_b and gate_c and gate_d and gate_f and gate_e),
-        "gate_all": bool(gate_a and gate_b and gate_c and gate_d and gate_f and gate_e),
+        "gate_pass": bool(gate_a and gate_b and gate_c and gate_d and gate_f and gate_g and gate_e),
+        "gate_all": bool(gate_a and gate_b and gate_c and gate_d and gate_f and gate_g and gate_e),
         "fail_reasons": ",".join(fail_reasons) if fail_reasons else "",
     }
 
@@ -484,6 +524,8 @@ def main() -> int:
     parser.add_argument("--material_tail_threshold", type=float, default=0.02)
     parser.add_argument("--opportunity_horizon_bars", type=int, default=20)
     parser.add_argument("--opportunity_tight_eps", type=float, default=0.005)
+    parser.add_argument("--opportunity_near_zero_eps", type=float, default=0.001)
+    parser.add_argument("--net_benefit_floor", type=float, default=0.0)
     parser.add_argument("--min_sample_size", type=int, default=20)
     parser.add_argument("--require_phase1_pass", type=int, default=1)
     parser.add_argument("--out_dir", default=None)
@@ -585,6 +627,8 @@ def main() -> int:
                     cost_floor=args.cost_floor,
                     tail_material_threshold=args.material_tail_threshold,
                     opportunity_tight_eps=args.opportunity_tight_eps,
+                    opportunity_near_zero_eps=args.opportunity_near_zero_eps,
+                    net_benefit_floor=args.net_benefit_floor,
                     simplicity_gate=simplicity_pass,
                 )
                 rows.append(res)
@@ -641,6 +685,8 @@ def main() -> int:
         "opportunity": {
             "horizon_bars": int(args.opportunity_horizon_bars),
             "tight_ci_eps": float(args.opportunity_tight_eps),
+            "near_zero_eps": float(args.opportunity_near_zero_eps),
+            "net_benefit_floor": float(args.net_benefit_floor),
         },
     }
     manifest_path.write_text(json.dumps(manifest_payload, indent=2), encoding="utf-8")
