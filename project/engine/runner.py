@@ -155,40 +155,10 @@ def _validate_positions(series: pd.Series) -> None:
         raise ValueError(f"Positions must be in {{-1,0,1}}. Found: {bad_vals}")
 
 
-def _apply_execution_stress(
-    positions: pd.Series,
-    *,
-    delay_bars: int,
-    min_hold_bars: int,
-    decision_grid_hours: int,
-    decision_grid_bars: int,
-    decision_grid_offset_bars: int,
-) -> pd.Series:
+def _apply_execution_stress(positions: pd.Series, *, delay_bars: int, min_hold_bars: int) -> pd.Series:
     stressed = positions.copy()
     if delay_bars > 0:
         stressed = stressed.shift(delay_bars).fillna(0).astype(int)
-
-    grid_bars = max(0, int(decision_grid_bars))
-    grid_hours = max(0, int(decision_grid_hours))
-
-    if grid_bars <= 0 and grid_hours > 0:
-        ts = pd.DatetimeIndex(stressed.index)
-        if len(ts) >= 2:
-            step_minutes = max(1.0, float(np.median((ts[1:] - ts[:-1]).total_seconds()) / 60.0))
-            grid_bars = max(1, int(round((grid_hours * 60.0) / step_minutes)))
-
-    if grid_bars > 0:
-        n = len(stressed)
-        offset = int(decision_grid_offset_bars) % grid_bars
-        decision_mask = ((np.arange(n) - offset) % grid_bars) == 0
-        values = stressed.to_numpy(copy=True)
-        current = 0
-        for i in range(n):
-            if bool(decision_mask[i]):
-                current = int(values[i])
-            else:
-                values[i] = current
-        stressed = pd.Series(values, index=stressed.index).astype(int)
 
     min_hold = max(1, int(min_hold_bars))
     if min_hold <= 1:
@@ -225,21 +195,11 @@ def _strategy_returns(
     delay_bars = max(0, int(params.get("execution_delay_bars", 0)))
     min_hold_bars = max(1, int(params.get("execution_min_hold_bars", 1)))
     spread_bps = max(0.0, float(params.get("execution_spread_bps", 0.0)))
-    decision_grid_hours = max(0, int(params.get("execution_decision_grid_hours", 0)))
-    decision_grid_bars = max(0, int(params.get("execution_decision_grid_bars", 0)))
-    decision_grid_offset_bars = max(0, int(params.get("execution_decision_grid_offset_bars", 0)))
 
     positions = strategy.generate_positions(bars, features, params)
     timestamp_index = pd.DatetimeIndex(bars["timestamp"])
     positions = positions.reindex(timestamp_index).fillna(0).astype(int)
-    positions = _apply_execution_stress(
-        positions,
-        delay_bars=delay_bars,
-        min_hold_bars=min_hold_bars,
-        decision_grid_hours=decision_grid_hours,
-        decision_grid_bars=decision_grid_bars,
-        decision_grid_offset_bars=decision_grid_offset_bars,
-    )
+    positions = _apply_execution_stress(positions, delay_bars=delay_bars, min_hold_bars=min_hold_bars)
     _validate_positions(positions)
 
     bars_indexed = bars.set_index("timestamp")
@@ -250,20 +210,7 @@ def _strategy_returns(
     nan_ret_mask = ret.isna()
     forced_flat_bars = int((nan_ret_mask & (positions != 0)).sum())
     positions = positions.mask(nan_ret_mask, 0).astype(int)
-    abs_pos = positions.abs()
-    position_delta = positions.diff().fillna(positions).abs()
-    base_cost_bps = float(cost_bps)
-    spread_cost_bps = float(spread_bps)
-    stressed_cost_bps = base_cost_bps + spread_cost_bps
-    prior_pos = positions.shift(1).fillna(0).astype(float)
-    gross_pnl_series = prior_pos * ret
-    base_cost_paid_series = position_delta * (base_cost_bps / 10000.0)
-    spread_cost_paid_series = position_delta * (spread_cost_bps / 10000.0)
-    cost_paid_series = base_cost_paid_series + spread_cost_paid_series
-    gross_pnl_series = gross_pnl_series.mask(nan_ret_mask, 0.0)
-    base_cost_paid_series = base_cost_paid_series.mask(nan_ret_mask, 0.0)
-    spread_cost_paid_series = spread_cost_paid_series.mask(nan_ret_mask, 0.0)
-    cost_paid_series = cost_paid_series.mask(nan_ret_mask, 0.0)
+    stressed_cost_bps = float(cost_bps) + float(spread_bps)
     pnl = compute_pnl(positions, ret, stressed_cost_bps)
     if nan_ret_mask.any():
         LOGGER.info(
@@ -303,20 +250,6 @@ def _strategy_returns(
         }
     )
     total_bars = int(len(ret))
-    num_trades = int((position_delta > 0).sum()) if total_bars else 0
-    holding_lengths = []
-    if total_bars:
-        vals = positions.to_numpy()
-        run = 1
-        for i in range(1, len(vals)):
-            if vals[i] == vals[i - 1]:
-                run += 1
-            else:
-                holding_lengths.append(run)
-                run = 1
-        holding_lengths.append(run)
-    avg_holding_bars = float(np.mean(holding_lengths)) if holding_lengths else 0.0
-
     diagnostics = {
         "total_bars": total_bars,
         "nan_return_bars": int(nan_ret_mask.sum()),
@@ -329,22 +262,6 @@ def _strategy_returns(
         "execution_delay_bars": delay_bars,
         "execution_min_hold_bars": min_hold_bars,
         "execution_spread_bps": spread_bps,
-        "execution_decision_grid_hours": decision_grid_hours,
-        "execution_decision_grid_bars": decision_grid_bars,
-        "execution_decision_grid_offset_bars": decision_grid_offset_bars,
-        "cost_bps_effective": stressed_cost_bps,
-        "base_cost_bps": base_cost_bps,
-        "spread_cost_bps": spread_cost_bps,
-        "avg_abs_position": float(abs_pos.mean()) if total_bars else 0.0,
-        "nonzero_position_pct": float((abs_pos > 0).mean()) if total_bars else 0.0,
-        "avg_turnover_per_bar": float(position_delta.mean()) if total_bars else 0.0,
-        "num_trades": num_trades,
-        "avg_holding_bars": avg_holding_bars,
-        "gross_pnl": float(gross_pnl_series.sum()),
-        "base_cost_paid": float(base_cost_paid_series.sum()),
-        "spread_cost_paid": float(spread_cost_paid_series.sum()),
-        "cost_paid": float(cost_paid_series.sum()),
-        "net_pnl": float(pnl.sum()),
     }
     return StrategyResult(name=strategy_name, data=df, diagnostics=diagnostics)
 
@@ -458,29 +375,6 @@ def run_engine(
             "missing_feature_bars": sum(res.diagnostics["missing_feature_bars"] for res in symbol_results),
         }
         total_bars = diagnostics_total["total_bars"]
-        gross_pnl = float(sum(float(res.diagnostics.get("gross_pnl", 0.0)) for res in symbol_results))
-        base_cost_paid = float(sum(float(res.diagnostics.get("base_cost_paid", 0.0)) for res in symbol_results))
-        spread_cost_paid = float(sum(float(res.diagnostics.get("spread_cost_paid", 0.0)) for res in symbol_results))
-        cost_paid = float(sum(float(res.diagnostics.get("cost_paid", 0.0)) for res in symbol_results))
-        net_pnl = float(sum(float(res.diagnostics.get("net_pnl", 0.0)) for res in symbol_results))
-        weighted_abs_position = (
-            float(sum(float(res.diagnostics.get("avg_abs_position", 0.0)) * float(res.diagnostics.get("total_bars", 0)) for res in symbol_results))
-            / float(total_bars)
-            if total_bars
-            else 0.0
-        )
-        weighted_nonzero_pct = (
-            float(sum(float(res.diagnostics.get("nonzero_position_pct", 0.0)) * float(res.diagnostics.get("total_bars", 0)) for res in symbol_results))
-            / float(total_bars)
-            if total_bars
-            else 0.0
-        )
-        weighted_turnover = (
-            float(sum(float(res.diagnostics.get("avg_turnover_per_bar", 0.0)) * float(res.diagnostics.get("total_bars", 0)) for res in symbol_results))
-            / float(total_bars)
-            if total_bars
-            else 0.0
-        )
         diagnostics = {
             **diagnostics_total,
             "nan_return_pct": float(diagnostics_total["nan_return_bars"] / total_bars) if total_bars else 0.0,
@@ -489,17 +383,6 @@ def run_engine(
             "missing_feature_columns": sorted(
                 {col for res in symbol_results for col in res.diagnostics.get("missing_feature_columns", [])}
             ),
-            "cost_bps_effective": float(cost_bps) + max(0.0, float(params.get("execution_spread_bps", 0.0))),
-            "base_cost_bps": float(cost_bps),
-            "spread_cost_bps": max(0.0, float(params.get("execution_spread_bps", 0.0))),
-            "avg_abs_position": weighted_abs_position,
-            "nonzero_position_pct": weighted_nonzero_pct,
-            "avg_turnover_per_bar": weighted_turnover,
-            "gross_pnl": gross_pnl,
-            "base_cost_paid": base_cost_paid,
-            "spread_cost_paid": spread_cost_paid,
-            "cost_paid": cost_paid,
-            "net_pnl": net_pnl,
         }
         metrics["strategies"][strategy_name] = {**summary, "entries": entries}
         metrics.setdefault("diagnostics", {}).setdefault("strategies", {})[strategy_name] = diagnostics
