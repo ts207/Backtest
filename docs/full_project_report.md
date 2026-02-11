@@ -1,187 +1,136 @@
 # Full Project Report: Backtest Repository
 
-_Date: 2026-02-10_
+_Date: 2026-02-10 (refreshed)_
 
 ## 1) Executive Summary
 
-Backtest is a Python-based quantitative research and backtesting system focused on crypto perpetual futures at 15-minute resolution. The repository is organized around a staged pipeline (`ingest -> clean -> features -> backtest -> report`) with optional research and portfolio-validation branches. The codebase has strong modular separation (pipelines, engine, strategies, analyzers, portfolio), explicit configuration support, and solid regression coverage. Test health is currently strong (`81 passed`).
+Backtest is a modular crypto-perpetual research and backtesting stack centered on a 15m data model and a run-scoped pipeline (`ingest -> clean -> features -> backtest -> report`).
 
-Overall assessment:
-- **Maturity:** Medium-high for research-grade workflows.
-- **Reliability:** High in current tested behaviors.
-- **Operational readiness:** Good for local/CI research workloads.
-- **Primary risks:** data-source availability edge cases, pandas forward-compatibility warnings in selected paths, and single-strategy concentration in the default registry.
+Current high-level status:
+- Test health is strong (**92 passed**).
+- Strategy stack is now multi-family (trend, carry, reversion, vol-compression variants), not single-strategy.
+- Portfolio controls are intentionally strict on drawdown, exposure, and turnover.
+- The main practical question is calibration: **are constraints too harsh for edge realization after costs?**
 
----
-
-## 2) Repository Inventory
-
-High-level inventory from filesystem scan:
-- Python files: **101**
-- Markdown docs: **16**
-- YAML configs: **5**
-- JSON edge specs: **3**
-
-Major folders and role:
-- `project/` (**132 files**) — implementation code.
-- `tests/` (**60 files**) — regression and contract tests.
-- `docs/` (**8 files**) — architecture, research notes, recommendations.
-- `edges/` (**3 files**) — pinned overlay specifications.
+Bottom line:
+- The framework is robust enough to produce tradable candidates.
+- The current risk gates are **conservative but not unreasonable** for institutional-style survivability.
+- For pure return-seeking research, a staged “harshness sweep” should be added so constraints are validated empirically rather than accepted by default.
 
 ---
 
-## 3) Architecture Overview
+## 2) Current Strategy and Edge Inventory
 
-### 3.1 Pipeline orchestration
+### 2.1 Registered strategies (`project/strategies/registry.py`)
+The active registry exposes six strategies:
+1. `vol_compression_v1`
+2. `vol_compression_momentum_v1`
+3. `vol_compression_reversion_v1`
+4. `tsmom_v1`
+5. `funding_carry_v1`
+6. `intraday_reversion_v1`
 
-The main orchestrator is `project/pipelines/run_all.py` and supports:
-- Core stages: ingest OHLCV, ingest funding, clean, build features, build context features, backtest, report.
-- Optional research branches:
-  - Phase 1/2 research (`analyze_vol_shock_relaxation`, `phase2_conditional_hypotheses`)
-  - Aftershock analysis
-  - Edge-candidate export
-- Optional multi-edge branch:
-  - Portfolio backtest and validation with configurable modes.
+This is a healthy cross-family baseline for diversification experiments.
 
-Design strengths:
-- Stage-level logs/manifests per `run_id`.
-- CLI flags allow skipping ingest, forcing rebuilds, and toggling strictness around funding quality.
-- Config overlays supported via repeated `--config` options.
+### 2.2 Portfolio edge set (`project/configs/portfolio.yaml`)
+Configured APPROVED edges include:
+- `vc_core`, `vc_momentum`, `vc_reversion` (vol-compression family)
+- `tsmom_trend` (trend family)
+- `carry_funding` (carry family)
+- `intraday_reversion_core` (reversion family)
 
-### 3.2 Data model and IO strategy
-
-The project uses a run-scoped data lake approach:
-- Raw market data under `data/lake/raw/...`.
-- Run-specific cleaned/features/context artifacts under `data/lake/runs/<run_id>/...`.
-- Reports/manifests under `data/reports/...` and `data/runs/<run_id>/...`.
-
-This pattern supports reproducibility and split-by-run analysis while keeping large data outside git.
-
-### 3.3 Strategy and simulation engine
-
-Core simulation lives in:
-- `project/engine/runner.py`
-- `project/engine/pnl.py`
-
-Observations:
-- Engine merges per-symbol features with context features (funding persistence context).
-- Position and return paths are validated for timestamp correctness (UTC checks).
-- Strategy lookup is pluggable through `project/strategies/registry.py`.
-
-Current registered strategy set is intentionally minimal:
-- `vol_compression_v1`.
-
-### 3.4 Overlay and edge governance contracts
-
-Two policy-oriented contract layers exist:
-- `project/strategies/overlay_registry.py` validates pinned overlay specs in `edges/*.json`.
-- `project/portfolio/edge_contract.py` validates edge definitions and enforces evidence requirements for APPROVED edges.
-
-Notable governance controls:
-- Pinned spec versioning.
-- Allowed lifecycle states (`DRAFT`, `APPROVED`, etc.).
-- Required objective/constraints/stability fields for promoted overlays.
-- Required evidence metadata for approved edges.
-
-### 3.5 Portfolio allocator
-
-`project/portfolio/multi_edge_allocator.py` implements multi-edge allocation with modes:
-- `equal_risk`
-- `score_weighted`
-- `constrained_optimizer`
-
-Constraints include:
-- Max drawdown, CVaR proxy, gross/net exposure caps.
-- Single-symbol and per-edge risk controls.
-- Turnover budgeting and optional return-tilt behavior.
+Notable governance quality:
+- Each edge carries evidence metadata (`run_id`, `split`, `date_range`, `config_hash`).
+- Family policy can enforce one edge per family to reduce intra-family crowding.
+- Cost assumptions are explicit (fees/slippage), which improves realism.
 
 ---
 
-## 4) Configuration & Operational Controls
+## 3) “Too Harsh?” Constraint/Gate Review
 
-Key configuration files:
-- `project/configs/pipeline.yaml` — pipeline shape and multi-edge policy defaults.
-- `project/configs/portfolio.yaml` — objective and constraints for portfolio allocation.
-- `project/configs/fees.yaml` — baseline fee/slippage assumptions.
+### 3.1 Current guardrails
+From `project/configs/portfolio.yaml`, key limits are:
+- `max_drawdown_pct: 0.20`
+- `cvar_1d_99_pct: 0.025`
+- `gross_exposure_max: 1.50`
+- `net_exposure_max: 0.60`
+- `single_symbol_weight_max: 0.20`
+- `turnover_budget_daily: 0.30`
 
-Operational controls exposed via CLI:
-- Funding strictness toggles (`allow_missing_funding`, `allow_constant_funding`, timestamp rounding).
-- Cost overrides (`fees_bps`, `slippage_bps`, `cost_bps`).
-- Strategy selection and overlay injection.
+With gates:
+- `regime_sign_consistency_min: 0.80`
+- `symbol_positive_pnl_ratio_min: 0.60`
+- non-negative uplift / friction-floor thresholds.
 
-This balance gives strong reproducibility while still supporting controlled experiment variance.
+### 3.2 Assessment
+These settings are **conservative**, but broadly aligned with preventing overfit/high-turnover illusionary edges.
 
----
+Where they may feel harsh:
+- `sign_consistency >= 0.80` can reject valid cyclical or regime-rotating edges.
+- `symbol_positive_pnl_ratio >= 0.60` can penalize concentrated-but-strong specialist strategies.
+- `turnover_budget_daily = 0.30` can clip short-horizon alpha that requires frequent rebalancing.
 
-## 5) Testing and Quality Signals
+### 3.3 Verdict
+- For **promotion to production-like deployment**: constraints are appropriate.
+- For **early discovery research**: likely somewhat harsh.
 
-Validation executed in this review:
-- `python3 -m pytest -q`
-- Result: **81 passed**, 0 failed.
-
-Test suite coverage domains (from file inventory):
-- Pipeline orchestration and diagnostics.
-- Funding ingestion/persistence and feature-context correctness.
-- Research analyzer mechanics and contracts.
-- Overlay promotion checks and edge contract validation.
-- Multi-edge allocation and run-all integration behavior.
-
-Quality posture:
-- Strong regression confidence for current architecture.
-- Good alignment between governance contracts and tests.
-
----
-
-## 6) Strengths
-
-1. **Clear modular architecture** with explicit boundaries between ingestion, feature engineering, simulation, and research.
-2. **Reproducibility-first workflow** using `run_id`, stage manifests, and run-scoped artifacts.
-3. **Governance-oriented promotion model** for overlays and edges (status lifecycle + evidence requirements).
-4. **Strong automated test baseline** for both mechanics and policy contracts.
-5. **Config-driven extensibility** for research toggles and risk/cost assumptions.
+Recommended operating model:
+- Keep current strict profile as **Production Profile**.
+- Add a **Research Profile** with slightly relaxed gates for idea incubation, then require re-validation under Production Profile before approval.
 
 ---
 
-## 7) Risks / Gaps
+## 4) Priority Improvements to Reach “Successful Trading Strategy”
 
-1. **Strategy concentration risk**
-   - Default strategy registry currently exposes a single strategy (`vol_compression_v1`).
-   - Portfolio and research pipelines are broader than current baseline strategy diversity.
+### P0: Separate research-vs-production gate profiles
+Create two config presets:
+- `portfolio_research.yaml` (moderately relaxed)
+- `portfolio_production.yaml` (current strict defaults)
 
-2. **Potential forward-compatibility warnings (pandas evolution)**
-   - Prior local audit doc flags deprecation/future-warning hot spots.
-   - Not blocking today, but relevant for future dependency upgrades.
+Suggested research relaxations to test:
+- `regime_sign_consistency_min`: 0.80 -> 0.70
+- `symbol_positive_pnl_ratio_min`: 0.60 -> 0.50
+- `turnover_budget_daily`: 0.30 -> 0.40
 
-3. **Data-source boundary limitations**
-   - Historical availability constraints (pre-late-2019 futures archives) require clamp behavior and manifest caveats.
+### P1: Run a formal harshness sensitivity sweep
+Automate a sweep around gate thresholds and report:
+- candidate survival rate
+- net return vs drawdown frontier
+- stability degradation curve
 
-4. **Operational complexity in optional branches**
-   - `run_all.py` supports many toggles; this is powerful but increases config and runbook burden.
+This converts “too harsh?” from opinion into measurable policy tradeoff.
 
----
+### P2: Strengthen objective alignment
+Given objective `net_total_return`, add reporting of:
+- return per unit turnover
+- return per unit drawdown
+- tail event contribution decomposition
 
-## 8) Recommendations (Prioritized)
+This ensures return maximization remains constrained and economically meaningful.
 
-### P0 (Immediate, low risk)
-- Add a concise architecture diagram (`docs/`) showing stage artifacts and dependencies.
-- Add a single “operator runbook” markdown with 3 reference workflows:
-  - baseline run
-  - research phase2 run
-  - multi-edge validation run
+### P3: Improve dependency security baseline
+Upgrade known vulnerable pins (at minimum):
+- `requests >= 2.32.4`
+- `pyarrow >= 17.0.0`
 
-### P1 (Near-term)
-- Harden identified warning-prone pandas paths and add targeted unit tests that assert dtypes after fill/merge operations.
-- Introduce smoke fixtures for “missing funding + strict mode” and “rounded timestamps mode” with explicit expected manifests.
-
-### P2 (Medium-term)
-- Expand strategy registry with at least one additional orthogonal baseline strategy to reduce concentration and improve portfolio-combination utility.
-- Add benchmark timing/profiling snapshots for heavy stages (`ingest`, `features`, `backtest_multi_edge_portfolio`).
-
-### P3 (Long-term)
-- Consider introducing a machine-readable experiment registry (e.g., YAML index of run groups and hypotheses) to connect research promotion decisions directly to evidence runs.
+Then re-run full tests and audit.
 
 ---
 
-## 9) Conclusion
+## 5) Practical 30-Day Execution Plan
 
-The repository is well-structured, test-healthy, and already incorporates advanced governance concepts uncommon in many research backtest codebases (formal edge/overlay contracts with promotion checks). With modest investment in operator documentation, warning hardening, and strategy diversity, it can move from strong research infrastructure toward more production-like repeatability and maintainability.
+1. **Week 1**: Add research/production config split and harshness sweep script.
+2. **Week 2**: Run sweep on TOP10 and BTC/ETH-only universes; publish frontier report.
+3. **Week 3**: Promote only candidates that pass both relaxed discovery and strict re-validation.
+4. **Week 4**: Lock one deployable multi-edge spec and monitor out-of-sample stability.
+
+Success criteria:
+- Positive constrained net return after costs.
+- No material breach of drawdown/tail limits.
+- Stable sign across major regimes and major symbols.
+
+---
+
+## 6) Conclusion
+
+The project is no longer strategy-concentrated and already has a strong governance backbone for disciplined promotion. The current policy is not “wrongly harsh”; it is **production-conservative**. To maximize chance of finding successful strategies, add an explicit two-profile workflow and a quantitative harshness sweep, then require strict-profile re-validation before final approval.
