@@ -1,0 +1,157 @@
+spec_version: '1.0'
+system_name: institutional_crypto_systematic_trading_combined_m1_m3
+design_goal: Model 3 systems/governance + Model 1 alpha research depth
+time_conventions:
+  timezone: UTC
+  event_time_field: ts_event
+  process_time_field: ts_proc
+determinism:
+  required: true
+  numeric:
+    dtype: float64
+    stable_sort: symbol_canonical_id_asc
+  training:
+    row_ordering: ts_event_asc_then_symbol_canonical_id_asc
+    folds: explicit_time_blocks_only
+versioning:
+  required: true
+  objects_versioned:
+  - features
+  - signals
+  - models
+  - optimizers
+  - execution_policies
+  - alpha_families
+  - regime_models
+  - orthogonalization_specs
+  - combination_models
+  - hyperparam_grids
+  - label_defs
+  - universe_defs
+  - universe_snapshots
+  - cross_section_defs
+  - alpha_bundles
+  provenance_fields_required:
+  - strategy_version
+  - artifact_hash
+  - train_snapshot_hash
+  - code_hash
+  - dependency_hashes
+data_models:
+  canonical_schemas:
+    UniverseDef:
+      fields:
+      - universe_id
+      - description
+      - selection_rules
+      - gating_rules
+      - created_ts
+      - universe_def_version
+      primary_key:
+      - universe_id
+      - universe_def_version
+    UniverseSnapshot:
+      fields:
+      - ts_event
+      - universe_id
+      - symbols_sorted
+      - included_flags
+      - snapshot_hash
+      - universe_snapshot_version
+      primary_key:
+      - ts_event
+      - universe_id
+      - universe_snapshot_version
+    CrossSectionAgg:
+      fields:
+      - ts_event
+      - universe_id
+      - feature_name
+      - agg_name
+      - value
+      - cs_def_version
+      primary_key:
+      - ts_event
+      - universe_id
+      - feature_name
+      - agg_name
+      - cs_def_version
+    OnChainFlow:
+      fields:
+      - ts_event
+      - asset
+      - provider
+      - exch_inflow_coin
+      - exch_outflow_coin
+      - netflow_coin
+      - mcap_usd
+      primary_key:
+      - provider
+      - asset
+      - ts_event
+    OpenInterest:
+      fields:
+      - ts_event
+      - venue
+      - symbol
+      - oi_contracts
+      - oi_usd
+      primary_key:
+      - venue
+      - symbol
+      - ts_event
+    FeatureDefinition:
+      fields:
+      - feature_name
+      - formula_id
+      - params_json
+      - depends_on
+      - feature_def_version
+      - artifact_hash
+      primary_key:
+      - feature_name
+      - feature_def_version
+    SignalDefinition:
+      fields:
+      - signal_name
+      - formula_id
+      - params_json
+      - inputs
+      - signal_def_version
+      - artifact_hash
+      primary_key:
+      - signal_name
+      - signal_def_version
+alpha_bundle:
+  name: AlphaBundle_v1
+  signals:
+  - ts_momentum_multi
+  - xs_momentum
+  - mean_reversion_state
+  - funding_carry_adjusted
+  - onchain_flow_mc
+  - orderflow_imbalance
+  orthogonalization:
+    enabled: true
+    method: residualization
+    ordering:
+    - tsmom_multi
+    - xs_momentum
+    - mean_reversion_state
+    - funding_carry_adjusted
+    - onchain_flow_mc
+    - orderflow_imbalance
+  combination_model:
+    selector: ridge_linear
+    fit_offline_only: true
+  post_processing:
+    clipping: true
+    liquidity_scaling: true
+    regime_gating: true
+  expected_return_mapping:
+    formula_id: E_MU_FROM_SCORE
+    scaling: sigma_i * sqrt(h)
+    label_def_id: LBL_EXCESS_LOGRET_H
+notes:
+  repo_integration: Implemented as new pipelines under project/pipelines/alpha_bundle
+    and specs under project/specs.
