@@ -1,0 +1,41 @@
+Handoff Report
+Generated: 2026-02-12 21:27:27 UTC
+
+Repository: Backtest
+Branch: integration/main-plus-alpha-bundle
+Remote: origin (https://github.com/ts207/Backtest.git)
+
+Current HEAD:
+- c2fa852 docs: add research report requirements and repo gap matrix
+
+Recent commits (newest first):
+- c2fa852 docs: add research report requirements and repo gap matrix
+- f52827e test: verify backtest metrics include decomposition and reproducibility
+- 64f7f24 feat: add backtest cost decomposition and reproducibility metadata
+- 81f6262 feat: add multiplicity-adjusted expectancy gating
+
+Implemented high-risk/ROI requirement gaps:
+- R7: Multiplicity control in expectancy analysis via Benjamini-Hochberg adjusted p-values.
+- R5: Reproducibility metadata in backtest metrics (config digest, code revision, data snapshot IDs).
+- R4: Cost decomposition in backtest/report outputs (gross alpha, fees, slippage, impact, net alpha, turnover).
+
+Validation status:
+- Standard suite last run: make test
+- Result: 72 passed in 11.33s
+
+Artifacts added in prior docs commit:
+- report_requirements.md
+- agents.md
+- gap_matrix.md
+- deep-research-report.md
+
+Working tree note:
+- Untracked file remains: deep-research-report.md:Zone.Identifier
+  (Windows metadata sidecar; intentionally not included in commits)
+
+Resume instructions for next session:
+1) git fetch origin
+2) git checkout integration/main-plus-alpha-bundle
+3) git pull --ff-only
+4) make test
+5) Continue from gap matrix priorities (R7/R5/R4 already implemented)
