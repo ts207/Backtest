@@ -49,3 +49,64 @@ def test_build_reproducibility_metadata_includes_digest_revision_and_snapshots(m
     assert len(meta["config_digest"]) == 64
     assert "build_cleaned_15m" in meta["data_snapshot_ids"]
     assert "build_features_v1" in meta["data_snapshot_ids"]
+
+
+def test_backtest_main_writes_cost_decomposition_and_reproducibility(monkeypatch, tmp_path: Path) -> None:
+    run_id = "bt_meta_runtime"
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(bts, "DATA_ROOT", tmp_path)
+
+    # Inputs used by reproducibility snapshot hashing.
+    runs_dir = tmp_path / "runs" / run_id
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    (runs_dir / "build_cleaned_15m.json").write_text(json.dumps({"ok": 1}), encoding="utf-8")
+
+    def _fake_engine(**kwargs):
+        engine_dir = tmp_path / "runs" / run_id / "engine"
+        engine_dir.mkdir(parents=True, exist_ok=True)
+        frame = pd.DataFrame(
+            {
+                "timestamp": pd.to_datetime(["2024-01-01T00:00:00Z", "2024-01-01T00:15:00Z"]),
+                "symbol": ["BTCUSDT", "BTCUSDT"],
+                "pos": [0, 1],
+                "ret": [0.0, 0.01],
+                "pnl": [0.0, -0.0006],
+                "close": [100.0, 101.0],
+                "high": [101.0, 102.0],
+                "low": [99.0, 100.0],
+                "high_96": [101.0, 102.0],
+                "low_96": [99.0, 100.0],
+            }
+        )
+        portfolio = pd.DataFrame(
+            {
+                "timestamp": pd.to_datetime(["2024-01-01T00:00:00Z", "2024-01-01T00:15:00Z"]),
+                "portfolio_pnl": [0.0, -0.0006],
+            }
+        )
+        return {"engine_dir": engine_dir, "strategy_frames": {"vol_compression_v1": frame}, "portfolio": portfolio}
+
+    monkeypatch.setattr(bts, "run_engine", _fake_engine)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "backtest_strategies.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT",
+            "--strategies",
+            "vol_compression_v1",
+            "--force",
+            "1",
+        ],
+    )
+    assert bts.main() == 0
+
+    metrics_path = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id / "metrics.json"
+    payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+    assert "cost_decomposition" in payload
+    assert "reproducibility" in payload
+    assert set(["gross_alpha", "fees", "slippage", "impact", "net_alpha"]).issubset(payload["cost_decomposition"].keys())
+    assert "config_digest" in payload["reproducibility"]
