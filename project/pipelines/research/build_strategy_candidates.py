@@ -17,6 +17,21 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from strategies.registry import list_strategies
+
+EVENT_BASE_STRATEGY_MAP: Dict[str, str] = {
+    "vol_shock_relaxation": "vol_compression_v1",
+    "vol_aftershock_window": "vol_compression_v1",
+    "range_compression_breakout_window": "vol_compression_v1",
+    "liquidity_refill_lag_window": "liquidity_refill_lag_v1",
+    "liquidity_absence_window": "liquidity_absence_gate_v1",
+    "directional_exhaustion_after_forced_flow": "forced_flow_exhaustion_v1",
+    "funding_extreme_reversal_window": "funding_extreme_reversal_v1",
+    "cross_venue_desync": "cross_venue_desync_v1",
+    "liquidity_vacuum": "liquidity_vacuum_v1",
+}
+
+BACKTEST_READY_BASE_STRATEGIES = set(list_strategies())
 
 
 def _safe_float(value: object, default: float = 0.0) -> float:
@@ -101,6 +116,27 @@ def _risk_controls_from_action(action: str) -> Dict[str, object]:
     return controls
 
 
+def _base_strategy_for_event(event: str) -> str:
+    key = str(event).strip().lower()
+    if key in EVENT_BASE_STRATEGY_MAP:
+        return EVENT_BASE_STRATEGY_MAP[key]
+    return "vol_compression_v1"
+
+
+def _manual_backtest_command_for_strategy(base_strategy: str, symbols_csv: str) -> str:
+    if base_strategy in BACKTEST_READY_BASE_STRATEGIES:
+        return (
+            f"./.venv/bin/python project/pipelines/backtest/backtest_strategies.py "
+            f"--run_id <manual_backtest_run_id> --symbols {symbols_csv} "
+            f"--strategies {base_strategy} --force 1"
+        )
+    return (
+        "Backtest adapter required for this strategy template. Implement/choose a supported strategy id, then run:\n"
+        f"./.venv/bin/python project/pipelines/backtest/backtest_strategies.py "
+        f"--run_id <manual_backtest_run_id> --symbols {symbols_csv} --strategies <strategy_id> --force 1"
+    )
+
+
 def _build_edge_strategy_candidate(
     row: Dict[str, object],
     detail: Dict[str, object],
@@ -117,14 +153,12 @@ def _build_edge_strategy_candidate(
     action = str(detail.get("action", "no_action"))
     selection_score = (0.65 * edge_score) + (0.35 * stability_proxy)
     controls = _risk_controls_from_action(action)
+    base_strategy = _base_strategy_for_event(event)
+    backtest_ready = bool(base_strategy in BACKTEST_READY_BASE_STRATEGIES)
 
     strategy_candidate_id = _sanitize_id(f"{event}_{condition}_{action}_{candidate_id}")
     symbols_csv = ",".join(symbols)
-    manual_backtest_command = (
-        f"./.venv/bin/python project/pipelines/backtest/backtest_vol_compression_v1.py "
-        f"--run_id <manual_backtest_run_id> --symbols {symbols_csv} "
-        f"--strategies vol_compression_v1 --force 1"
-    )
+    manual_backtest_command = _manual_backtest_command_for_strategy(base_strategy, symbols_csv)
 
     notes: List[str] = [
         f"Derived from promoted edge candidate {candidate_id} ({event}).",
@@ -132,11 +166,16 @@ def _build_edge_strategy_candidate(
     ]
     if controls.get("block_entries"):
         notes.append("Action implies full entry block; use as rejection/guard condition, not a standalone trading strategy.")
+    if not backtest_ready:
+        notes.append(
+            f"`{base_strategy}` is a strategy template. Add/choose a concrete backtest implementation before execution."
+        )
 
     return {
         "strategy_candidate_id": strategy_candidate_id,
         "source_type": "edge_candidate",
-        "base_strategy": "vol_compression_v1",
+        "base_strategy": base_strategy,
+        "backtest_ready": backtest_ready,
         "event": event,
         "condition": condition,
         "action": action,
@@ -255,7 +294,7 @@ def _render_manual_instructions(run_id: str, symbols: List[str], candidates: Lis
         "",
         "## 2) Run manual backtest command template",
         "```bash",
-        "./.venv/bin/python project/pipelines/backtest/backtest_vol_compression_v1.py \\",
+        "./.venv/bin/python project/pipelines/backtest/backtest_strategies.py \\",
         "  --run_id <manual_backtest_run_id> \\",
         f"  --symbols {symbols_csv} \\",
         "  --strategies vol_compression_v1 \\",
@@ -269,6 +308,8 @@ def _render_manual_instructions(run_id: str, symbols: List[str], candidates: Lis
         lines.append(f"- `{item['strategy_candidate_id']}`:")
         for note in notes[:3]:
             lines.append(f"  - {note}")
+        lines.append(f"  - Base strategy template: `{item.get('base_strategy', 'unknown')}`")
+        lines.append(f"  - Backtest ready now: `{bool(item.get('backtest_ready', False))}`")
     lines.append("")
     lines.append("## 4) Acceptance checklist")
     lines.append("- Verify the translated strategy matches condition/action intent from the source edge.")

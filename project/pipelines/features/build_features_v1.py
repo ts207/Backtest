@@ -58,6 +58,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build features v1")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
+    parser.add_argument("--market", choices=["perp", "spot"], default="perp")
     parser.add_argument("--force", type=int, default=0)
     # Compatibility flag from run_all; feature build already tolerates missing funding.
     parser.add_argument("--allow_missing_funding", type=int, default=0)
@@ -67,6 +68,7 @@ def main() -> int:
 
     run_id = args.run_id
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+    market = str(args.market).strip().lower()
 
     log_handlers = [logging.StreamHandler(sys.stdout)]
     if args.log_path:
@@ -82,6 +84,7 @@ def main() -> int:
     outputs: List[Dict[str, object]] = []
     params = {
         "symbols": symbols,
+        "market": market,
         "trade_day_timezone": config.get("trade_day_timezone", "UTC"),
         "force": int(args.force),
         "allow_missing_funding": int(args.allow_missing_funding),
@@ -91,12 +94,12 @@ def main() -> int:
 
     try:
         for symbol in symbols:
-            cleaned_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
-            funding_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "funding_15m"
+            cleaned_dir = DATA_ROOT / "lake" / "cleaned" / market / symbol / "bars_15m"
+            funding_dir = DATA_ROOT / "lake" / "cleaned" / market / symbol / "funding_15m"
             cleaned_files = list_parquet_files(cleaned_dir)
             funding_files = list_parquet_files(funding_dir)
             bars = read_parquet(cleaned_files)
-            funding = read_parquet(funding_files)
+            funding = read_parquet(funding_files) if market == "perp" else pd.DataFrame()
             if bars.empty:
                 raise ValueError(f"No cleaned bars for {symbol}")
 
@@ -106,10 +109,10 @@ def main() -> int:
             bars = bars.sort_values("timestamp").reset_index(drop=True)
 
             inputs.append({"path": str(cleaned_dir), **_collect_stats(bars)})
-            if not funding.empty:
+            if market == "perp" and not funding.empty:
                 inputs.append({"path": str(funding_dir), **_collect_stats(funding)})
 
-            if not funding.empty:
+            if market == "perp" and not funding.empty:
                 funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
                 funding = funding.sort_values("timestamp").reset_index(drop=True)
                 if "funding_rate_scaled" in funding.columns:
@@ -139,7 +142,7 @@ def main() -> int:
 
             features["year"] = features["timestamp"].dt.year
             features["month"] = features["timestamp"].dt.month
-            out_dir = DATA_ROOT / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
+            out_dir = DATA_ROOT / "lake" / "features" / market / symbol / "15m" / "features_v1"
 
             partitions_written: List[str] = []
             partitions_skipped: List[str] = []

@@ -107,6 +107,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build cleaned 15m bars")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
+    parser.add_argument("--market", choices=["perp", "spot"], default="perp")
     parser.add_argument("--start", required=False)
     parser.add_argument("--end", required=False)
     parser.add_argument("--force", type=int, default=0)
@@ -119,6 +120,7 @@ def main() -> int:
 
     run_id = args.run_id
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+    market = str(args.market).strip().lower()
 
     log_handlers = [logging.StreamHandler(sys.stdout)]
     if args.log_path:
@@ -132,6 +134,7 @@ def main() -> int:
 
     params = {
         "symbols": symbols,
+        "market": market,
         "trade_day_timezone": config.get("trade_day_timezone", "UTC"),
         "start": args.start,
         "end": args.end,
@@ -147,13 +150,13 @@ def main() -> int:
 
     try:
         for symbol in symbols:
-            raw_dir = DATA_ROOT / "lake" / "raw" / "binance" / "perp" / symbol / "ohlcv_15m"
-            funding_dir = DATA_ROOT / "lake" / "raw" / "binance" / "perp" / symbol / "funding"
+            raw_dir = DATA_ROOT / "lake" / "raw" / "binance" / market / symbol / "ohlcv_15m"
+            funding_dir = DATA_ROOT / "lake" / "raw" / "binance" / market / symbol / "funding"
             raw_files = list_parquet_files(raw_dir)
             funding_files = list_parquet_files(funding_dir)
 
             raw = read_parquet(raw_files)
-            funding = read_parquet(funding_files)
+            funding = read_parquet(funding_files) if market == "perp" else pd.DataFrame()
 
             if raw.empty:
                 raise ValueError(f"No raw OHLCV data for {symbol}")
@@ -187,12 +190,12 @@ def main() -> int:
 
             funding_scale_used = None
             funding_timestamp_rounded = 0
-            if funding.empty:
+            if market == "perp" and funding.empty:
                 if not args.allow_missing_funding:
                     raise ValueError(
                         f"No funding data for {symbol}. Use --allow_missing_funding=1 to proceed."
                     )
-            else:
+            elif market == "perp":
                 validate_columns(funding, ["timestamp", "funding_rate"])
                 funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True, format="mixed")
                 if funding["timestamp"].isna().any():
@@ -230,7 +233,7 @@ def main() -> int:
             inputs.append(
                 {"path": str(raw_dir), "rows": int(len(raw)), "start_ts": raw_start.isoformat(), "end_ts": raw_end.isoformat()}
             )
-            if not funding.empty:
+            if market == "perp" and not funding.empty:
                 inputs.append(
                     {
                         "path": str(funding_dir),
@@ -240,8 +243,8 @@ def main() -> int:
                     }
                 )
 
-            cleaned_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
-            funding_out_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "funding_15m"
+            cleaned_dir = DATA_ROOT / "lake" / "cleaned" / market / symbol / "bars_15m"
+            funding_out_dir = DATA_ROOT / "lake" / "cleaned" / market / symbol / "funding_15m"
 
             missing_stats: Dict[str, Dict[str, float]] = {}
             funding_stats: Dict[str, Dict[str, float]] = {}
@@ -279,7 +282,7 @@ def main() -> int:
                     "funding_rate_scaled_std": funding_rate_month_std,
                 }
 
-                if not args.allow_constant_funding:
+                if market == "perp" and not args.allow_constant_funding:
                     funding_values = funding_month["funding_rate_scaled"].dropna()
                     if len(funding_values) and is_constant_series(funding_values):
                         raise ValueError(
@@ -316,21 +319,22 @@ def main() -> int:
                     )
                     partitions_written.append(str(bars_written))
 
-                if not args.force and _partition_complete(funding_out_path, expected_rows):
-                    partitions_skipped.append(str(funding_out_path))
-                else:
-                    ensure_dir(funding_out_path.parent)
-                    funding_written, storage = write_parquet(funding_month.reset_index(drop=True), funding_out_path)
-                    outputs.append(
-                        {
-                            "path": str(funding_written),
-                            "rows": int(len(funding_month)),
-                            "start_ts": funding_month["timestamp"].min().isoformat(),
-                            "end_ts": funding_month["timestamp"].max().isoformat(),
-                            "storage": storage,
-                        }
-                    )
-                    partitions_written.append(str(funding_written))
+                if market == "perp":
+                    if not args.force and _partition_complete(funding_out_path, expected_rows):
+                        partitions_skipped.append(str(funding_out_path))
+                    else:
+                        ensure_dir(funding_out_path.parent)
+                        funding_written, storage = write_parquet(funding_month.reset_index(drop=True), funding_out_path)
+                        outputs.append(
+                            {
+                                "path": str(funding_written),
+                                "rows": int(len(funding_month)),
+                                "start_ts": funding_month["timestamp"].min().isoformat(),
+                                "end_ts": funding_month["timestamp"].max().isoformat(),
+                                "storage": storage,
+                            }
+                        )
+                        partitions_written.append(str(funding_written))
 
             stats["symbols"][symbol] = {
                 "effective_start": start_ts.isoformat(),

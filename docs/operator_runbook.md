@@ -24,6 +24,16 @@ export BACKTEST_DATA_ROOT=/abs/path/to/data
   --run_strategy_builder 1
 ```
 
+Cross-venue specifics:
+- If phase2 includes `cross_venue_desync` (or `all`), `run_all.py` auto-runs:
+  - `ingest_binance_spot_ohlcv_15m`
+  - `build_cleaned_15m --market spot`
+  - `build_features_v1 --market spot`
+- To reuse preloaded spot data and skip downloads:
+```bash
+--skip_ingest_spot_ohlcv 1
+```
+
 Expected outputs:
 - `data/runs/<run_id>/*.json|*.log`
 - `data/lake/runs/<run_id>/context/funding_persistence/...`
@@ -33,12 +43,20 @@ Expected outputs:
 - `data/reports/expectancy/<run_id>/conditional_expectancy*.json`
 - `data/reports/strategy_builder/<run_id>/*`
 
+Execution order (high-level):
+1. ingest -> clean -> features (perp, optional spot)
+2. context build
+3. phase1 family analyzers
+4. phase2 conditional hypotheses
+5. edge candidate export + expectancy checks
+6. strategy builder handoff
+
 ## 2) Manual backtest after strategy builder
 Backtests are not auto-triggered by default. Use strategy-builder outputs first, then run manual backtests.
 
 Manual command template:
 ```bash
-./.venv/bin/python project/pipelines/backtest/backtest_vol_compression_v1.py \
+./.venv/bin/python project/pipelines/backtest/backtest_strategies.py \
   --run_id <manual_backtest_run_id> \
   --symbols BTCUSDT,ETHUSDT \
   --strategies vol_compression_v1 \
@@ -55,8 +73,15 @@ Manual command template:
   --include_alpha_bundle 1
 ```
 
+Interpretation:
+- `base_strategy` is event-family template mapping.
+- `backtest_ready=true` means executable adapter exists now.
+- `backtest_ready=false` means translate candidate into concrete strategy implementation first.
+
 ## 4) AlphaBundle parallel flow (equal policy)
 Use AlphaBundle when multi-signal, cross-sectional research is required. Keep promotion gates equivalent to mainline.
+
+Avoid AlphaBundle when your question is narrow and event-mechanism specific (single-family validation is faster and cleaner in mainline phase1/phase2).
 
 Minimal path:
 ```bash

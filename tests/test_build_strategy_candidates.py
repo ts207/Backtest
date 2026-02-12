@@ -10,9 +10,15 @@ sys.path.insert(0, str(ROOT / "project"))
 from pipelines.research import build_strategy_candidates
 
 
-def _write_edge_inputs(tmp_path: Path, run_id: str) -> None:
+def _write_edge_inputs(
+    tmp_path: Path,
+    run_id: str,
+    event: str = "vol_shock_relaxation",
+    condition: str = "age_bucket_0_8",
+    action: str = "delay_30",
+) -> None:
     edge_dir = tmp_path / "reports" / "edge_candidates" / run_id
-    phase2_dir = tmp_path / "reports" / "phase2" / run_id / "vol_shock_relaxation"
+    phase2_dir = tmp_path / "reports" / "phase2" / run_id / event
     edge_dir.mkdir(parents=True, exist_ok=True)
     phase2_dir.mkdir(parents=True, exist_ok=True)
 
@@ -21,11 +27,11 @@ def _write_edge_inputs(tmp_path: Path, run_id: str) -> None:
         json.dumps(
             {
                 "run_id": run_id,
-                "event_type": "vol_shock_relaxation",
+                "event_type": event,
                 "candidates": [
                     {
-                        "condition": "age_bucket_0_8",
-                        "action": "delay_30",
+                        "condition": condition,
+                        "action": action,
                         "sample_size": 120,
                     }
                 ],
@@ -38,8 +44,8 @@ def _write_edge_inputs(tmp_path: Path, run_id: str) -> None:
         [
             {
                 "run_id": run_id,
-                "event": "vol_shock_relaxation",
-                "candidate_id": "vol_shock_relaxation_0",
+                "event": event,
+                "candidate_id": f"{event}_0",
                 "status": "PROMOTED",
                 "edge_score": 0.42,
                 "expected_return_proxy": 0.01,
@@ -78,6 +84,7 @@ def test_build_strategy_candidates_from_promoted_edges(monkeypatch, tmp_path: Pa
     payload = json.loads(out_json.read_text(encoding="utf-8"))
     assert len(payload) == 1
     assert payload[0]["base_strategy"] == "vol_compression_v1"
+    assert payload[0]["backtest_ready"] is True
     assert payload[0]["action"] == "delay_30"
     assert payload[0]["risk_controls"]["entry_delay_bars"] == 30
 
@@ -130,3 +137,38 @@ def test_build_strategy_candidates_can_include_alpha_bundle(monkeypatch, tmp_pat
     payload = json.loads(out_json.read_text(encoding="utf-8"))
     assert len(payload) == 1
     assert payload[0]["source_type"] == "alpha_bundle"
+
+
+def test_build_strategy_candidates_event_specific_template(monkeypatch, tmp_path: Path) -> None:
+    run_id = "strategy_builder_funding_template"
+    _write_edge_inputs(
+        tmp_path,
+        run_id=run_id,
+        event="funding_extreme_reversal_window",
+        condition="vol_regime_mid",
+        action="entry_gate_skip",
+    )
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(build_strategy_candidates, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_strategy_candidates.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--include_alpha_bundle",
+            "0",
+        ],
+    )
+
+    assert build_strategy_candidates.main() == 0
+    out_json = tmp_path / "reports" / "strategy_builder" / run_id / "strategy_candidates.json"
+    payload = json.loads(out_json.read_text(encoding="utf-8"))
+    assert len(payload) == 1
+    assert payload[0]["base_strategy"] == "funding_extreme_reversal_v1"
+    assert payload[0]["backtest_ready"] is True
+    assert "--strategies funding_extreme_reversal_v1" in payload[0]["manual_backtest_command"]

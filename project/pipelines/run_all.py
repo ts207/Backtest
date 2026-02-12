@@ -71,6 +71,8 @@ def main() -> int:
     parser.add_argument("--force", type=int, default=0)
     parser.add_argument("--skip_ingest_ohlcv", type=int, default=0)
     parser.add_argument("--skip_ingest_funding", type=int, default=0)
+    parser.add_argument("--skip_ingest_spot_ohlcv", type=int, default=0)
+    parser.add_argument("--enable_cross_venue_spot_pipeline", type=int, default=1)
     parser.add_argument("--allow_missing_funding", type=int, default=0)
     parser.add_argument("--allow_constant_funding", type=int, default=0)
     parser.add_argument("--allow_funding_timestamp_rounding", type=int, default=0)
@@ -126,6 +128,12 @@ def main() -> int:
     allow_constant_funding_flag = _as_flag(args.allow_constant_funding)
     allow_funding_timestamp_rounding_flag = _as_flag(args.allow_funding_timestamp_rounding)
 
+    cross_venue_requested = bool(
+        int(args.run_phase2_conditional)
+        and args.phase2_event_type in {"all", "cross_venue_desync"}
+    )
+    run_spot_pipeline = bool(int(args.enable_cross_venue_spot_pipeline) and cross_venue_requested)
+
     stages: List[Tuple[str, Path, List[str]]] = []
 
     if not args.skip_ingest_ohlcv:
@@ -153,6 +161,26 @@ def main() -> int:
             (
                 "ingest_binance_um_funding",
                 PROJECT_ROOT / "pipelines" / "ingest" / "ingest_binance_um_funding.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--start",
+                    start,
+                    "--end",
+                    end,
+                    "--force",
+                    force_flag,
+                ],
+            )
+        )
+
+    if run_spot_pipeline and not args.skip_ingest_spot_ohlcv:
+        stages.append(
+            (
+                "ingest_binance_spot_ohlcv_15m",
+                PROJECT_ROOT / "pipelines" / "ingest" / "ingest_binance_spot_ohlcv_15m.py",
                 [
                     "--run_id",
                     run_id,
@@ -286,6 +314,44 @@ def main() -> int:
             ),
         ]
     )
+
+    if run_spot_pipeline:
+        stages.extend(
+            [
+                (
+                    "build_cleaned_15m_spot",
+                    PROJECT_ROOT / "pipelines" / "clean" / "build_cleaned_15m.py",
+                    [
+                        "--run_id",
+                        run_id,
+                        "--symbols",
+                        symbols,
+                        "--market",
+                        "spot",
+                        "--start",
+                        start,
+                        "--end",
+                        end,
+                        "--force",
+                        force_flag,
+                    ],
+                ),
+                (
+                    "build_features_v1_spot",
+                    PROJECT_ROOT / "pipelines" / "features" / "build_features_v1.py",
+                    [
+                        "--run_id",
+                        run_id,
+                        "--symbols",
+                        symbols,
+                        "--market",
+                        "spot",
+                        "--force",
+                        force_flag,
+                    ],
+                ),
+            ]
+        )
 
     if int(args.run_hypothesis_generator):
         stages.append(
@@ -434,8 +500,8 @@ def main() -> int:
     if int(args.run_backtest):
         stages.append(
             (
-                "backtest_vol_compression_v1",
-                PROJECT_ROOT / "pipelines" / "backtest" / "backtest_vol_compression_v1.py",
+                "backtest_strategies",
+                PROJECT_ROOT / "pipelines" / "backtest" / "backtest_strategies.py",
                 [
                     "--run_id",
                     run_id,
@@ -461,14 +527,14 @@ def main() -> int:
         "build_features_v1",
         "build_context_features",
         "build_market_context",
-        "backtest_vol_compression_v1",
+        "backtest_strategies",
         "make_report",
     }
     for stage_name, _, base_args in stages:
         if stage_name in stages_with_config:
             for config_path in args.config:
                 base_args.extend(["--config", config_path])
-        if stage_name == "backtest_vol_compression_v1":
+        if stage_name == "backtest_strategies":
             if args.fees_bps is not None:
                 base_args.extend(["--fees_bps", str(args.fees_bps)])
             if args.slippage_bps is not None:

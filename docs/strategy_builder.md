@@ -27,8 +27,19 @@ Each candidate includes:
 - source metadata (`event`, `condition`, `action`, `status`)
 - ranking metrics (`edge_score`, `stability_proxy`, `selection_score`)
 - translated risk controls (`entry_delay_bars`, `size_scale`, `block_entries`)
+- `base_strategy` event-family template mapping
+- `backtest_ready` execution readiness flag
 - manual backtest command template
 
 ## Intended usage
 - Use strategy-builder outputs as a deterministic handoff for manual backtests.
 - Keep track-level parity: AlphaBundle and mainline candidates must pass the same gate philosophy.
+
+## Base strategy mapping behavior
+- Not all events map to the same strategy template.
+- Example mappings:
+  - `vol_shock_relaxation -> vol_compression_v1` (`backtest_ready=true`)
+  - `funding_extreme_reversal_window -> funding_extreme_reversal_v1` (`backtest_ready=true`)
+  - `cross_venue_desync -> cross_venue_desync_v1` (`backtest_ready=true`)
+
+`backtest_ready=false` can still occur for newly promoted families not yet mapped into the adapter registry.

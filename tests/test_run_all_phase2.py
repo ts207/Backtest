@@ -216,11 +216,11 @@ def test_run_all_includes_backtest_and_report_when_enabled(monkeypatch) -> None:
 
     assert run_all.main() == 0
     stage_names = [x[0] for x in captured]
-    assert "backtest_vol_compression_v1" in stage_names
+    assert "backtest_strategies" in stage_names
     assert "make_report" in stage_names
-    assert stage_names.index("backtest_vol_compression_v1") < stage_names.index("make_report")
+    assert stage_names.index("backtest_strategies") < stage_names.index("make_report")
 
-    backtest_args = next(base_args for stage, _, base_args, _ in captured if stage == "backtest_vol_compression_v1")
+    backtest_args = next(base_args for stage, _, base_args, _ in captured if stage == "backtest_strategies")
     assert "--fees_bps" in backtest_args and "3.0" in backtest_args
     assert "--slippage_bps" in backtest_args and "1.0" in backtest_args
     assert "--cost_bps" in backtest_args and "4.0" in backtest_args
@@ -253,7 +253,7 @@ def test_run_all_omits_backtest_by_default(monkeypatch) -> None:
     )
 
     assert run_all.main() == 0
-    assert "backtest_vol_compression_v1" not in captured
+    assert "backtest_strategies" not in captured
     assert "make_report" not in captured
 
 
@@ -285,3 +285,73 @@ def test_run_all_requires_strategies_when_backtest_enabled(monkeypatch) -> None:
 
     assert run_all.main() == 1
     assert captured == []
+
+
+def test_run_all_auto_adds_spot_pipeline_for_cross_venue(monkeypatch) -> None:
+    captured: list[str] = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append(stage)
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_cross_venue_spot_auto",
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_phase2_conditional",
+            "1",
+            "--phase2_event_type",
+            "cross_venue_desync",
+        ],
+    )
+
+    assert run_all.main() == 0
+    assert "ingest_binance_spot_ohlcv_15m" in captured
+    assert "build_cleaned_15m_spot" in captured
+    assert "build_features_v1_spot" in captured
+
+
+def test_run_all_can_disable_spot_ingest_for_cross_venue(monkeypatch) -> None:
+    captured: list[str] = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append(stage)
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_cross_venue_no_spot_ingest",
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_phase2_conditional",
+            "1",
+            "--phase2_event_type",
+            "cross_venue_desync",
+            "--skip_ingest_spot_ohlcv",
+            "1",
+        ],
+    )
+
+    assert run_all.main() == 0
+    assert "ingest_binance_spot_ohlcv_15m" not in captured
+    assert "build_cleaned_15m_spot" in captured
+    assert "build_features_v1_spot" in captured

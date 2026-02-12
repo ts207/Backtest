@@ -41,6 +41,45 @@ Standard discovery duration is:
   --run_strategy_builder 1
 ```
 
+Cross-venue note:
+- `cross_venue_desync` requires both perp and spot features.
+- `run_all.py` now auto-runs spot ingest/clean/features when phase2 includes `cross_venue_desync` (or `all`).
+- Disable spot archive download with `--skip_ingest_spot_ohlcv 1` if spot raw data already exists.
+
+## What discovery actually does (stage order)
+1. Ingest raw Binance data (perp OHLCV/funding, optional spot OHLCV for cross-venue).
+2. Build cleaned bars and `features_v1` for each market.
+3. Build context features (`funding_persistence`, `market_state`).
+4. Run Phase 1 analyzers (event-family structure tests).
+5. Run Phase 2 conditional hypotheses per event family (conditions/actions + gate decisions).
+6. Export normalized edge candidates.
+7. Run expectancy + robustness checks.
+8. Build strategy candidates for manual backtests.
+
+Key artifacts:
+- phase1 outputs: `data/reports/<event_type>/<run_id>/...`
+- phase2 outputs: `data/reports/phase2/<run_id>/<event_type>/...`
+- promoted edges: `data/reports/edge_candidates/<run_id>/edge_candidates_normalized.csv`
+- strategy candidates: `data/reports/strategy_builder/<run_id>/strategy_candidates.json`
+
+## Why strategy candidates no longer share one base strategy
+Strategy builder now maps event families to strategy templates (for example `funding_extreme_reversal_window -> funding_extreme_reversal_v1`).
+
+`strategy_candidates.json` includes:
+- `base_strategy`: template selected from event family.
+- `backtest_ready`: `true` when adapter exists in strategy registry.
+
+Current adapter-backed strategy ids include:
+- `vol_compression_v1`
+- `liquidity_refill_lag_v1`
+- `liquidity_absence_gate_v1`
+- `forced_flow_exhaustion_v1`
+- `funding_extreme_reversal_v1`
+- `cross_venue_desync_v1`
+- `liquidity_vacuum_v1`
+
+If `backtest_ready=false`, candidate is still valid research output, but needs adapter implementation before execution.
+
 ## Strategy-builder outputs
 - `data/reports/strategy_builder/<run_id>/strategy_candidates.json`
 - `data/reports/strategy_builder/<run_id>/selection_summary.md`
@@ -49,7 +88,7 @@ Standard discovery duration is:
 ## Manual backtest handoff
 Backtests are intentionally manual after strategy builder output:
 ```bash
-./.venv/bin/python project/pipelines/backtest/backtest_vol_compression_v1.py \
+./.venv/bin/python project/pipelines/backtest/backtest_strategies.py \
   --run_id <manual_backtest_run_id> \
   --symbols BTCUSDT,ETHUSDT \
   --strategies vol_compression_v1 \
@@ -67,4 +106,8 @@ Do not default to AlphaBundle when:
 - labels/panel alignment are incomplete,
 - quick iteration is needed on a single mainline event strategy.
 
-See `docs/operator_runbook.md`, `docs/strategy_builder.md`, and `docs/combined_model_1_3_architecture.md`.
+See `docs/operator_runbook.md`, `docs/strategy_builder.md`, `docs/discovery_pipeline.md`, and `docs/combined_model_1_3_architecture.md`.
+
+## Liquidity vacuum gates (strict vs practical)
+`analyze_liquidity_vacuum.py` now supports `--profile {strict,balanced,lenient}` (default: `balanced`) plus explicit threshold overrides.  
+Use `strict` for conservative confirmation and `balanced/lenient` when event counts are too sparse.
