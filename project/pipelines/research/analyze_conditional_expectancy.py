@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import sys
 from pathlib import Path
@@ -108,6 +109,60 @@ def _distribution_stats(returns: pd.Series) -> Dict[str, float]:
         "t_stat": t_stat,
         "signal_to_noise": signal_to_noise,
     }
+
+
+def _normal_cdf(x: float) -> float:
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _two_sided_p_from_t(t_stat: float) -> float:
+    # Normal approximation keeps this dependency-free for CI environments.
+    if not np.isfinite(t_stat):
+        return 1.0
+    z = abs(float(t_stat))
+    return float(max(0.0, min(1.0, 2.0 * (1.0 - _normal_cdf(z)))))
+
+
+def _bh_adjust(p_values: pd.Series) -> pd.Series:
+    """
+    Benjamini-Hochberg FDR adjustment.
+    Returns adjusted p-values aligned to the input index.
+    """
+    if p_values.empty:
+        return p_values.astype(float)
+
+    p = pd.to_numeric(p_values, errors="coerce").fillna(1.0).clip(lower=0.0, upper=1.0)
+    order = np.argsort(p.values)
+    sorted_p = p.values[order]
+    m = float(len(sorted_p))
+    adjusted = np.empty(len(sorted_p), dtype=float)
+
+    running_min = 1.0
+    for i in range(len(sorted_p) - 1, -1, -1):
+        rank = float(i + 1)
+        candidate = float(sorted_p[i] * m / rank)
+        running_min = min(running_min, candidate)
+        adjusted[i] = running_min
+
+    adjusted = np.clip(adjusted, 0.0, 1.0)
+    out = pd.Series(index=p.index, dtype=float)
+    out.iloc[order] = adjusted
+    return out
+
+
+def _select_expectancy_candidates(
+    combined_df: pd.DataFrame,
+    min_samples: int,
+    tstat_threshold: float,
+) -> pd.DataFrame:
+    if combined_df.empty:
+        return combined_df.copy()
+    return combined_df[
+        (combined_df["samples"] >= int(min_samples))
+        & (combined_df["mean_return"] > 0.0)
+        & (combined_df["t_stat"] >= float(tstat_threshold))
+        & (combined_df["significant_adj_bh"])
+    ].copy()
 
 
 def _build_markdown_table(rows: List[Dict[str, object]], columns: List[str]) -> List[str]:
@@ -227,6 +282,7 @@ def main() -> int:
     parser.add_argument("--funding_pct_window", type=int, default=2880)
     parser.add_argument("--min_samples", type=int, default=100)
     parser.add_argument("--tstat_threshold", type=float, default=2.0)
+    parser.add_argument("--fdr_alpha", type=float, default=0.05)
     parser.add_argument("--out_dir", default=None)
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
@@ -280,11 +336,20 @@ def main() -> int:
     combined_df = results_df[results_df["scope"] == "combined"].copy()
     combined_df = combined_df.sort_values(["condition", "horizon_bars"], ignore_index=True)
 
-    expectancy_candidates = combined_df[
-        (combined_df["samples"] >= args.min_samples)
-        & (combined_df["mean_return"] > 0.0)
-        & (combined_df["t_stat"] >= args.tstat_threshold)
-    ]
+    if not combined_df.empty:
+        combined_df["p_value"] = combined_df["t_stat"].map(_two_sided_p_from_t).astype(float)
+        combined_df["p_value_adj_bh"] = _bh_adjust(combined_df["p_value"]).astype(float)
+        combined_df["significant_adj_bh"] = combined_df["p_value_adj_bh"] <= float(args.fdr_alpha)
+    else:
+        combined_df["p_value"] = pd.Series(dtype=float)
+        combined_df["p_value_adj_bh"] = pd.Series(dtype=float)
+        combined_df["significant_adj_bh"] = pd.Series(dtype=bool)
+
+    expectancy_candidates = _select_expectancy_candidates(
+        combined_df=combined_df,
+        min_samples=args.min_samples,
+        tstat_threshold=args.tstat_threshold,
+    )
 
     expectancy_exists = not expectancy_candidates.empty
     if expectancy_exists:
@@ -302,8 +367,11 @@ def main() -> int:
             "funding_pct_window": args.funding_pct_window,
             "min_samples": args.min_samples,
             "tstat_threshold": args.tstat_threshold,
+            "fdr_alpha": args.fdr_alpha,
+            "multiplicity_method": "benjamini_hochberg",
         },
         "feature_columns": chosen_columns,
+        "test_count": int(len(combined_df)),
         "expectancy_exists": expectancy_exists,
         "verdict": verdict,
         "expectancy_evidence": expectancy_candidates.to_dict(orient="records"),
@@ -320,6 +388,9 @@ def main() -> int:
         "mean_return",
         "win_rate",
         "t_stat",
+        "p_value",
+        "p_value_adj_bh",
+        "significant_adj_bh",
         "signal_to_noise",
     ]
 
@@ -331,7 +402,13 @@ def main() -> int:
         "",
         "## Verdict",
         f"- Expectancy exists: `{expectancy_exists}`",
-        f"- Rule: mean return > 0, t-stat >= {args.tstat_threshold}, samples >= {args.min_samples}",
+        (
+            "- Rule: mean return > 0, "
+            f"t-stat >= {args.tstat_threshold}, "
+            f"samples >= {args.min_samples}, "
+            f"BH-adjusted p <= {args.fdr_alpha}"
+        ),
+        f"- Multiplicity control: `Benjamini-Hochberg` across `{len(combined_df)}` combined tests",
         f"- Decision: {verdict}",
         "",
         "## Combined Results",
