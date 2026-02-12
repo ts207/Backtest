@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Dict, List
@@ -11,7 +10,6 @@ import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.config import load_configs
@@ -59,8 +57,6 @@ def main() -> int:
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--force", type=int, default=0)
-    # Compatibility flag from run_all; feature build already tolerates missing funding.
-    parser.add_argument("--allow_missing_funding", type=int, default=0)
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
@@ -84,15 +80,14 @@ def main() -> int:
         "symbols": symbols,
         "trade_day_timezone": config.get("trade_day_timezone", "UTC"),
         "force": int(args.force),
-        "allow_missing_funding": int(args.allow_missing_funding),
     }
     manifest = start_manifest("build_features_v1", run_id, params, inputs, outputs)
     stats: Dict[str, object] = {"symbols": {}}
 
     try:
         for symbol in symbols:
-            cleaned_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
-            funding_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "funding_15m"
+            cleaned_dir = PROJECT_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
+            funding_dir = PROJECT_ROOT / "lake" / "cleaned" / "perp" / symbol / "funding_15m"
             cleaned_files = list_parquet_files(cleaned_dir)
             funding_files = list_parquet_files(funding_dir)
             bars = read_parquet(cleaned_files)
@@ -112,23 +107,11 @@ def main() -> int:
             if not funding.empty:
                 funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
                 funding = funding.sort_values("timestamp").reset_index(drop=True)
-                if "funding_rate_scaled" in funding.columns:
-                    rate_col = "funding_rate_scaled"
-                elif "funding_rate" in funding.columns:
-                    rate_col = "funding_rate"
-                else:
-                    raise ValueError(
-                        f"Funding schema for {symbol} missing rate column; expected funding_rate_scaled or funding_rate."
-                    )
-                funding_rates = funding[["timestamp", rate_col]].rename(columns={rate_col: "funding_rate_scaled"})
-                bars = bars.merge(funding_rates, on="timestamp", how="left")
+                bars = bars.merge(funding[["timestamp", "funding_rate"]], on="timestamp", how="left")
             else:
-                bars["funding_rate_scaled"] = 0.0
+                bars["funding_rate"] = 0.0
 
-            # Backward-compatible alias for any code still reading funding_rate.
-            bars["funding_rate"] = bars["funding_rate_scaled"]
-
-            features = bars[["timestamp", "open", "high", "low", "close", "funding_rate_scaled", "funding_rate"]].copy()
+            features = bars[["timestamp", "open", "high", "low", "close", "funding_rate"]].copy()
             features["logret_1"] = np.log(features["close"]).diff()
             features["rv_96"] = features["logret_1"].rolling(window=96, min_periods=96).std()
             features["rv_pct_17280"] = _rolling_percentile(features["rv_96"], window=17280)
@@ -139,7 +122,7 @@ def main() -> int:
 
             features["year"] = features["timestamp"].dt.year
             features["month"] = features["timestamp"].dt.month
-            out_dir = DATA_ROOT / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
+            out_dir = PROJECT_ROOT / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
 
             partitions_written: List[str] = []
             partitions_skipped: List[str] = []
