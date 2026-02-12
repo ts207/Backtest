@@ -37,6 +37,24 @@ class CompressionEvent:
     bull_bear: str
 
 
+EVENT_ROW_COLUMNS = [
+    "symbol",
+    "year",
+    "vol_q",
+    "bull_bear",
+    "funding_bucket",
+    "horizon",
+    "end_reason",
+    "trend_state",
+    "breakout_dir",
+    "breakout_aligns_htf",
+    "time_to_expansion_bars",
+    "mfe_post_end",
+    "event_return",
+    "event_directional_return",
+]
+
+
 def _parse_horizons(value: str) -> List[int]:
     parts = [x.strip() for x in value.split(",") if x.strip()]
     horizons = sorted({int(x) for x in parts if int(x) > 0})
@@ -345,6 +363,11 @@ def _bar_condition_stats(df: pd.DataFrame, condition: str, horizon: int) -> Dict
 
 
 def _event_condition_frame(events_df: pd.DataFrame, condition: str, horizon: int) -> Tuple[pd.DataFrame, str]:
+    ret_col = "event_directional_return" if condition == "compression_plus_htf_trend" else "event_return"
+
+    if events_df.empty or "horizon" not in events_df.columns:
+        return pd.DataFrame(columns=EVENT_ROW_COLUMNS), ret_col
+
     frame = events_df[events_df["horizon"] == horizon].copy()
     if condition == "compression":
         pass
@@ -355,7 +378,6 @@ def _event_condition_frame(events_df: pd.DataFrame, condition: str, horizon: int
     else:
         raise ValueError(f"Unknown condition: {condition}")
 
-    ret_col = "event_directional_return" if condition == "compression_plus_htf_trend" else "event_return"
     return frame, ret_col
 
 
@@ -412,7 +434,7 @@ def main() -> int:
         )
 
     master_bars = pd.concat(all_bar_df, ignore_index=True)
-    events_df = pd.DataFrame(all_event_rows)
+    events_df = pd.DataFrame(all_event_rows, columns=EVENT_ROW_COLUMNS)
 
     conditions = ["compression", "compression_plus_htf_trend", "compression_plus_funding_low"]
     trap_rows = []
