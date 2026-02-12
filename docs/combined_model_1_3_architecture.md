@@ -1,62 +1,44 @@
 # Combined Model 1 + Model 3 Architecture (v1)
 
-This repository includes an additive AlphaBundle track for an institutional, reproducible crypto systematic trading research stack that combines:
+AlphaBundle is a parallel research stack combining deterministic infrastructure (Model 3) with multi-signal alpha construction (Model 1).
 
-- **Model 3**: deterministic data model, service boundaries, auditability, event-driven backtesting, accounting completeness, validation & robustness battery.
-- **Model 1**: deeper alpha research layer: multi-horizon momentum, stateful mean reversion, funding/basis/OI carry, on-chain flow, regime gating, orthogonalization, ridge combination.
+## Position in this repository
+- Mainline and AlphaBundle are treated as **equal research paths**.
+- Both must satisfy the same discovery and robustness gates before promotion.
+- AlphaBundle is not an automatic replacement for mainline event strategies.
 
-## What changed in this repo
+## Included AlphaBundle modules
+- `project/pipelines/alpha_bundle/build_universe_snapshot.py`
+- `project/pipelines/alpha_bundle/build_cross_section_features.py`
+- `project/pipelines/alpha_bundle/build_alpha_signals_v2.py`
+- `project/pipelines/alpha_bundle/build_xs_momentum.py`
+- `project/pipelines/alpha_bundle/build_onchain_flow_signal.py`
+- `project/pipelines/alpha_bundle/build_regime_filter.py`
+- `project/pipelines/alpha_bundle/merge_signals.py`
+- `project/pipelines/alpha_bundle/fit_orth_and_ridge.py`
+- `project/pipelines/alpha_bundle/apply_alpha_bundle.py`
 
-### New specs
-- `project/specs/combined_model_1_3_spec_v1.yaml` — authoritative combined spec (schemas + alpha bundle contract).
+## Promotion policy parity
+Use identical gating principles for both tracks:
+- adequate effective sample size,
+- stable sign/effect across regimes and time splits,
+- positive net benefit after friction proxies,
+- robustness survivors in expectancy checks.
 
-### New pipeline modules (scaffolding)
-- `project/pipelines/alpha_bundle/`
-  - `build_universe_snapshot.py`
-  - `build_cross_section_features.py`
-  - `build_alpha_signals_v2.py`
-  - `build_xs_momentum.py`
-  - `build_onchain_flow_signal.py`
-  - `build_regime_filter.py`
-  - `merge_signals.py`
-  - `fit_orth_and_ridge.py`
-  - `apply_alpha_bundle.py`
+## When AlphaBundle is recommended
+- multi-signal composition is required (time-series + cross-sectional + context),
+- robust panel labels exist,
+- you need universe-level ranking rather than single-event gating.
 
-These modules are written to be **deterministic** (stable sorting, explicit time blocks) and **point-in-time safe** (event-time only).
+## When AlphaBundle is not recommended
+- narrow single-event hypothesis where mainline phase1/phase2 is sufficient,
+- incomplete feature panel or weak label alignment,
+- low-latency iteration needs on one strategy family only.
 
-## Relationship to mainline runtime
+## Workflow alignment with mainline
+1. Run canonical discovery over 2020-2025.
+2. Build/validate promoted edge candidates (mainline).
+3. Build/validate AlphaBundle scores in parallel when applicable.
+4. Convert promoted candidates into strategy builder artifacts.
+5. Perform manual backtests from generated strategy candidates.
 
-The AlphaBundle track is additive. Existing mainline flows remain active:
-- `project/pipelines/run_all.py` discovery chain
-- optional mainline backtest/report (`vol_compression_v1`)
-
-AlphaBundle outputs are generated independently under:
-- `data/feature_store/...`
-- `data/model_registry/...`
-
-## Data expectations
-
-The repo already supports Binance UM ingestion (funding, open interest, OHLCV). The alpha bundle assumes:
-- `timestamp` is UTC and used as `ts_event` (the pipelines normalize naming).
-- funding is 8h cadence; open interest is provided at a regular cadence (or forward-filled with PIT rules).
-
-## Recommended workflow
-
-1. Ingest raw data (existing pipelines).
-2. Build cleaned bars (existing).
-3. Build universe snapshots (new).
-4. Build raw per-symbol alpha signals (`build_alpha_signals_v2.py`).
-5. Build cross-sectional momentum (`build_xs_momentum.py`) and optional on-chain flow (`build_onchain_flow_signal.py`).
-6. Build volatility regime gate (`build_regime_filter.py`, optional but recommended).
-7. Merge components into one PIT-safe table (`merge_signals.py`).
-8. Fit OrthSpec + Ridge combination offline (`fit_orth_and_ridge.py`).
-9. Apply AlphaBundle to produce `alpha_bundle_scores.parquet` (`apply_alpha_bundle.py`, optional regime gating).
-10. Use existing research scripts or extend to portfolio/risk/execution backtests.
-
-## Open items
-
-This patch focuses on repo structure, contracts, and core scaffolding. Production-grade completion typically adds:
-- stream watermarks and late-event policy for live/backfill parity
-- calibration options for score->mu (ridge / isotonic / binning)
-- liquidation/margin stress module for perps
-- capacity estimation outputs

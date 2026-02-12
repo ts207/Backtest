@@ -96,6 +96,10 @@ def main() -> int:
     parser.add_argument("--phase2_require_phase1_pass", type=int, default=1)
 
     parser.add_argument("--run_edge_candidate_universe", type=int, default=0)
+    parser.add_argument("--run_strategy_builder", type=int, default=1)
+    parser.add_argument("--strategy_builder_top_k_per_event", type=int, default=2)
+    parser.add_argument("--strategy_builder_max_candidates", type=int, default=20)
+    parser.add_argument("--strategy_builder_include_alpha_bundle", type=int, default=1)
     parser.add_argument("--run_expectancy_analysis", type=int, default=0)
     parser.add_argument("--run_expectancy_robustness", type=int, default=0)
     parser.add_argument("--run_recommendations_checklist", type=int, default=1)
@@ -262,6 +266,24 @@ def main() -> int:
                     force_flag,
                 ],
             ),
+            (
+                "build_market_context",
+                PROJECT_ROOT / "pipelines" / "features" / "build_market_context.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--timeframe",
+                    "15m",
+                    "--start",
+                    start,
+                    "--end",
+                    end,
+                    "--force",
+                    force_flag,
+                ],
+            ),
         ]
     )
 
@@ -389,6 +411,26 @@ def main() -> int:
             )
         )
 
+    if int(args.run_strategy_builder):
+        stages.append(
+            (
+                "build_strategy_candidates",
+                PROJECT_ROOT / "pipelines" / "research" / "build_strategy_candidates.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--top_k_per_event",
+                    str(int(args.strategy_builder_top_k_per_event)),
+                    "--max_candidates",
+                    str(int(args.strategy_builder_max_candidates)),
+                    "--include_alpha_bundle",
+                    str(int(args.strategy_builder_include_alpha_bundle)),
+                ],
+            )
+        )
+
     if int(args.run_backtest):
         stages.append(
             (
@@ -418,6 +460,7 @@ def main() -> int:
         "build_cleaned_15m",
         "build_features_v1",
         "build_context_features",
+        "build_market_context",
         "backtest_vol_compression_v1",
         "make_report",
     }
