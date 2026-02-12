@@ -209,6 +209,8 @@ def main() -> int:
         metrics_win_rate = float(metrics.get("win_rate", 0.0) or 0.0)
         ending_equity = float(metrics.get("ending_equity", 0.0) or 0.0)
         metrics_sharpe = float(metrics.get("sharpe_annualized", 0.0) or 0.0)
+        cost_decomposition = metrics.get("cost_decomposition", {}) if isinstance(metrics, dict) else {}
+        reproducibility_meta = metrics.get("reproducibility", {}) if isinstance(metrics, dict) else {}
 
         if trades.empty and not fallback_per_symbol.empty:
             per_symbol_trades = fallback_per_symbol
@@ -272,6 +274,35 @@ def main() -> int:
             lines.append("Fee sensitivity data unavailable.")
         else:
             lines.append(_table_text(fee_df))
+
+        lines.extend(["", "## Cost Decomposition", ""])
+        if not cost_decomposition:
+            lines.append("Cost decomposition unavailable.")
+        else:
+            cost_rows = [
+                {
+                    "gross_alpha": float(cost_decomposition.get("gross_alpha", 0.0) or 0.0),
+                    "fees": float(cost_decomposition.get("fees", 0.0) or 0.0),
+                    "slippage": float(cost_decomposition.get("slippage", 0.0) or 0.0),
+                    "impact": float(cost_decomposition.get("impact", 0.0) or 0.0),
+                    "net_alpha": float(cost_decomposition.get("net_alpha", 0.0) or 0.0),
+                    "turnover_units": float(cost_decomposition.get("turnover_units", 0.0) or 0.0),
+                }
+            ]
+            lines.append(_table_text(pd.DataFrame(cost_rows)))
+
+        lines.extend(["", "## Reproducibility Metadata", ""])
+        if not reproducibility_meta:
+            lines.append("Reproducibility metadata unavailable.")
+        else:
+            lines.append(f"- code_revision: `{reproducibility_meta.get('code_revision', 'unknown')}`")
+            lines.append(f"- config_digest: `{reproducibility_meta.get('config_digest', '')}`")
+            snapshot_ids = reproducibility_meta.get("data_snapshot_ids", {})
+            if isinstance(snapshot_ids, dict) and snapshot_ids:
+                for key, value in sorted(snapshot_ids.items()):
+                    lines.append(f"- data_snapshot_ids.{key}: `{value}`")
+            else:
+                lines.append("- data_snapshot_ids: none")
 
         lines.extend(["", "## Data Quality", ""])
         if not cleaned_stats:
@@ -383,6 +414,8 @@ def main() -> int:
             "max_drawdown": max_drawdown,
             "per_symbol": per_symbol_trades.reset_index().to_dict(orient="records") if not per_symbol_trades.empty else [],
             "fee_sensitivity": fee_table,
+            "cost_decomposition": cost_decomposition,
+            "reproducibility": reproducibility_meta,
             "data_quality": cleaned_stats,
             "feature_quality": features_stats,
             "engine_diagnostics": engine_diagnostics,

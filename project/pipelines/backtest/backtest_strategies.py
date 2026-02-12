@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, List
@@ -221,6 +223,115 @@ def _extract_trades(frame: pd.DataFrame, max_hold_bars: int = 48) -> pd.DataFram
     return pd.DataFrame(trades, columns=_empty_trades_frame().columns)
 
 
+def _sha256_text(payload: str) -> str:
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _git_revision(project_root: Path) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _build_reproducibility_metadata(
+    run_id: str,
+    config: Dict[str, object],
+    params: Dict[str, object],
+    data_root: Path = DATA_ROOT,
+    project_root: Path = PROJECT_ROOT,
+) -> Dict[str, object]:
+    stage_files = [
+        "build_cleaned_15m.json",
+        "build_features_v1.json",
+        "build_context_features.json",
+        "build_market_context.json",
+    ]
+    snapshots: Dict[str, str] = {}
+    for stage_file in stage_files:
+        path = data_root / "runs" / run_id / stage_file
+        if path.exists():
+            snapshots[stage_file.removesuffix(".json")] = _file_sha256(path)
+
+    config_payload = json.dumps(config, sort_keys=True, default=str)
+    params_payload = json.dumps(params, sort_keys=True, default=str)
+    config_digest = _sha256_text(f"{config_payload}\n{params_payload}")
+    return {
+        "config_digest": config_digest,
+        "code_revision": _git_revision(project_root),
+        "data_snapshot_ids": snapshots,
+    }
+
+
+def _cost_components_from_frame(
+    frame: pd.DataFrame,
+    fee_bps: float,
+    slippage_bps: float,
+    impact_bps: float = 0.0,
+) -> Dict[str, float]:
+    if frame.empty:
+        return {
+            "gross_alpha": 0.0,
+            "fees": 0.0,
+            "slippage": 0.0,
+            "impact": 0.0,
+            "net_alpha": 0.0,
+            "turnover_units": 0.0,
+        }
+    pos = pd.to_numeric(frame["pos"], errors="coerce").fillna(0.0)
+    ret = pd.to_numeric(frame["ret"], errors="coerce").fillna(0.0)
+    prior_pos = pos.shift(1).fillna(0.0)
+    turnover = (pos - prior_pos).abs()
+    gross = float((prior_pos * ret).sum())
+    fee_cost = float(turnover.sum() * (float(fee_bps) / 10_000.0))
+    slippage_cost = float(turnover.sum() * (float(slippage_bps) / 10_000.0))
+    impact_cost = float(turnover.sum() * (float(impact_bps) / 10_000.0))
+    net = gross - fee_cost - slippage_cost - impact_cost
+    return {
+        "gross_alpha": gross,
+        "fees": fee_cost,
+        "slippage": slippage_cost,
+        "impact": impact_cost,
+        "net_alpha": net,
+        "turnover_units": float(turnover.sum()),
+    }
+
+
+def _aggregate_cost_components(
+    strategy_frames: Dict[str, pd.DataFrame],
+    fee_bps: float,
+    slippage_bps: float,
+    impact_bps: float = 0.0,
+) -> Dict[str, float]:
+    totals = {
+        "gross_alpha": 0.0,
+        "fees": 0.0,
+        "slippage": 0.0,
+        "impact": 0.0,
+        "net_alpha": 0.0,
+        "turnover_units": 0.0,
+    }
+    for frame in strategy_frames.values():
+        comp = _cost_components_from_frame(frame, fee_bps=fee_bps, slippage_bps=slippage_bps, impact_bps=impact_bps)
+        for key in totals:
+            totals[key] += float(comp.get(key, 0.0))
+    return totals
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Backtest registered strategies")
     parser.add_argument("--run_id", required=True)
@@ -382,6 +493,19 @@ def main() -> int:
             "max_drawdown": max_drawdown,
             "ending_equity": ending_equity,
             "sharpe_annualized": sharpe_annualized,
+            "cost_decomposition": _aggregate_cost_components(
+                engine_results["strategy_frames"],
+                fee_bps=fee_bps,
+                slippage_bps=slippage_bps,
+                impact_bps=0.0,
+            ),
+            "reproducibility": _build_reproducibility_metadata(
+                run_id=run_id,
+                config=config,
+                params=params,
+                data_root=DATA_ROOT,
+                project_root=PROJECT_ROOT,
+            ),
         }
         metrics_path.write_text(json.dumps(metrics_payload, indent=2, sort_keys=True), encoding="utf-8")
         outputs.append({"path": str(metrics_path), "rows": 1, "start_ts": None, "end_ts": None})
