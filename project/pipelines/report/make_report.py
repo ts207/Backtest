@@ -193,6 +193,10 @@ def main() -> int:
         cleaned_stats = _read_json(cleaned_manifest_path).get("stats", {}) if cleaned_manifest_path.exists() else {}
         features_manifest_path = DATA_ROOT / "runs" / run_id / "build_features_v1.json"
         features_stats = _read_json(features_manifest_path).get("stats", {}) if features_manifest_path.exists() else {}
+        universe_manifest_path = DATA_ROOT / "runs" / run_id / "build_universe_snapshots.json"
+        universe_stats = _read_json(universe_manifest_path).get("stats", {}) if universe_manifest_path.exists() else {}
+        universe_report_path = DATA_ROOT / "reports" / "universe" / run_id / "universe_membership.json"
+        universe_report = _read_json(universe_report_path) if universe_report_path.exists() else {}
         engine_metrics_path = DATA_ROOT / "runs" / run_id / "engine" / "metrics.json"
         engine_metrics = _read_json(engine_metrics_path) if engine_metrics_path.exists() else {}
         engine_diagnostics = engine_metrics.get("diagnostics", {})
@@ -379,6 +383,18 @@ def main() -> int:
                     f"({diag.get('missing_feature_pct', 0.0):.2%})"
                 )
 
+        lines.extend(["", "## Universe Membership", ""])
+        if not universe_report:
+            lines.append("No universe snapshot report available.")
+        else:
+            lines.append(f"- Symbols with history: {int(universe_report.get('symbols_with_history', 0))}")
+            monthly = universe_report.get("monthly_membership", {}) if isinstance(universe_report, dict) else {}
+            if monthly:
+                month_rows = []
+                for month, members in sorted(monthly.items()):
+                    month_rows.append({"month": month, "members": ",".join(members), "count": len(members)})
+                lines.append(_table_text(pd.DataFrame(month_rows)))
+
         lines.extend(["", "## Overlay Bindings", ""])
         overlay_bindings = engine_metrics.get("overlay_bindings", {}) if isinstance(engine_metrics, dict) else {}
         if not overlay_bindings:
@@ -418,6 +434,8 @@ def main() -> int:
             "reproducibility": reproducibility_meta,
             "data_quality": cleaned_stats,
             "feature_quality": features_stats,
+            "universe_quality": universe_stats,
+            "universe_membership": universe_report.get("monthly_membership", {}) if isinstance(universe_report, dict) else {},
             "engine_diagnostics": engine_diagnostics,
             "overlay_bindings": engine_metrics.get("overlay_bindings", {}) if isinstance(engine_metrics, dict) else {},
             "context_segmentation": {

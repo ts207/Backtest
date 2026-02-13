@@ -49,3 +49,10 @@ python3 -m venv .venv
 ## Security & Configuration Tips
 - Set `BACKTEST_DATA_ROOT` to a controlled local path; avoid committing runtime artifacts.
 - Treat API/network ingestion as non-deterministic input; persist manifests/logs for reproducibility.
+
+## Plan Milestone Map (Engineering Backlog)
+- **Milestone A (R2 + R3):** Implement walk-forward split labels, OOS-only promotion gating, and multiplicity-adjusted significance in phase2 outputs.
+- **Milestone B (R4):** Enforce source/schema provenance completeness across clean/features manifests.
+- **Milestone C (R6 + R11):** Add funding/borrow PnL decomposition and historical universe snapshots for survivorship-bias-safe backtests.
+- **Milestone D (R5 + R8):** Integrate OI/liquidation/revision-lag features and add stability/capacity robustness diagnostics with checklist gates.
+- **Milestone E (R10):** Add MEV-aware execution overlay and microstructure strategy template routing/tests.

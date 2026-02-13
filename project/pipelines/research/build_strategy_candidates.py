@@ -145,6 +145,9 @@ def _risk_controls_from_action(action: str) -> Dict[str, object]:
 
 def _route_event_family(event: str) -> Optional[Dict[str, str]]:
     key = str(event).strip().lower()
+    if key in EVENT_BASE_STRATEGY_MAP:
+        return EVENT_BASE_STRATEGY_MAP[key]
+    return "unmapped_event_template_v1"
     return EVENT_FAMILY_STRATEGY_ROUTING.get(key)
 
 

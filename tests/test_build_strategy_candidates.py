@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "project"))
@@ -173,6 +174,55 @@ def test_build_strategy_candidates_event_specific_template(monkeypatch, tmp_path
     out_json = tmp_path / "reports" / "strategy_builder" / run_id / "strategy_candidates.json"
     payload = json.loads(out_json.read_text(encoding="utf-8"))
     assert len(payload) == 1
+    assert payload[0]["base_strategy"] == "funding_extreme_reversal_v1"
+    assert payload[0]["backtest_ready"] is True
+    assert "--strategies funding_extreme_reversal_v1" in payload[0]["manual_backtest_command"]
+
+
+@pytest.mark.parametrize(
+    "event,expected_strategy",
+    [
+        ("funding_extreme_reversal_window", "funding_extreme_reversal_v1"),
+        ("directional_exhaustion_after_forced_flow", "forced_flow_exhaustion_v1"),
+        ("liquidity_refill_lag_window", "liquidity_refill_lag_v1"),
+        ("cross_venue_desync", "cross_venue_desync_v1"),
+    ],
+)
+def test_build_strategy_candidates_maps_event_families(
+    monkeypatch,
+    tmp_path: Path,
+    event: str,
+    expected_strategy: str,
+) -> None:
+    run_id = f"strategy_builder_map_{event}"
+    _write_edge_inputs(tmp_path, run_id=run_id, event=event)
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(build_strategy_candidates, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_strategy_candidates.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--include_alpha_bundle",
+            "0",
+        ],
+    )
+
+    assert build_strategy_candidates.main() == 0
+    out_json = tmp_path / "reports" / "strategy_builder" / run_id / "strategy_candidates.json"
+    payload = json.loads(out_json.read_text(encoding="utf-8"))
+    assert payload[0]["base_strategy"] == expected_strategy
+
+
+def test_build_strategy_candidates_unknown_event_does_not_fallback_to_breakout(monkeypatch, tmp_path: Path) -> None:
+    run_id = "strategy_builder_unknown"
+    _write_edge_inputs(tmp_path, run_id=run_id, event="unknown_edge_family")
+
     assert payload[0]["execution_family"] == "carry_imbalance"
     assert payload[0]["base_strategy"] == "carry_imbalance_v1"
     assert payload[0]["backtest_ready"] is False
@@ -208,6 +258,9 @@ def test_build_strategy_candidates_unknown_event_fails_closed(monkeypatch, tmp_p
     assert build_strategy_candidates.main() == 0
     out_json = tmp_path / "reports" / "strategy_builder" / run_id / "strategy_candidates.json"
     payload = json.loads(out_json.read_text(encoding="utf-8"))
+    assert payload[0]["base_strategy"] == "unmapped_event_template_v1"
+    assert payload[0]["base_strategy"] != "vol_compression_v1"
+    assert payload[0]["backtest_ready"] is False
     assert len(payload) == 1
     assert payload[0]["execution_family"] == "unmapped"
     assert payload[0]["base_strategy"] == "unmapped"
