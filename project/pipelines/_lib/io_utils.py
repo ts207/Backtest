@@ -92,7 +92,11 @@ def read_parquet(files: Iterable[Path]) -> pd.DataFrame:
         else:
             if not HAS_PYARROW:
                 raise ImportError("pyarrow is required to read parquet files")
-            frames.append(pq.read_table(file_path).to_pandas())
+            # Use ParquetFile for single-file reads so hive-style partition
+            # directories (e.g. year=2024/month=01) do not trigger dataset
+            # partition schema inference conflicts when the file also contains
+            # partition columns.
+            frames.append(pq.ParquetFile(file_path).read().to_pandas())
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
