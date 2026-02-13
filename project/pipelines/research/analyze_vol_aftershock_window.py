@@ -153,16 +153,18 @@ def _matched_controls(
         return pd.DataFrame()
 
     pool["rv_rank"] = pool["rv_base"].rank(pct=True)
+    pool_ranks = pool["rv_rank"].to_numpy(dtype=float)
     rng = np.random.default_rng(seed)
     rows: List[Dict[str, object]] = []
 
-    for _, ev in events_df_sym.iterrows():
-        x = int(ev["window_x"])
-        y = int(ev["window_y"])
-        target_rank = float(ev.get("rv_rank", np.nan))
+    for ev in events_df_sym.itertuples(index=False):
+        x = int(ev.window_x)
+        y = int(ev.window_y)
+        target_rank = float(getattr(ev, "rv_rank", np.nan))
         if np.isfinite(target_rank):
-            pool_scored = pool.assign(match_dist=(pool["rv_rank"] - target_rank).abs())
-            pick_pool = pool_scored.nsmallest(200, "match_dist")
+            top_k = min(200, len(pool_ranks))
+            nearest_idx = np.argpartition(np.abs(pool_ranks - target_rank), top_k - 1)[:top_k]
+            pick_pool = pool.iloc[nearest_idx]
         else:
             pick_pool = pool
         if pick_pool.empty:
@@ -175,8 +177,8 @@ def _matched_controls(
             continue
         rows.append(
             {
-                "event_id": ev["parent_event_id"],
-                "symbol": ev["symbol"],
+                "event_id": ev.parent_event_id,
+                "symbol": ev.symbol,
                 "window_x": x,
                 "window_y": y,
                 "start_idx": start,
@@ -195,20 +197,30 @@ def _placebo_windows(core: pd.DataFrame, parent_events: pd.DataFrame, events_df_
         return pd.DataFrame()
     pool["rv_rank"] = pool["rv_base"].rank(pct=True)
 
+    pool_ranks = pool["rv_rank"].to_numpy(dtype=float)
+    pool_sessions = np.where(
+        pool["timestamp"].dt.hour <= 7,
+        "Asia",
+        np.where(pool["timestamp"].dt.hour <= 15, "EU", "US"),
+    )
+
     rng = np.random.default_rng(seed)
     rows: List[Dict[str, object]] = []
-    for _, ev in events_df_sym.iterrows():
-        x = int(ev["window_x"])
-        y = int(ev["window_y"])
-        target_rank = float(ev.get("rv_rank", np.nan))
-        target_session = str(ev.get("session", ""))
+    for ev in events_df_sym.itertuples(index=False):
+        x = int(ev.window_x)
+        y = int(ev.window_y)
+        target_rank = float(getattr(ev, "rv_rank", np.nan))
+        target_session = str(getattr(ev, "session", ""))
         if np.isfinite(target_rank):
-            pool_scored = pool.assign(match_dist=(pool["rv_rank"] - target_rank).abs())
-            pick_pool = pool_scored.nsmallest(300, "match_dist")
+            top_k = min(300, len(pool_ranks))
+            nearest_idx = np.argpartition(np.abs(pool_ranks - target_rank), top_k - 1)[:top_k]
+            pick_pool = pool.iloc[nearest_idx]
+            pick_sessions = pool_sessions[nearest_idx]
         else:
             pick_pool = pool
+            pick_sessions = pool_sessions
         if target_session:
-            same_session = pick_pool[pick_pool["timestamp"].dt.hour.apply(lambda h: _session_from_hour(int(h))) == target_session]
+            same_session = pick_pool[pick_sessions == target_session]
             if not same_session.empty:
                 pick_pool = same_session
         if pick_pool.empty:
@@ -221,8 +233,8 @@ def _placebo_windows(core: pd.DataFrame, parent_events: pd.DataFrame, events_df_
             continue
         rows.append(
             {
-                "source_parent_event_id": ev["parent_event_id"],
-                "symbol": ev["symbol"],
+                "source_parent_event_id": ev.parent_event_id,
+                "symbol": ev.symbol,
                 "window_x": x,
                 "window_y": y,
                 "placebo_start_idx": start,

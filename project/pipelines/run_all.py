@@ -4,6 +4,7 @@ import argparse
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -581,9 +582,24 @@ def main() -> int:
             if args.overlays:
                 base_args.extend(["--overlays", str(args.overlays)])
 
-    for stage, script, base_args in stages:
-        if not _run_stage(stage, script, base_args, run_id):
+    stage_timings: List[Tuple[str, float]] = []
+    print(f"Planned stages: {len(stages)}")
+    for idx, (stage, script, base_args) in enumerate(stages, start=1):
+        print(f"[{idx}/{len(stages)}] Starting stage: {stage}")
+        started = time.perf_counter()
+        ok = _run_stage(stage, script, base_args, run_id)
+        elapsed_sec = time.perf_counter() - started
+        stage_timings.append((stage, elapsed_sec))
+        print(f"[{idx}/{len(stages)}] Finished stage: {stage} ({elapsed_sec:.1f}s)")
+        if not ok:
+            print("Slow-stage summary before failure:")
+            for stage_name, duration in sorted(stage_timings, key=lambda x: x[1], reverse=True):
+                print(f"  - {stage_name}: {duration:.1f}s")
             return 1
+
+    print("Stage timing summary (slowest first):")
+    for stage_name, duration in sorted(stage_timings, key=lambda x: x[1], reverse=True):
+        print(f"  - {stage_name}: {duration:.1f}s")
 
     print(f"Pipeline run completed: {run_id}")
     return 0
