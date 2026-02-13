@@ -28,8 +28,11 @@ def _sample_bars_and_features() -> tuple[pd.DataFrame, pd.DataFrame]:
             "range_96": [1.0] * 6,
             "high_96": [102, 103, 104, 105, 106, 107],
             "low_96": [98, 99, 100, 101, 102, 103],
-            "rv_pct_2880": [5.0] * 6,
+            "rv_pct_2880": [5.0, 10.0, 15.0, 20.0, 10.0, 5.0],
             "range_med_480": [1.2] * 6,
+            "fp_norm_due": [0, 0, 1, 0, 0, 0],
+            "fp_severity": [0.2, 1.8, 1.9, 0.3, 0.1, 0.0],
+            "basis_zscore": [0.1, 1.4, 1.6, 0.7, 0.2, 0.1],
         }
     )
     return bars, features
@@ -44,6 +47,9 @@ def test_registry_includes_strategy_adapters() -> None:
     assert "funding_extreme_reversal_v1" in names
     assert "cross_venue_desync_v1" in names
     assert "liquidity_vacuum_v1" in names
+    assert "carry_funding_v1" in names
+    assert "mean_reversion_exhaustion_v1" in names
+    assert "spread_desync_v1" in names
 
 
 def test_strategy_adapter_generates_valid_positions() -> None:
@@ -79,3 +85,20 @@ def test_strategy_adapter_filters_irrelevant_params(monkeypatch) -> None:
     assert "trade_day_timezone" in captured
     assert "compression_rv_pct_max" in captured
     assert "funding_percentile_entry_min" not in captured
+def test_new_strategies_generate_positions_and_metadata() -> None:
+    bars, features = _sample_bars_and_features()
+
+    strategies = [
+        "carry_funding_v1",
+        "mean_reversion_exhaustion_v1",
+        "spread_desync_v1",
+    ]
+    for name in strategies:
+        out = get_strategy(name).generate_positions(bars, features, params={"trade_day_timezone": "UTC"})
+        assert len(out) == len(bars)
+        assert out.index.tz is not None
+        assert set(out.unique()).issubset({-1, 0, 1})
+        assert "strategy_metadata" in out.attrs
+        assert out.attrs["strategy_metadata"].get("strategy_id") == name
+        assert "family" in out.attrs["strategy_metadata"]
+        assert isinstance(out.attrs["strategy_metadata"].get("key_params"), dict)

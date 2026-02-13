@@ -33,6 +33,7 @@ class StrategyResult:
     name: str
     data: pd.DataFrame
     diagnostics: Dict[str, object]
+    strategy_metadata: Dict[str, object]
 
 
 _CONTEXT_COLUMNS = [
@@ -168,6 +169,7 @@ def _strategy_returns(
 
     positions = strategy.generate_positions(bars, features, params)
     signal_events = positions.attrs.get("signal_events", []) if hasattr(positions, "attrs") else []
+    strategy_metadata = positions.attrs.get("strategy_metadata", {}) if hasattr(positions, "attrs") else {}
     timestamp_index = pd.DatetimeIndex(bars["timestamp"])
     positions = positions.reindex(timestamp_index).fillna(0).astype(int)
     _validate_positions(positions)
@@ -251,7 +253,12 @@ def _strategy_returns(
         "missing_feature_pct": float(missing_feature_mask.mean()) if total_bars else 0.0,
         "missing_feature_columns": missing_feature_columns,
     }
-    return StrategyResult(name=strategy_name, data=df, diagnostics=diagnostics)
+    return StrategyResult(
+        name=strategy_name,
+        data=df,
+        diagnostics=diagnostics,
+        strategy_metadata=strategy_metadata if isinstance(strategy_metadata, dict) else {},
+    )
 
 
 def _aggregate_strategy(results: Iterable[pd.DataFrame]) -> pd.DataFrame:
@@ -375,6 +382,17 @@ def run_engine(
             ),
         }
         metrics["strategies"][strategy_name] = {**summary, "entries": entries}
+        metadata_candidates = [res.strategy_metadata for res in symbol_results if res.strategy_metadata]
+        if metadata_candidates:
+            metrics.setdefault("strategy_metadata", {})[strategy_name] = {
+                **metadata_candidates[0],
+                "symbols": [
+                    str(res.data["symbol"].iloc[0])
+                    for res in symbol_results
+                    if not res.data.empty and "symbol" in res.data.columns
+                ],
+            }
+
         metrics.setdefault("diagnostics", {}).setdefault("strategies", {})[strategy_name] = diagnostics
         symbol_bindings = []
         for res in symbol_results:
