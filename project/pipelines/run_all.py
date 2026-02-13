@@ -71,6 +71,8 @@ def main() -> int:
     parser.add_argument("--force", type=int, default=0)
     parser.add_argument("--skip_ingest_ohlcv", type=int, default=0)
     parser.add_argument("--skip_ingest_funding", type=int, default=0)
+    parser.add_argument("--skip_ingest_spot_ohlcv", type=int, default=0)
+    parser.add_argument("--enable_cross_venue_spot_pipeline", type=int, default=1)
     parser.add_argument("--allow_missing_funding", type=int, default=0)
     parser.add_argument("--allow_constant_funding", type=int, default=0)
     parser.add_argument("--allow_funding_timestamp_rounding", type=int, default=0)
@@ -96,6 +98,10 @@ def main() -> int:
     parser.add_argument("--phase2_require_phase1_pass", type=int, default=1)
 
     parser.add_argument("--run_edge_candidate_universe", type=int, default=0)
+    parser.add_argument("--run_strategy_builder", type=int, default=1)
+    parser.add_argument("--strategy_builder_top_k_per_event", type=int, default=2)
+    parser.add_argument("--strategy_builder_max_candidates", type=int, default=20)
+    parser.add_argument("--strategy_builder_include_alpha_bundle", type=int, default=1)
     parser.add_argument("--run_expectancy_analysis", type=int, default=0)
     parser.add_argument("--run_expectancy_robustness", type=int, default=0)
     parser.add_argument("--run_recommendations_checklist", type=int, default=1)
@@ -121,6 +127,12 @@ def main() -> int:
     allow_missing_funding_flag = _as_flag(args.allow_missing_funding)
     allow_constant_funding_flag = _as_flag(args.allow_constant_funding)
     allow_funding_timestamp_rounding_flag = _as_flag(args.allow_funding_timestamp_rounding)
+
+    cross_venue_requested = bool(
+        int(args.run_phase2_conditional)
+        and args.phase2_event_type in {"all", "cross_venue_desync"}
+    )
+    run_spot_pipeline = bool(int(args.enable_cross_venue_spot_pipeline) and cross_venue_requested)
 
     stages: List[Tuple[str, Path, List[str]]] = []
 
@@ -149,6 +161,26 @@ def main() -> int:
             (
                 "ingest_binance_um_funding",
                 PROJECT_ROOT / "pipelines" / "ingest" / "ingest_binance_um_funding.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--start",
+                    start,
+                    "--end",
+                    end,
+                    "--force",
+                    force_flag,
+                ],
+            )
+        )
+
+    if run_spot_pipeline and not args.skip_ingest_spot_ohlcv:
+        stages.append(
+            (
+                "ingest_binance_spot_ohlcv_15m",
+                PROJECT_ROOT / "pipelines" / "ingest" / "ingest_binance_spot_ohlcv_15m.py",
                 [
                     "--run_id",
                     run_id,
@@ -245,6 +277,20 @@ def main() -> int:
                 ],
             ),
             (
+                "build_universe_snapshots",
+                PROJECT_ROOT / "pipelines" / "ingest" / "build_universe_snapshots.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--market",
+                    "perp",
+                    "--force",
+                    force_flag,
+                ],
+            ),
+            (
                 "build_context_features",
                 PROJECT_ROOT / "pipelines" / "features" / "build_context_features.py",
                 [
@@ -262,8 +308,64 @@ def main() -> int:
                     force_flag,
                 ],
             ),
+            (
+                "build_market_context",
+                PROJECT_ROOT / "pipelines" / "features" / "build_market_context.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--timeframe",
+                    "15m",
+                    "--start",
+                    start,
+                    "--end",
+                    end,
+                    "--force",
+                    force_flag,
+                ],
+            ),
         ]
     )
+
+    if run_spot_pipeline:
+        stages.extend(
+            [
+                (
+                    "build_cleaned_15m_spot",
+                    PROJECT_ROOT / "pipelines" / "clean" / "build_cleaned_15m.py",
+                    [
+                        "--run_id",
+                        run_id,
+                        "--symbols",
+                        symbols,
+                        "--market",
+                        "spot",
+                        "--start",
+                        start,
+                        "--end",
+                        end,
+                        "--force",
+                        force_flag,
+                    ],
+                ),
+                (
+                    "build_features_v1_spot",
+                    PROJECT_ROOT / "pipelines" / "features" / "build_features_v1.py",
+                    [
+                        "--run_id",
+                        run_id,
+                        "--symbols",
+                        symbols,
+                        "--market",
+                        "spot",
+                        "--force",
+                        force_flag,
+                    ],
+                ),
+            ]
+        )
 
     if int(args.run_hypothesis_generator):
         stages.append(
@@ -389,11 +491,31 @@ def main() -> int:
             )
         )
 
+    if int(args.run_strategy_builder):
+        stages.append(
+            (
+                "build_strategy_candidates",
+                PROJECT_ROOT / "pipelines" / "research" / "build_strategy_candidates.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--top_k_per_event",
+                    str(int(args.strategy_builder_top_k_per_event)),
+                    "--max_candidates",
+                    str(int(args.strategy_builder_max_candidates)),
+                    "--include_alpha_bundle",
+                    str(int(args.strategy_builder_include_alpha_bundle)),
+                ],
+            )
+        )
+
     if int(args.run_backtest):
         stages.append(
             (
-                "backtest_vol_compression_v1",
-                PROJECT_ROOT / "pipelines" / "backtest" / "backtest_vol_compression_v1.py",
+                "backtest_strategies",
+                PROJECT_ROOT / "pipelines" / "backtest" / "backtest_strategies.py",
                 [
                     "--run_id",
                     run_id,
@@ -418,14 +540,15 @@ def main() -> int:
         "build_cleaned_15m",
         "build_features_v1",
         "build_context_features",
-        "backtest_vol_compression_v1",
+        "build_market_context",
+        "backtest_strategies",
         "make_report",
     }
     for stage_name, _, base_args in stages:
         if stage_name in stages_with_config:
             for config_path in args.config:
                 base_args.extend(["--config", config_path])
-        if stage_name == "backtest_vol_compression_v1":
+        if stage_name == "backtest_strategies":
             if args.fees_bps is not None:
                 base_args.extend(["--fees_bps", str(args.fees_bps)])
             if args.slippage_bps is not None:

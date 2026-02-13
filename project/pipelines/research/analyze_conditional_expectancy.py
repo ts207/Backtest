@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import sys
 from pathlib import Path
@@ -110,6 +111,107 @@ def _distribution_stats(returns: pd.Series) -> Dict[str, float]:
     }
 
 
+def _normal_cdf(x: float) -> float:
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _two_sided_p_from_t(t_stat: float) -> float:
+    # Normal approximation keeps this dependency-free for CI environments.
+    if not np.isfinite(t_stat):
+        return 1.0
+    z = abs(float(t_stat))
+    return float(max(0.0, min(1.0, 2.0 * (1.0 - _normal_cdf(z)))))
+
+
+def _bh_adjust(p_values: pd.Series) -> pd.Series:
+    """
+    Benjamini-Hochberg FDR adjustment.
+    Returns adjusted p-values aligned to the input index.
+    """
+    if p_values.empty:
+        return p_values.astype(float)
+
+    p = pd.to_numeric(p_values, errors="coerce").fillna(1.0).clip(lower=0.0, upper=1.0)
+    order = np.argsort(p.values)
+    sorted_p = p.values[order]
+    m = float(len(sorted_p))
+    adjusted = np.empty(len(sorted_p), dtype=float)
+
+    running_min = 1.0
+    for i in range(len(sorted_p) - 1, -1, -1):
+        rank = float(i + 1)
+        candidate = float(sorted_p[i] * m / rank)
+        running_min = min(running_min, candidate)
+        adjusted[i] = running_min
+
+    adjusted = np.clip(adjusted, 0.0, 1.0)
+    out = pd.Series(index=p.index, dtype=float)
+    out.iloc[order] = adjusted
+    return out
+
+
+def build_walk_forward_split_labels(
+    df: pd.DataFrame,
+    *,
+    time_col: str,
+    symbol_col: str = "symbol",
+    train_frac: float = 0.6,
+    validation_frac: float = 0.2,
+) -> pd.Series:
+    """Assign deterministic time-ordered walk-forward labels (train/validation/test)."""
+    if df.empty:
+        return pd.Series(dtype="object", index=df.index)
+
+    out = pd.Series("", index=df.index, dtype="object")
+
+    def _assign_group(group: pd.DataFrame) -> None:
+        ordered = group.sort_values(time_col).index.to_list()
+        n = len(ordered)
+        if n == 0:
+            return
+        train_end = max(1, int(np.floor(n * train_frac)))
+        val_end = max(train_end + 1, int(np.floor(n * (train_frac + validation_frac))))
+        train_end = min(train_end, n - 1) if n > 1 else 1
+        val_end = min(max(val_end, train_end), n - 1) if n > 2 else train_end
+
+        for pos, idx in enumerate(ordered):
+            if pos < train_end:
+                out.at[idx] = "train"
+            elif pos < val_end:
+                out.at[idx] = "validation"
+            else:
+                out.at[idx] = "test"
+
+        if n == 1:
+            out.at[ordered[0]] = "test"
+        elif n == 2:
+            out.at[ordered[0]] = "train"
+            out.at[ordered[1]] = "test"
+
+    if symbol_col in df.columns:
+        for _, g in df.groupby(symbol_col, dropna=False):
+            _assign_group(g)
+    else:
+        _assign_group(df)
+
+    return out
+
+
+def _select_expectancy_candidates(
+    combined_df: pd.DataFrame,
+    min_samples: int,
+    tstat_threshold: float,
+) -> pd.DataFrame:
+    if combined_df.empty:
+        return combined_df.copy()
+    return combined_df[
+        (combined_df["samples"] >= int(min_samples))
+        & (combined_df["mean_return"] > 0.0)
+        & (combined_df["t_stat"] >= float(tstat_threshold))
+        & (combined_df["significant_adj_bh"])
+    ].copy()
+
+
 def _build_markdown_table(rows: List[Dict[str, object]], columns: List[str]) -> List[str]:
     if not rows:
         return ["No rows."]
@@ -181,6 +283,13 @@ def _analyze_symbol(
     compression = (df[rv_pct_col] <= 10.0) & (df["range_96"] <= 0.8 * df[range_med_col])
     compression = compression.fillna(False)
 
+    oi_delta = pd.to_numeric(df.get("oi_delta_1h", pd.Series(index=df.index, dtype=float)), errors="coerce")
+    oi_positive = (oi_delta > 0).fillna(False)
+    liquidation_notional = pd.to_numeric(df.get("liquidation_notional", pd.Series(index=df.index, dtype=float)), errors="coerce")
+    liq_roll = liquidation_notional.rolling(window=96, min_periods=24).median()
+    liquidation_spike = (liquidation_notional > (liq_roll * 2.0)).fillna(False)
+    revision_lagged = (pd.to_numeric(df.get("revision_lag_bars", 0), errors="coerce").fillna(0) > 0)
+
     condition_returns: Dict[Tuple[str, int], pd.Series] = {}
     rows: List[Dict[str, object]] = []
 
@@ -194,6 +303,9 @@ def _analyze_symbol(
             "compression_plus_funding_low": compression & (funding_bucket == "low"),
             "compression_plus_funding_mid": compression & (funding_bucket == "mid"),
             "compression_plus_funding_high": compression & (funding_bucket == "high"),
+            "compression_plus_oi_positive": compression & oi_positive,
+            "compression_plus_liquidation_spike": compression & liquidation_spike,
+            "compression_plus_revision_lagged": compression & revision_lagged,
         }
 
         for condition_name, mask in masks.items():
@@ -227,6 +339,7 @@ def main() -> int:
     parser.add_argument("--funding_pct_window", type=int, default=2880)
     parser.add_argument("--min_samples", type=int, default=100)
     parser.add_argument("--tstat_threshold", type=float, default=2.0)
+    parser.add_argument("--fdr_alpha", type=float, default=0.05)
     parser.add_argument("--out_dir", default=None)
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
@@ -280,11 +393,20 @@ def main() -> int:
     combined_df = results_df[results_df["scope"] == "combined"].copy()
     combined_df = combined_df.sort_values(["condition", "horizon_bars"], ignore_index=True)
 
-    expectancy_candidates = combined_df[
-        (combined_df["samples"] >= args.min_samples)
-        & (combined_df["mean_return"] > 0.0)
-        & (combined_df["t_stat"] >= args.tstat_threshold)
-    ]
+    if not combined_df.empty:
+        combined_df["p_value"] = combined_df["t_stat"].map(_two_sided_p_from_t).astype(float)
+        combined_df["p_value_adj_bh"] = _bh_adjust(combined_df["p_value"]).astype(float)
+        combined_df["significant_adj_bh"] = combined_df["p_value_adj_bh"] <= float(args.fdr_alpha)
+    else:
+        combined_df["p_value"] = pd.Series(dtype=float)
+        combined_df["p_value_adj_bh"] = pd.Series(dtype=float)
+        combined_df["significant_adj_bh"] = pd.Series(dtype=bool)
+
+    expectancy_candidates = _select_expectancy_candidates(
+        combined_df=combined_df,
+        min_samples=args.min_samples,
+        tstat_threshold=args.tstat_threshold,
+    )
 
     expectancy_exists = not expectancy_candidates.empty
     if expectancy_exists:
@@ -302,8 +424,11 @@ def main() -> int:
             "funding_pct_window": args.funding_pct_window,
             "min_samples": args.min_samples,
             "tstat_threshold": args.tstat_threshold,
+            "fdr_alpha": args.fdr_alpha,
+            "multiplicity_method": "benjamini_hochberg",
         },
         "feature_columns": chosen_columns,
+        "test_count": int(len(combined_df)),
         "expectancy_exists": expectancy_exists,
         "verdict": verdict,
         "expectancy_evidence": expectancy_candidates.to_dict(orient="records"),
@@ -320,6 +445,9 @@ def main() -> int:
         "mean_return",
         "win_rate",
         "t_stat",
+        "p_value",
+        "p_value_adj_bh",
+        "significant_adj_bh",
         "signal_to_noise",
     ]
 
@@ -331,7 +459,13 @@ def main() -> int:
         "",
         "## Verdict",
         f"- Expectancy exists: `{expectancy_exists}`",
-        f"- Rule: mean return > 0, t-stat >= {args.tstat_threshold}, samples >= {args.min_samples}",
+        (
+            "- Rule: mean return > 0, "
+            f"t-stat >= {args.tstat_threshold}, "
+            f"samples >= {args.min_samples}, "
+            f"BH-adjusted p <= {args.fdr_alpha}"
+        ),
+        f"- Multiplicity control: `Benjamini-Hochberg` across `{len(combined_df)}` combined tests",
         f"- Decision: {verdict}",
         "",
         "## Combined Results",

@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Dict, List
 
@@ -166,6 +167,14 @@ def main() -> int:
         default=10,
         help="Minimum number of events required when selecting a shock threshold",
     )
+    parser.add_argument("--profile", choices=["strict", "balanced", "lenient"], default="balanced")
+    parser.add_argument("--volume_window", type=int, default=None)
+    parser.add_argument("--range_window", type=int, default=None)
+    parser.add_argument("--vol_ratio_floor", type=float, default=None)
+    parser.add_argument("--range_multiplier", type=float, default=None)
+    parser.add_argument("--min_vacuum_bars", type=int, default=None)
+    parser.add_argument("--max_vacuum_bars", type=int, default=None)
+    parser.add_argument("--cooldown_bars", type=int, default=None)
     parser.add_argument(
         "--out_dir",
         default=None,
@@ -192,6 +201,28 @@ def main() -> int:
     quantiles: List[float] = _parse_quantiles(str(args.shock_quantiles))
     min_events: int = int(args.min_events)
 
+    cfg_profiles: Dict[str, LiquidityVacuumConfig] = {
+        "strict": DEFAULT_LV_CONFIG,
+        "balanced": replace(DEFAULT_LV_CONFIG, vol_ratio_floor=0.65, range_multiplier=1.3, min_vacuum_bars=2),
+        "lenient": replace(DEFAULT_LV_CONFIG, vol_ratio_floor=0.8, range_multiplier=1.15, min_vacuum_bars=2),
+    }
+    cfg: LiquidityVacuumConfig = cfg_profiles[str(args.profile)]
+    overrides: Dict[str, object] = {}
+    for field in (
+        "volume_window",
+        "range_window",
+        "vol_ratio_floor",
+        "range_multiplier",
+        "min_vacuum_bars",
+        "max_vacuum_bars",
+        "cooldown_bars",
+    ):
+        value = getattr(args, field)
+        if value is not None:
+            overrides[field] = value
+    if overrides:
+        cfg = replace(cfg, **overrides)
+
     # Resolve output directory.  Per default, reports are written
     # under ``data/reports/liquidity_vacuum/<run_id>``.  Use
     # ``ensure_dir`` to create it if necessary.
@@ -204,19 +235,18 @@ def main() -> int:
     # detected for a symbol, that symbol is skipped.
     all_events: List[pd.DataFrame] = []
     summary_rows: List[Dict[str, object]] = []
+    calibration_rows: List[pd.DataFrame] = []
     for sym in symbols:
         bars = _load_bars(run_id, sym, timeframe=timeframe)
         if bars.empty:
             logging.warning("No bars found for %s; skipping", sym)
             continue
-        # Use the default configuration unless overridden via
-        # environment variables or other mechanisms.  Copy to avoid
-        # mutating the global default.
-        cfg: LiquidityVacuumConfig = DEFAULT_LV_CONFIG
         # Calibrate shock threshold by sweeping the quantiles.  The
         # calibration helper returns a DataFrame of candidate
         # thresholds and a dict with the selected entry.
         df_q, sel = calibrate_shock_threshold(bars, sym, cfg, quantiles=quantiles, min_events=min_events)
+        if not df_q.empty:
+            calibration_rows.append(df_q.assign(symbol=sym))
         if sel.get("selected_t_shock") is None or sel.get("selected_event_count", 0) < min_events:
             logging.warning(
                 "Calibration did not yield enough events for %s; threshold may be unreliable (selected=%s, count=%s)",
@@ -249,11 +279,39 @@ def main() -> int:
         csv_path = out_dir / "liquidity_vacuum_events.csv"
         events_df.to_csv(csv_path, index=False)
         logging.info("Wrote events to %s", csv_path)
+    controls_path = out_dir / "liquidity_vacuum_controls.csv"
+    pd.DataFrame(columns=["event_id", "symbol", "start_idx", "end_idx"]).to_csv(controls_path, index=False)
+    logging.info("Wrote controls scaffold to %s", controls_path)
+
+    if calibration_rows:
+        calibration_df = pd.concat(calibration_rows, ignore_index=True)
+        calibration_csv_path = out_dir / "liquidity_vacuum_calibration.csv"
+        calibration_df.to_csv(calibration_csv_path, index=False)
+        logging.info("Wrote calibration sweep to %s", calibration_csv_path)
 
     # Write a JSON summary capturing calibration and event counts per symbol
     summary_path = out_dir / "liquidity_vacuum_summary.json"
     with summary_path.open("w", encoding="utf-8") as f:
-        json.dump({"run_id": run_id, "symbols": symbols, "summaries": summary_rows}, f, indent=2, default=str)
+        json.dump(
+            {
+                "run_id": run_id,
+                "symbols": symbols,
+                "profile": str(args.profile),
+                "config": {
+                    "volume_window": int(cfg.volume_window),
+                    "range_window": int(cfg.range_window),
+                    "vol_ratio_floor": float(cfg.vol_ratio_floor),
+                    "range_multiplier": float(cfg.range_multiplier),
+                    "min_vacuum_bars": int(cfg.min_vacuum_bars),
+                    "max_vacuum_bars": int(cfg.max_vacuum_bars),
+                    "cooldown_bars": int(cfg.cooldown_bars),
+                },
+                "summaries": summary_rows,
+            },
+            f,
+            indent=2,
+            default=str,
+        )
     logging.info("Wrote summary to %s", summary_path)
 
     return 0

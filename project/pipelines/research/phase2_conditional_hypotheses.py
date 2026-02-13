@@ -23,6 +23,11 @@ from pipelines._lib.io_utils import (
     read_parquet,
     run_scoped_lake_path,
 )
+from pipelines.research.analyze_conditional_expectancy import (
+    _bh_adjust,
+    _two_sided_p_from_t,
+    build_walk_forward_split_labels,
+)
 
 
 PRIMARY_OUTPUT_COLUMNS = [
@@ -31,6 +36,9 @@ PRIMARY_OUTPUT_COLUMNS = [
     "action",
     "action_family",
     "sample_size",
+    "train_samples",
+    "validation_samples",
+    "test_samples",
     "baseline_mode",
     "delta_adverse_mean",
     "delta_adverse_ci_low",
@@ -54,6 +62,13 @@ PRIMARY_OUTPUT_COLUMNS = [
     "gate_f_exposure_guard",
     "gate_g_net_benefit",
     "gate_e_simplicity",
+    "validation_delta_adverse_mean",
+    "test_delta_adverse_mean",
+    "test_t_stat",
+    "test_p_value",
+    "test_p_value_adj_bh",
+    "gate_oos_validation_test",
+    "gate_multiplicity",
     "gate_pass",
     "gate_all",
     "fail_reasons",
@@ -706,6 +721,36 @@ def _gate_regime_stability(
     return stable_splits >= required_splits, stable_splits, required_splits
 
 
+def _split_count(sub: pd.DataFrame, label: str) -> int:
+    if "split_label" not in sub.columns:
+        return 0
+    return int((sub["split_label"] == label).sum())
+
+
+def _split_mean(sub: pd.DataFrame, split_label: str, col: str) -> float:
+    if "split_label" not in sub.columns or col not in sub.columns:
+        return np.nan
+    frame = sub[sub["split_label"] == split_label]
+    if frame.empty:
+        return np.nan
+    values = pd.to_numeric(frame[col], errors="coerce").dropna()
+    return float(values.mean()) if not values.empty else np.nan
+
+
+def _split_t_stat_and_p_value(sub: pd.DataFrame, split_label: str, col: str) -> Tuple[float, float]:
+    if "split_label" not in sub.columns or col not in sub.columns:
+        return np.nan, np.nan
+    frame = sub[sub["split_label"] == split_label]
+    values = pd.to_numeric(frame[col], errors="coerce").dropna().to_numpy(dtype=float)
+    if len(values) < 2:
+        return np.nan, np.nan
+    std = float(np.std(values, ddof=1))
+    if std <= 0.0:
+        return np.nan, np.nan
+    t_stat = float(np.mean(values) / (std / np.sqrt(len(values))))
+    return t_stat, float(_two_sided_p_from_t(t_stat))
+
+
 def _evaluate_candidate(
     sub: pd.DataFrame,
     condition: ConditionSpec,
@@ -775,6 +820,21 @@ def _evaluate_candidate(
     gate_g = bool(np.isfinite(net_benefit) and net_benefit >= net_benefit_floor)
     gate_e = bool(simplicity_gate)
 
+    train_samples = _split_count(sub, "train")
+    validation_samples = _split_count(sub, "validation")
+    test_samples = _split_count(sub, "test")
+    validation_delta_adverse_mean = _split_mean(tmp, "validation", "adverse_effect")
+    test_delta_adverse_mean = _split_mean(tmp, "test", "adverse_effect")
+    test_t_stat, test_p_value = _split_t_stat_and_p_value(tmp, "test", "adverse_effect")
+    gate_oos = bool(
+        validation_samples > 0
+        and test_samples > 0
+        and np.isfinite(validation_delta_adverse_mean)
+        and np.isfinite(test_delta_adverse_mean)
+        and validation_delta_adverse_mean < 0.0
+        and test_delta_adverse_mean < 0.0
+    )
+
     fail_reasons = []
     if not gate_a:
         fail_reasons.append("gate_a_ci")
@@ -790,6 +850,8 @@ def _evaluate_candidate(
         fail_reasons.append("gate_g_net_benefit")
     if not gate_e:
         fail_reasons.append("gate_e_simplicity")
+    if not gate_oos:
+        fail_reasons.append("gate_oos_validation_test")
 
     return {
         "condition": condition.name,
@@ -797,6 +859,9 @@ def _evaluate_candidate(
         "action": action.name,
         "action_family": action.family,
         "sample_size": int(len(sub)),
+        "train_samples": train_samples,
+        "validation_samples": validation_samples,
+        "test_samples": test_samples,
         "baseline_mode": str(sub["baseline_mode"].iloc[0]) if "baseline_mode" in sub.columns and not sub.empty else "event_proxy_only",
         "delta_adverse_mean": mean_adv,
         "delta_adverse_ci_low": ci_low_adv,
@@ -820,8 +885,15 @@ def _evaluate_candidate(
         "gate_f_exposure_guard": gate_f,
         "gate_g_net_benefit": gate_g,
         "gate_e_simplicity": gate_e,
-        "gate_pass": bool(gate_a and gate_b and gate_c and gate_d and gate_f and gate_g and gate_e),
-        "gate_all": bool(gate_a and gate_b and gate_c and gate_d and gate_f and gate_g and gate_e),
+        "validation_delta_adverse_mean": validation_delta_adverse_mean,
+        "test_delta_adverse_mean": test_delta_adverse_mean,
+        "test_t_stat": test_t_stat,
+        "test_p_value": test_p_value,
+        "test_p_value_adj_bh": np.nan,
+        "gate_oos_validation_test": gate_oos,
+        "gate_multiplicity": False,
+        "gate_pass": bool(gate_a and gate_b and gate_c and gate_d and gate_f and gate_g and gate_e and gate_oos),
+        "gate_all": False,
         "fail_reasons": ",".join(fail_reasons) if fail_reasons else "",
     }
 
@@ -959,6 +1031,15 @@ def main() -> int:
     )
     events = _prepare_baseline(events, controls)
 
+    if "split_label" not in events.columns:
+        if "enter_ts" not in events.columns or events["enter_ts"].isna().all():
+            raise ValueError("Phase 2 requires split_label or valid enter_ts for walk-forward split assignment")
+        events["split_label"] = build_walk_forward_split_labels(events, time_col="enter_ts", symbol_col="symbol")
+
+    missing_splits = ~events["split_label"].isin(["train", "validation", "test"])
+    if missing_splits.any():
+        raise ValueError("Phase 2 split_label contains invalid values")
+
     all_conditions = _build_conditions(events)
     all_actions = _build_actions()
     conditions = all_conditions[: args.max_conditions]
@@ -995,6 +1076,20 @@ def main() -> int:
     candidates = pd.DataFrame(rows)
     if candidates.empty:
         candidates = pd.DataFrame(columns=PRIMARY_OUTPUT_COLUMNS)
+    else:
+        candidates["test_p_value"] = pd.to_numeric(candidates.get("test_p_value"), errors="coerce")
+        candidates["test_p_value_adj_bh"] = _bh_adjust(candidates["test_p_value"].fillna(1.0))
+        candidates["gate_multiplicity"] = candidates["test_p_value_adj_bh"] <= 0.05
+        candidates["gate_all"] = (
+            candidates["gate_pass"].astype(bool)
+            & candidates["gate_oos_validation_test"].astype(bool)
+            & candidates["gate_multiplicity"].astype(bool)
+        )
+        for idx, row in candidates.iterrows():
+            reasons = [x for x in str(row.get("fail_reasons", "")).split(",") if x]
+            if not bool(row.get("gate_multiplicity", False)):
+                reasons.append("gate_multiplicity")
+            candidates.at[idx, "fail_reasons"] = ",".join(dict.fromkeys(reasons))
 
     promoted = candidates[candidates.get("gate_all", False)].copy() if not candidates.empty else pd.DataFrame()
     if not promoted.empty:
@@ -1049,7 +1144,13 @@ def main() -> int:
         },
         "gates": {
             "min_regime_stable_splits": int(args.min_regime_stable_splits),
+            "oos_gate": "validation_and_test_adverse_improvement_required",
+            "multiplicity_method": "benjamini_hochberg",
+            "multiplicity_alpha": 0.05,
         },
+        "hypotheses_tested": int(len(candidates)),
+        "adjusted_pass_count": int(candidates["gate_multiplicity"].sum()) if not candidates.empty and "gate_multiplicity" in candidates.columns else 0,
+        "oos_pass_count": int(candidates["gate_oos_validation_test"].sum()) if not candidates.empty and "gate_oos_validation_test" in candidates.columns else 0,
     }
     manifest_path.write_text(json.dumps(manifest_payload, indent=2), encoding="utf-8")
 

@@ -1,0 +1,174 @@
+from __future__ import annotations
+
+import argparse
+import logging
+import os
+import sys
+from pathlib import Path
+from typing import Dict, List
+
+import numpy as np
+import pandas as pd
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from pipelines._lib.io_utils import (
+    choose_partition_dir,
+    ensure_dir,
+    list_parquet_files,
+    read_parquet,
+    run_scoped_lake_path,
+    write_parquet,
+)
+from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+
+
+def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
+    if df.empty:
+        return {"rows": 0, "start_ts": None, "end_ts": None}
+    return {
+        "rows": int(len(df)),
+        "start_ts": df["timestamp"].min().isoformat(),
+        "end_ts": df["timestamp"].max().isoformat(),
+    }
+
+
+def _rolling_percentile(series: pd.Series, window: int) -> pd.Series:
+    def pct_rank(values: np.ndarray) -> float:
+        last = values[-1]
+        return float(np.sum(values <= last) / len(values) * 100.0)
+
+    return series.rolling(window=window, min_periods=max(128, window // 6)).apply(pct_rank, raw=True)
+
+
+def _build_market_context(symbol: str, features: pd.DataFrame) -> pd.DataFrame:
+    out = features[["timestamp"]].copy()
+    out["symbol"] = symbol
+
+    close = pd.to_numeric(features.get("close"), errors="coerce")
+    out["trend_return_96"] = close.pct_change(96)
+    out["trend_regime"] = np.where(out["trend_return_96"] >= 0.0, "bull", "bear")
+
+    rv_pct = pd.to_numeric(features.get("rv_pct_17280"), errors="coerce")
+    if rv_pct.isna().all():
+        rv = pd.to_numeric(features.get("rv_96"), errors="coerce")
+        if rv.notna().any():
+            rv_pct = _rolling_percentile(rv, window=17280)
+        else:
+            rv_pct = pd.Series(index=features.index, dtype=float)
+    out["rv_pct_17280"] = rv_pct
+    out["vol_regime"] = pd.cut(
+        out["rv_pct_17280"],
+        bins=[-np.inf, 33.3333, 66.6667, np.inf],
+        labels=["low", "mid", "high"],
+    ).astype("string").fillna("unknown")
+
+    range_96 = pd.to_numeric(features.get("range_96"), errors="coerce")
+    range_med_2880 = pd.to_numeric(features.get("range_med_2880"), errors="coerce")
+    out["compression_ratio"] = (range_96 / range_med_2880.replace(0.0, np.nan)).astype(float)
+    out["compression_state"] = (out["compression_ratio"] <= 0.8).fillna(False)
+
+    funding = pd.to_numeric(features.get("funding_rate_scaled"), errors="coerce").fillna(0.0)
+    out["funding_mean_32"] = funding.rolling(window=32, min_periods=8).mean()
+    q_lo = float(out["funding_mean_32"].quantile(0.33)) if out["funding_mean_32"].notna().any() else 0.0
+    q_hi = float(out["funding_mean_32"].quantile(0.67)) if out["funding_mean_32"].notna().any() else 0.0
+    out["funding_regime"] = "neutral"
+    out.loc[out["funding_mean_32"] <= q_lo, "funding_regime"] = "negative"
+    out.loc[out["funding_mean_32"] >= q_hi, "funding_regime"] = "positive"
+
+    out["context_def_version"] = "market_context_v1"
+    return out
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Build market-state context features from features_v1")
+    parser.add_argument("--run_id", required=True)
+    parser.add_argument("--symbols", required=True)
+    parser.add_argument("--timeframe", default="15m")
+    parser.add_argument("--start", required=True)
+    parser.add_argument("--end", required=True)
+    parser.add_argument("--out_dir", default=None)
+    parser.add_argument("--force", type=int, default=0)
+    parser.add_argument("--config", action="append", default=[])
+    parser.add_argument("--log_path", default=None)
+    args = parser.parse_args()
+
+    symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+    start = pd.Timestamp(args.start, tz="UTC").floor("D")
+    end_exclusive = pd.Timestamp(args.end, tz="UTC").floor("D") + pd.Timedelta(days=1)
+    output_root = (
+        Path(args.out_dir)
+        if args.out_dir
+        else run_scoped_lake_path(DATA_ROOT, args.run_id, "context", "market_state")
+    )
+
+    log_handlers = [logging.StreamHandler(sys.stdout)]
+    if args.log_path:
+        ensure_dir(Path(args.log_path).parent)
+        log_handlers.append(logging.FileHandler(args.log_path))
+    logging.basicConfig(level=logging.INFO, handlers=log_handlers, format="%(asctime)s %(levelname)s %(message)s")
+
+    inputs: List[Dict[str, object]] = []
+    outputs: List[Dict[str, object]] = []
+    params = {
+        "symbols": symbols,
+        "timeframe": args.timeframe,
+        "start": start.isoformat(),
+        "end_exclusive": end_exclusive.isoformat(),
+        "out_dir": str(output_root),
+        "force": int(args.force),
+    }
+    manifest = start_manifest("build_market_context", args.run_id, params, inputs, outputs)
+    stats: Dict[str, object] = {"symbols": {}}
+
+    try:
+        for symbol in symbols:
+            feature_candidates = [
+                run_scoped_lake_path(DATA_ROOT, args.run_id, "features", "perp", symbol, args.timeframe, "features_v1"),
+                DATA_ROOT / "lake" / "features" / "perp" / symbol / args.timeframe / "features_v1",
+            ]
+            feature_dir = choose_partition_dir(feature_candidates)
+            features = read_parquet(list_parquet_files(feature_dir)) if feature_dir else pd.DataFrame()
+            if features.empty:
+                raise ValueError(f"No features_v1 found for {symbol} at timeframe={args.timeframe}")
+
+            features["timestamp"] = pd.to_datetime(features["timestamp"], utc=True, errors="coerce")
+            features = features.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+            features = features[(features["timestamp"] >= start) & (features["timestamp"] < end_exclusive)].copy()
+            if features.empty:
+                raise ValueError(f"No feature rows in requested range for {symbol}")
+
+            inputs.append({"path": str(feature_dir), **_collect_stats(features)})
+            context = _build_market_context(symbol=symbol, features=features)
+
+            out_path = output_root / symbol / f"{args.timeframe}.parquet"
+            if out_path.exists() and not int(args.force):
+                existing = read_parquet([out_path])
+                if len(existing) == len(context):
+                    outputs.append({"path": str(out_path), "rows": int(len(existing)), "storage_format": out_path.suffix})
+                    stats["symbols"][symbol] = {
+                        "rows": int(len(existing)),
+                        "skipped_existing": True,
+                    }
+                    continue
+
+            written_path, storage = write_parquet(context, out_path)
+            outputs.append({"path": str(written_path), "rows": int(len(context)), "storage_format": storage})
+            stats["symbols"][symbol] = {
+                "rows": int(len(context)),
+                "vol_regime_counts": context["vol_regime"].value_counts(dropna=False).to_dict(),
+                "funding_regime_counts": context["funding_regime"].value_counts(dropna=False).to_dict(),
+            }
+
+        finalize_manifest(manifest, "success", stats=stats)
+        return 0
+    except Exception as exc:
+        logging.exception("Market context build failed")
+        finalize_manifest(manifest, "failed", error=str(exc), stats=stats)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

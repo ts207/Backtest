@@ -16,7 +16,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.config import load_configs
 from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet, write_parquet
-from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from pipelines._lib.run_manifest import (
+    finalize_manifest,
+    schema_hash_from_columns,
+    start_manifest,
+    validate_input_provenance,
+)
 from pipelines._lib.validation import ensure_utc_timestamp, validate_columns
 
 
@@ -54,19 +59,114 @@ def _partition_complete(path: Path, expected_rows: int) -> bool:
         return False
 
 
+def _read_optional_time_series(path: Path) -> pd.DataFrame:
+    files = list_parquet_files(path)
+    if not files:
+        return pd.DataFrame()
+    frame = read_parquet(files)
+    if frame.empty or "timestamp" not in frame.columns:
+        return pd.DataFrame()
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
+    frame = frame.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+    return frame
+
+
+def _merge_optional_oi_liquidation(
+    bars: pd.DataFrame,
+    symbol: str,
+    market: str,
+    run_id: str,
+) -> pd.DataFrame:
+    out = bars.copy()
+
+    oi_candidates = [
+        DATA_ROOT / "lake" / "raw" / "binance" / market / symbol / "open_interest" / "5m",
+        DATA_ROOT / "lake" / "runs" / run_id / "raw" / "binance" / market / symbol / "open_interest" / "5m",
+    ]
+    oi_frame = pd.DataFrame()
+    for candidate in oi_candidates:
+        oi_frame = _read_optional_time_series(candidate)
+        if not oi_frame.empty:
+            break
+
+    if not oi_frame.empty:
+        oi_col = None
+        for c in ["sum_open_interest_value", "sum_open_interest", "open_interest"]:
+            if c in oi_frame.columns:
+                oi_col = c
+                break
+        if oi_col is not None:
+            oi_series = oi_frame[["timestamp", oi_col]].rename(columns={oi_col: "oi_notional"}).copy()
+            oi_series["oi_notional"] = pd.to_numeric(oi_series["oi_notional"], errors="coerce")
+            out = pd.merge_asof(
+                out.sort_values("timestamp"),
+                oi_series.sort_values("timestamp"),
+                on="timestamp",
+                direction="backward",
+            )
+        else:
+            out["oi_notional"] = np.nan
+    else:
+        out["oi_notional"] = np.nan
+
+    liq_candidates = [
+        DATA_ROOT / "lake" / "raw" / "binance" / market / symbol / "liquidation_snapshot",
+        DATA_ROOT / "lake" / "runs" / run_id / "raw" / "binance" / market / symbol / "liquidation_snapshot",
+    ]
+    liq_frame = pd.DataFrame()
+    for candidate in liq_candidates:
+        liq_frame = _read_optional_time_series(candidate)
+        if not liq_frame.empty:
+            break
+
+    if not liq_frame.empty:
+        value_col = None
+        for c in ["notional_usd", "quote_qty", "notional"]:
+            if c in liq_frame.columns:
+                value_col = c
+                break
+        count_col = None
+        for c in ["event_count", "count", "n_events"]:
+            if c in liq_frame.columns:
+                count_col = c
+                break
+
+        liq_payload = pd.DataFrame({"timestamp": liq_frame["timestamp"]})
+        liq_payload["liquidation_notional"] = pd.to_numeric(liq_frame[value_col], errors="coerce") if value_col else 0.0
+        liq_payload["liquidation_count"] = pd.to_numeric(liq_frame[count_col], errors="coerce") if count_col else 1.0
+        out = pd.merge_asof(
+            out.sort_values("timestamp"),
+            liq_payload.sort_values("timestamp"),
+            on="timestamp",
+            direction="backward",
+        )
+    else:
+        out["liquidation_notional"] = 0.0
+        out["liquidation_count"] = 0.0
+
+    out["oi_notional"] = pd.to_numeric(out["oi_notional"], errors="coerce")
+    out["oi_delta_1h"] = out["oi_notional"].diff(4)
+    out["liquidation_notional"] = pd.to_numeric(out["liquidation_notional"], errors="coerce").fillna(0.0)
+    out["liquidation_count"] = pd.to_numeric(out["liquidation_count"], errors="coerce").fillna(0.0)
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build features v1")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
+    parser.add_argument("--market", choices=["perp", "spot"], default="perp")
     parser.add_argument("--force", type=int, default=0)
     # Compatibility flag from run_all; feature build already tolerates missing funding.
     parser.add_argument("--allow_missing_funding", type=int, default=0)
+    parser.add_argument("--revision_lag_bars", type=int, default=0)
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
 
     run_id = args.run_id
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+    market = str(args.market).strip().lower()
 
     log_handlers = [logging.StreamHandler(sys.stdout)]
     if args.log_path:
@@ -82,21 +182,28 @@ def main() -> int:
     outputs: List[Dict[str, object]] = []
     params = {
         "symbols": symbols,
+        "market": market,
         "trade_day_timezone": config.get("trade_day_timezone", "UTC"),
         "force": int(args.force),
         "allow_missing_funding": int(args.allow_missing_funding),
+        "source_vendor": "binance",
+        "source_exchange": "binance",
+        "schema_versions": {
+            "cleaned_bars": "cleaned_bars_15m_v1",
+            "funding": "funding_15m_v1",
+        },
     }
     manifest = start_manifest("build_features_v1", run_id, params, inputs, outputs)
     stats: Dict[str, object] = {"symbols": {}}
 
     try:
         for symbol in symbols:
-            cleaned_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_15m"
-            funding_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "funding_15m"
+            cleaned_dir = DATA_ROOT / "lake" / "cleaned" / market / symbol / "bars_15m"
+            funding_dir = DATA_ROOT / "lake" / "cleaned" / market / symbol / "funding_15m"
             cleaned_files = list_parquet_files(cleaned_dir)
             funding_files = list_parquet_files(funding_dir)
             bars = read_parquet(cleaned_files)
-            funding = read_parquet(funding_files)
+            funding = read_parquet(funding_files) if market == "perp" else pd.DataFrame()
             if bars.empty:
                 raise ValueError(f"No cleaned bars for {symbol}")
 
@@ -105,11 +212,39 @@ def main() -> int:
             ensure_utc_timestamp(bars["timestamp"], "timestamp")
             bars = bars.sort_values("timestamp").reset_index(drop=True)
 
-            inputs.append({"path": str(cleaned_dir), **_collect_stats(bars)})
-            if not funding.empty:
-                inputs.append({"path": str(funding_dir), **_collect_stats(funding)})
+            bars_stats = _collect_stats(bars)
+            inputs.append(
+                {
+                    "path": str(cleaned_dir),
+                    **bars_stats,
+                    "provenance": {
+                        "vendor": "binance",
+                        "exchange": "binance",
+                        "schema_version": "cleaned_bars_15m_v1",
+                        "schema_hash": schema_hash_from_columns(bars.columns.tolist()),
+                        "extraction_start": bars_stats.get("start_ts"),
+                        "extraction_end": bars_stats.get("end_ts"),
+                    },
+                }
+            )
+            if market == "perp" and not funding.empty:
+                funding_stats = _collect_stats(funding)
+                inputs.append(
+                    {
+                        "path": str(funding_dir),
+                        **funding_stats,
+                        "provenance": {
+                            "vendor": "binance",
+                            "exchange": "binance",
+                            "schema_version": "funding_15m_v1",
+                            "schema_hash": schema_hash_from_columns(funding.columns.tolist()),
+                            "extraction_start": funding_stats.get("start_ts"),
+                            "extraction_end": funding_stats.get("end_ts"),
+                        },
+                    }
+                )
 
-            if not funding.empty:
+            if market == "perp" and not funding.empty:
                 funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
                 funding = funding.sort_values("timestamp").reset_index(drop=True)
                 if "funding_rate_scaled" in funding.columns:
@@ -127,8 +262,25 @@ def main() -> int:
 
             # Backward-compatible alias for any code still reading funding_rate.
             bars["funding_rate"] = bars["funding_rate_scaled"]
+            bars = _merge_optional_oi_liquidation(bars, symbol=symbol, market=market, run_id=run_id)
+            bars["revision_lag_bars"] = int(args.revision_lag_bars)
+            bars["revision_lag_minutes"] = int(args.revision_lag_bars) * 15
 
-            features = bars[["timestamp", "open", "high", "low", "close", "funding_rate_scaled", "funding_rate"]].copy()
+            features = bars[[
+                "timestamp",
+                "open",
+                "high",
+                "low",
+                "close",
+                "funding_rate_scaled",
+                "funding_rate",
+                "oi_notional",
+                "oi_delta_1h",
+                "liquidation_notional",
+                "liquidation_count",
+                "revision_lag_bars",
+                "revision_lag_minutes",
+            ]].copy()
             features["logret_1"] = np.log(features["close"]).diff()
             features["rv_96"] = features["logret_1"].rolling(window=96, min_periods=96).std()
             features["rv_pct_17280"] = _rolling_percentile(features["rv_96"], window=17280)
@@ -139,7 +291,7 @@ def main() -> int:
 
             features["year"] = features["timestamp"].dt.year
             features["month"] = features["timestamp"].dt.month
-            out_dir = DATA_ROOT / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
+            out_dir = DATA_ROOT / "lake" / "features" / market / symbol / "15m" / "features_v1"
 
             partitions_written: List[str] = []
             partitions_skipped: List[str] = []
@@ -160,10 +312,14 @@ def main() -> int:
                 "rows_written": int(len(features)),
                 "coverage_start": features["timestamp"].min().isoformat(),
                 "coverage_end": features["timestamp"].max().isoformat(),
+                "revision_lag_bars": int(args.revision_lag_bars),
+                "oi_non_null_rows": int(features["oi_notional"].notna().sum()),
+                "liquidation_non_zero_rows": int((features["liquidation_notional"] > 0).sum()),
                 "partitions_written": partitions_written,
                 "partitions_skipped": partitions_skipped,
             }
 
+        validate_input_provenance(inputs)
         finalize_manifest(manifest, "success", stats=stats)
         return 0
     except Exception as exc:

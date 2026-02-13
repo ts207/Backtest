@@ -31,16 +31,30 @@ def _table_text(df: pd.DataFrame) -> str:
 
 
 def _load_feature_frame(run_id: str, symbol: str, market: str, timeframe: str = "15m") -> pd.DataFrame:
-    candidates = [
-        run_scoped_lake_path(DATA_ROOT, run_id, "features", market, symbol, timeframe, "features_v1"),
-        DATA_ROOT / "lake" / "features" / market / symbol / timeframe / "features_v1",
-    ]
-    features_dir = choose_partition_dir(candidates)
-    if features_dir is None:
-        return pd.DataFrame()
-    frame = read_parquet(list_parquet_files(features_dir))
+    symbol_candidates = [symbol]
+    if market == "spot":
+        for suffix in ("USDT", "BUSD", "USDC", "FDUSD"):
+            if symbol.endswith(suffix) and len(symbol) > len(suffix):
+                symbol_candidates.append(symbol[: -len(suffix)])
+                break
+
+    frame = pd.DataFrame()
+    for symbol_candidate in symbol_candidates:
+        candidates = [
+            run_scoped_lake_path(DATA_ROOT, run_id, "features", market, symbol_candidate, timeframe, "features_v1"),
+            DATA_ROOT / "lake" / "features" / market / symbol_candidate / timeframe / "features_v1",
+        ]
+        features_dir = choose_partition_dir(candidates)
+        if features_dir is None:
+            continue
+        loaded = read_parquet(list_parquet_files(features_dir))
+        if loaded.empty:
+            continue
+        frame = loaded
+        break
+
     if frame.empty:
-        return frame
+        return pd.DataFrame()
     frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
     frame = frame.sort_values("timestamp").reset_index(drop=True)
 
@@ -248,9 +262,15 @@ def main() -> int:
 
     event_parts: List[pd.DataFrame] = []
     ctrl_parts: List[pd.DataFrame] = []
+    missing_perp_symbols: List[str] = []
+    missing_spot_symbols: List[str] = []
     for symbol in [s.strip() for s in args.symbols.split(",") if s.strip()]:
         perp = _load_feature_frame(args.run_id, symbol, "perp")
         spot = _load_feature_frame(args.run_id, symbol, "spot")
+        if perp.empty:
+            missing_perp_symbols.append(symbol)
+        if spot.empty:
+            missing_spot_symbols.append(symbol)
         if perp.empty or spot.empty:
             continue
         ev, ct = _build_event_and_control_rows(
@@ -337,6 +357,8 @@ def main() -> int:
         "actions_generated": 0,
         "events": int(len(events)),
         "controls": int(len(controls)),
+        "missing_perp_symbols": sorted(set(missing_perp_symbols)),
+        "missing_spot_symbols": sorted(set(missing_spot_symbols)),
         "outputs": {
             "events": str(events_path),
             "controls": str(controls_path),
@@ -360,6 +382,8 @@ def main() -> int:
         "",
         f"- Events: {len(events)}",
         f"- Controls: {len(controls)}",
+        f"- Missing perp features symbols: {sorted(set(missing_perp_symbols)) if missing_perp_symbols else 'none'}",
+        f"- Missing spot features symbols: {sorted(set(missing_spot_symbols)) if missing_spot_symbols else 'none'}",
         "- Actions generated: 0 (Phase 1 structure only)",
         "",
         "## Matched deltas (head)",
