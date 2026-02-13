@@ -32,3 +32,33 @@ def test_event_condition_frame_filters_trend_condition() -> None:
     assert ret_col == "event_directional_return"
     assert len(frame) == 1
     assert int(frame.iloc[0]["trend_state"]) != 0
+
+
+def test_split_overlap_diagnostics_respects_embargo() -> None:
+    events_df = pd.DataFrame(
+        [
+            {"symbol": "BTCUSDT", "event_start_idx": 1, "split_label": "train"},
+            {"symbol": "BTCUSDT", "event_start_idx": 2, "split_label": "validation"},
+            {"symbol": "BTCUSDT", "event_start_idx": 3, "split_label": "test"},
+        ]
+    )
+
+    diag = validate_expectancy_traps._split_overlap_diagnostics(events_df, embargo_bars=1)
+    assert diag["pass"] is False
+    assert diag["embargo_bars"] == 1
+
+
+def test_split_overlap_diagnostics_passes_when_gap_satisfies_embargo() -> None:
+    events_df = pd.DataFrame(
+        [
+            {"symbol": "BTCUSDT", "event_start_idx": 1, "split_label": "train"},
+            {"symbol": "BTCUSDT", "event_start_idx": 2, "split_label": "train"},
+            {"symbol": "BTCUSDT", "event_start_idx": 3, "split_label": "holdout"},
+            {"symbol": "BTCUSDT", "event_start_idx": 4, "split_label": "validation"},
+            {"symbol": "BTCUSDT", "event_start_idx": 5, "split_label": "holdout"},
+            {"symbol": "BTCUSDT", "event_start_idx": 6, "split_label": "test"},
+        ]
+    )
+
+    diag = validate_expectancy_traps._split_overlap_diagnostics(events_df, embargo_bars=1)
+    assert diag["pass"] is True

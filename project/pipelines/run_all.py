@@ -277,6 +277,20 @@ def main() -> int:
                 ],
             ),
             (
+                "build_universe_snapshots",
+                PROJECT_ROOT / "pipelines" / "ingest" / "build_universe_snapshots.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--market",
+                    "perp",
+                    "--force",
+                    force_flag,
+                ],
+            ),
+            (
                 "build_context_features",
                 PROJECT_ROOT / "pipelines" / "features" / "build_context_features.py",
                 [
