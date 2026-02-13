@@ -186,7 +186,6 @@ def main() -> int:
         "trade_day_timezone": config.get("trade_day_timezone", "UTC"),
         "force": int(args.force),
         "allow_missing_funding": int(args.allow_missing_funding),
-        "revision_lag_bars": int(args.revision_lag_bars),
         "source_vendor": "binance",
         "source_exchange": "binance",
         "schema_versions": {
