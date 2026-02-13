@@ -8,7 +8,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -20,12 +20,88 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from pipelines._lib.config import load_configs
 from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from pipelines._lib.validation import strategy_family_allowed_keys, validate_strategy_family_params
 from engine.pnl import compute_pnl
 from engine.runner import run_engine
 from strategies.overlay_registry import apply_overlay
 
 INITIAL_EQUITY = 1_000_000.0
 BARS_PER_YEAR_15M = 365 * 24 * 4
+
+
+DEFAULT_STRATEGY_FAMILIES: Dict[str, str] = {
+    "funding_extreme_reversal_v1": "Carry",
+    "liquidity_refill_lag_v1": "MeanReversion",
+    "liquidity_absence_gate_v1": "MeanReversion",
+    "forced_flow_exhaustion_v1": "MeanReversion",
+    "liquidity_vacuum_v1": "MeanReversion",
+    "cross_venue_desync_v1": "Spread",
+}
+
+
+def _strategy_family_for_name(strategy_name: str, config: Dict[str, object]) -> str | None:
+    mapping = config.get("strategy_families", {}) if isinstance(config.get("strategy_families"), dict) else {}
+    if strategy_name in mapping:
+        family = str(mapping[strategy_name]).strip()
+        return family or None
+    return DEFAULT_STRATEGY_FAMILIES.get(strategy_name)
+
+
+def _build_base_strategy_params(config: Dict[str, object], trade_day_timezone: str) -> Dict[str, object]:
+    strategy_defaults = config.get("strategy_defaults", {}) if isinstance(config.get("strategy_defaults"), dict) else {}
+    vc_defaults = (
+        strategy_defaults.get("vol_compression_v1", {})
+        if isinstance(strategy_defaults.get("vol_compression_v1"), dict)
+        else {}
+    )
+
+    def _param(name: str, default: object) -> object:
+        if name in config:
+            return config[name]
+        if name in vc_defaults:
+            return vc_defaults[name]
+        return default
+
+    return {
+        "trade_day_timezone": trade_day_timezone,
+        "one_trade_per_day": True,
+        "compression_rv_pct_max": float(_param("compression_rv_pct_max", 10.0)),
+        "compression_range_ratio_max": float(_param("compression_range_ratio_max", 0.8)),
+        "breakout_confirm_bars": int(_param("breakout_confirm_bars", 0)),
+        "breakout_confirm_buffer_bps": float(_param("breakout_confirm_buffer_bps", 0.0)),
+        "max_hold_bars": int(_param("max_hold_bars", 48)),
+        "volatility_exit_rv_pct": float(_param("volatility_exit_rv_pct", 40.0)),
+        "expansion_timeout_bars": int(_param("expansion_timeout_bars", 0)),
+        "expansion_min_r": float(_param("expansion_min_r", 0.5)),
+        "adaptive_exit_enabled": bool(_param("adaptive_exit_enabled", False)),
+        "adaptive_activation_r": float(_param("adaptive_activation_r", 1.0)),
+        "adaptive_trail_lookback_bars": int(_param("adaptive_trail_lookback_bars", 8)),
+        "adaptive_trail_buffer_bps": float(_param("adaptive_trail_buffer_bps", 0.0)),
+    }
+
+
+def _build_strategy_params_by_name(
+    strategies: List[str],
+    config: Dict[str, object],
+    trade_day_timezone: str,
+    overlays: List[str],
+) -> Tuple[Dict[str, object], Dict[str, Dict[str, object]]]:
+    base_strategy_params = _build_base_strategy_params(config, trade_day_timezone)
+    validated_family_params = validate_strategy_family_params(config)
+    strategy_params_by_name: Dict[str, Dict[str, object]] = {}
+    for strategy_name in strategies:
+        strategy_params = dict(base_strategy_params)
+        family = _strategy_family_for_name(strategy_name, config)
+        if family:
+            allowed_keys = strategy_family_allowed_keys(family)
+            family_params = validated_family_params.get(family, {})
+            strategy_params.update({key: value for key, value in family_params.items() if key in allowed_keys})
+            strategy_params["strategy_family"] = family
+        for overlay_name in overlays:
+            strategy_params = apply_overlay(overlay_name, strategy_params)
+        strategy_params_by_name[strategy_name] = strategy_params
+    return base_strategy_params, strategy_params_by_name
+
 
 
 def _compute_drawdown(equity_curve: pd.Series) -> float:
@@ -393,46 +469,21 @@ def main() -> int:
             finalize_manifest(manifest, "success", stats={"skipped": True})
             return 0
 
-        strategy_defaults = config.get("strategy_defaults", {}) if isinstance(config.get("strategy_defaults"), dict) else {}
-        vc_defaults = (
-            strategy_defaults.get("vol_compression_v1", {})
-            if isinstance(strategy_defaults.get("vol_compression_v1"), dict)
-            else {}
+        base_strategy_params, strategy_params_by_name = _build_strategy_params_by_name(
+            strategies=strategies,
+            config=config,
+            trade_day_timezone=trade_day_timezone,
+            overlays=overlays,
         )
-
-        def _param(name: str, default: object) -> object:
-            if name in config:
-                return config[name]
-            if name in vc_defaults:
-                return vc_defaults[name]
-            return default
-
-        strategy_params = {
-            "trade_day_timezone": trade_day_timezone,
-            "one_trade_per_day": True,
-            "compression_rv_pct_max": float(_param("compression_rv_pct_max", 10.0)),
-            "compression_range_ratio_max": float(_param("compression_range_ratio_max", 0.8)),
-            "breakout_confirm_bars": int(_param("breakout_confirm_bars", 0)),
-            "breakout_confirm_buffer_bps": float(_param("breakout_confirm_buffer_bps", 0.0)),
-            "max_hold_bars": int(_param("max_hold_bars", 48)),
-            "volatility_exit_rv_pct": float(_param("volatility_exit_rv_pct", 40.0)),
-            "expansion_timeout_bars": int(_param("expansion_timeout_bars", 0)),
-            "expansion_min_r": float(_param("expansion_min_r", 0.5)),
-            "adaptive_exit_enabled": bool(_param("adaptive_exit_enabled", False)),
-            "adaptive_activation_r": float(_param("adaptive_activation_r", 1.0)),
-            "adaptive_trail_lookback_bars": int(_param("adaptive_trail_lookback_bars", 8)),
-            "adaptive_trail_buffer_bps": float(_param("adaptive_trail_buffer_bps", 0.0)),
-        }
-        for overlay_name in overlays:
-            strategy_params = apply_overlay(overlay_name, strategy_params)
 
         engine_results = run_engine(
             run_id=run_id,
             symbols=symbols,
             strategies=strategies,
-            params=strategy_params,
+            params=base_strategy_params,
             cost_bps=cost_bps,
             data_root=DATA_ROOT,
+            params_by_strategy=strategy_params_by_name,
         )
 
         for strategy_name in strategies:
@@ -448,10 +499,13 @@ def main() -> int:
             logging.warning("Multiple strategies detected; trades will be combined without strategy attribution.")
 
         trades_by_symbol: Dict[str, List[pd.DataFrame]] = {symbol: [] for symbol in symbols}
-        for _, frame in engine_results["strategy_frames"].items():
+        for strategy_name, frame in engine_results["strategy_frames"].items():
             for symbol, symbol_frame in frame.groupby("symbol", sort=True):
                 trades_by_symbol.setdefault(symbol, []).append(
-                    _extract_trades(symbol_frame, max_hold_bars=int(strategy_params.get("max_hold_bars", 48)))
+                    _extract_trades(
+                        symbol_frame,
+                        max_hold_bars=int(strategy_params_by_name.get(strategy_name, {}).get("max_hold_bars", 48)),
+                    )
                 )
 
         all_symbol_trades: List[pd.DataFrame] = []

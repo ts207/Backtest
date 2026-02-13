@@ -10,3 +10,21 @@ stages:
   - checklist
   - backtest
   - report
+
+strategy_family_params:
+  Carry:
+    funding_percentile_entry_min: 97.5
+    funding_percentile_entry_max: 99.5
+    normalization_exit_percentile: 65.0
+    normalization_exit_consecutive_bars: 2
+    sizing_curve: linear
+  MeanReversion:
+    zscore_entry_abs: 2.25
+    extension_entry_abs: 2.75
+    reversion_target_zscore: 0.5
+    stop_zscore_abs: null
+  Spread:
+    spread_zscore_entry_abs: 2.5
+    dislocation_threshold_bps: 20.0
+    convergence_target_zscore: 0.5
+    max_hold_bars: 48

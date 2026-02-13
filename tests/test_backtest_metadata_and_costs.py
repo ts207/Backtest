@@ -110,3 +110,69 @@ def test_backtest_main_writes_cost_decomposition_and_reproducibility(monkeypatch
     assert "reproducibility" in payload
     assert set(["gross_alpha", "fees", "slippage", "impact", "net_alpha"]).issubset(payload["cost_decomposition"].keys())
     assert "config_digest" in payload["reproducibility"]
+
+
+def test_backtest_main_passes_strategy_specific_params(monkeypatch, tmp_path: Path) -> None:
+    run_id = "bt_strategy_params"
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(bts, "DATA_ROOT", tmp_path)
+
+    captured_kwargs = {}
+
+    def _fake_engine(**kwargs):
+        captured_kwargs.update(kwargs)
+        engine_dir = tmp_path / "runs" / run_id / "engine"
+        engine_dir.mkdir(parents=True, exist_ok=True)
+        frame = pd.DataFrame(
+            {
+                "timestamp": pd.to_datetime(["2024-01-01T00:00:00Z"]),
+                "symbol": ["BTCUSDT"],
+                "pos": [0],
+                "ret": [0.0],
+                "pnl": [0.0],
+                "close": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "high_96": [101.0],
+                "low_96": [99.0],
+            }
+        )
+        portfolio = pd.DataFrame({"timestamp": pd.to_datetime(["2024-01-01T00:00:00Z"]), "portfolio_pnl": [0.0]})
+        return {"engine_dir": engine_dir, "strategy_frames": {"funding_extreme_reversal_v1": frame}, "portfolio": portfolio}
+
+    cfg = tmp_path / "family.yaml"
+    cfg.write_text(
+        """
+strategy_family_params:
+  Carry:
+    funding_percentile_entry_min: 96.0
+    funding_percentile_entry_max: 99.0
+strategy_families:
+  funding_extreme_reversal_v1: Carry
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(bts, "run_engine", _fake_engine)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "backtest_strategies.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT",
+            "--strategies",
+            "funding_extreme_reversal_v1",
+            "--config",
+            str(cfg),
+            "--force",
+            "1",
+        ],
+    )
+
+    assert bts.main() == 0
+    params_by_strategy = captured_kwargs["params_by_strategy"]
+    assert "funding_extreme_reversal_v1" in params_by_strategy
+    assert params_by_strategy["funding_extreme_reversal_v1"]["funding_percentile_entry_min"] == 96.0
