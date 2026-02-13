@@ -62,3 +62,35 @@ def test_split_overlap_diagnostics_passes_when_gap_satisfies_embargo() -> None:
 
     diag = validate_expectancy_traps._split_overlap_diagnostics(events_df, embargo_bars=1)
     assert diag["pass"] is True
+
+
+def test_parameter_stability_diagnostics_emits_sections() -> None:
+    trap_df = pd.DataFrame(
+        [
+            {"condition": "compression", "horizon": 4, "event_samples": 120, "event_mean": 0.01, "event_t": 2.5},
+            {"condition": "compression_plus_funding_low", "horizon": 16, "event_samples": 140, "event_mean": 0.008, "event_t": 2.2},
+        ]
+    )
+    diag = validate_expectancy_traps._parameter_stability_diagnostics(
+        trap_df,
+        base_min_samples=100,
+        base_tstat_threshold=2.0,
+        sample_delta=20,
+        tstat_delta=0.3,
+    )
+    assert "pass" in diag
+    assert "rank_consistency" in diag
+    assert "scenarios" in diag
+
+
+def test_capacity_diagnostics_computes_symbol_details() -> None:
+    events_df = pd.DataFrame(
+        [
+            {"symbol": "BTCUSDT", "enter_ts": "2024-01-01T00:00:00Z"},
+            {"symbol": "BTCUSDT", "enter_ts": "2024-01-01T01:00:00Z"},
+            {"symbol": "ETHUSDT", "enter_ts": "2024-01-01T02:00:00Z"},
+        ]
+    )
+    diag = validate_expectancy_traps._capacity_diagnostics(events_df, ["BTCUSDT", "ETHUSDT"], min_events_per_day=0.1)
+    assert diag["pass"] is True
+    assert len(diag["symbol_details"]) == 2

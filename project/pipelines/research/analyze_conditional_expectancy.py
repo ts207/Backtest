@@ -283,6 +283,13 @@ def _analyze_symbol(
     compression = (df[rv_pct_col] <= 10.0) & (df["range_96"] <= 0.8 * df[range_med_col])
     compression = compression.fillna(False)
 
+    oi_delta = pd.to_numeric(df.get("oi_delta_1h", pd.Series(index=df.index, dtype=float)), errors="coerce")
+    oi_positive = (oi_delta > 0).fillna(False)
+    liquidation_notional = pd.to_numeric(df.get("liquidation_notional", pd.Series(index=df.index, dtype=float)), errors="coerce")
+    liq_roll = liquidation_notional.rolling(window=96, min_periods=24).median()
+    liquidation_spike = (liquidation_notional > (liq_roll * 2.0)).fillna(False)
+    revision_lagged = (pd.to_numeric(df.get("revision_lag_bars", 0), errors="coerce").fillna(0) > 0)
+
     condition_returns: Dict[Tuple[str, int], pd.Series] = {}
     rows: List[Dict[str, object]] = []
 
@@ -296,6 +303,9 @@ def _analyze_symbol(
             "compression_plus_funding_low": compression & (funding_bucket == "low"),
             "compression_plus_funding_mid": compression & (funding_bucket == "mid"),
             "compression_plus_funding_high": compression & (funding_bucket == "high"),
+            "compression_plus_oi_positive": compression & oi_positive,
+            "compression_plus_liquidation_spike": compression & liquidation_spike,
+            "compression_plus_revision_lagged": compression & revision_lagged,
         }
 
         for condition_name, mask in masks.items():

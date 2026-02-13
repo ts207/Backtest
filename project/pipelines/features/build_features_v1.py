@@ -59,6 +59,98 @@ def _partition_complete(path: Path, expected_rows: int) -> bool:
         return False
 
 
+def _read_optional_time_series(path: Path) -> pd.DataFrame:
+    files = list_parquet_files(path)
+    if not files:
+        return pd.DataFrame()
+    frame = read_parquet(files)
+    if frame.empty or "timestamp" not in frame.columns:
+        return pd.DataFrame()
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
+    frame = frame.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+    return frame
+
+
+def _merge_optional_oi_liquidation(
+    bars: pd.DataFrame,
+    symbol: str,
+    market: str,
+    run_id: str,
+) -> pd.DataFrame:
+    out = bars.copy()
+
+    oi_candidates = [
+        DATA_ROOT / "lake" / "raw" / "binance" / market / symbol / "open_interest" / "5m",
+        DATA_ROOT / "lake" / "runs" / run_id / "raw" / "binance" / market / symbol / "open_interest" / "5m",
+    ]
+    oi_frame = pd.DataFrame()
+    for candidate in oi_candidates:
+        oi_frame = _read_optional_time_series(candidate)
+        if not oi_frame.empty:
+            break
+
+    if not oi_frame.empty:
+        oi_col = None
+        for c in ["sum_open_interest_value", "sum_open_interest", "open_interest"]:
+            if c in oi_frame.columns:
+                oi_col = c
+                break
+        if oi_col is not None:
+            oi_series = oi_frame[["timestamp", oi_col]].rename(columns={oi_col: "oi_notional"}).copy()
+            oi_series["oi_notional"] = pd.to_numeric(oi_series["oi_notional"], errors="coerce")
+            out = pd.merge_asof(
+                out.sort_values("timestamp"),
+                oi_series.sort_values("timestamp"),
+                on="timestamp",
+                direction="backward",
+            )
+        else:
+            out["oi_notional"] = np.nan
+    else:
+        out["oi_notional"] = np.nan
+
+    liq_candidates = [
+        DATA_ROOT / "lake" / "raw" / "binance" / market / symbol / "liquidation_snapshot",
+        DATA_ROOT / "lake" / "runs" / run_id / "raw" / "binance" / market / symbol / "liquidation_snapshot",
+    ]
+    liq_frame = pd.DataFrame()
+    for candidate in liq_candidates:
+        liq_frame = _read_optional_time_series(candidate)
+        if not liq_frame.empty:
+            break
+
+    if not liq_frame.empty:
+        value_col = None
+        for c in ["notional_usd", "quote_qty", "notional"]:
+            if c in liq_frame.columns:
+                value_col = c
+                break
+        count_col = None
+        for c in ["event_count", "count", "n_events"]:
+            if c in liq_frame.columns:
+                count_col = c
+                break
+
+        liq_payload = pd.DataFrame({"timestamp": liq_frame["timestamp"]})
+        liq_payload["liquidation_notional"] = pd.to_numeric(liq_frame[value_col], errors="coerce") if value_col else 0.0
+        liq_payload["liquidation_count"] = pd.to_numeric(liq_frame[count_col], errors="coerce") if count_col else 1.0
+        out = pd.merge_asof(
+            out.sort_values("timestamp"),
+            liq_payload.sort_values("timestamp"),
+            on="timestamp",
+            direction="backward",
+        )
+    else:
+        out["liquidation_notional"] = 0.0
+        out["liquidation_count"] = 0.0
+
+    out["oi_notional"] = pd.to_numeric(out["oi_notional"], errors="coerce")
+    out["oi_delta_1h"] = out["oi_notional"].diff(4)
+    out["liquidation_notional"] = pd.to_numeric(out["liquidation_notional"], errors="coerce").fillna(0.0)
+    out["liquidation_count"] = pd.to_numeric(out["liquidation_count"], errors="coerce").fillna(0.0)
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build features v1")
     parser.add_argument("--run_id", required=True)
@@ -67,6 +159,7 @@ def main() -> int:
     parser.add_argument("--force", type=int, default=0)
     # Compatibility flag from run_all; feature build already tolerates missing funding.
     parser.add_argument("--allow_missing_funding", type=int, default=0)
+    parser.add_argument("--revision_lag_bars", type=int, default=0)
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
@@ -169,8 +262,25 @@ def main() -> int:
 
             # Backward-compatible alias for any code still reading funding_rate.
             bars["funding_rate"] = bars["funding_rate_scaled"]
+            bars = _merge_optional_oi_liquidation(bars, symbol=symbol, market=market, run_id=run_id)
+            bars["revision_lag_bars"] = int(args.revision_lag_bars)
+            bars["revision_lag_minutes"] = int(args.revision_lag_bars) * 15
 
-            features = bars[["timestamp", "open", "high", "low", "close", "funding_rate_scaled", "funding_rate"]].copy()
+            features = bars[[
+                "timestamp",
+                "open",
+                "high",
+                "low",
+                "close",
+                "funding_rate_scaled",
+                "funding_rate",
+                "oi_notional",
+                "oi_delta_1h",
+                "liquidation_notional",
+                "liquidation_count",
+                "revision_lag_bars",
+                "revision_lag_minutes",
+            ]].copy()
             features["logret_1"] = np.log(features["close"]).diff()
             features["rv_96"] = features["logret_1"].rolling(window=96, min_periods=96).std()
             features["rv_pct_17280"] = _rolling_percentile(features["rv_96"], window=17280)
@@ -202,6 +312,9 @@ def main() -> int:
                 "rows_written": int(len(features)),
                 "coverage_start": features["timestamp"].min().isoformat(),
                 "coverage_end": features["timestamp"].max().isoformat(),
+                "revision_lag_bars": int(args.revision_lag_bars),
+                "oi_non_null_rows": int(features["oi_notional"].notna().sum()),
+                "liquidation_non_zero_rows": int((features["liquidation_notional"] > 0).sum()),
                 "partitions_written": partitions_written,
                 "partitions_skipped": partitions_skipped,
             }
