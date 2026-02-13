@@ -16,7 +16,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.config import load_configs
 from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet, write_parquet
-from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from pipelines._lib.run_manifest import (
+    finalize_manifest,
+    schema_hash_from_columns,
+    start_manifest,
+    validate_input_provenance,
+)
 from pipelines._lib.validation import ensure_utc_timestamp, validate_columns
 
 
@@ -88,6 +93,12 @@ def main() -> int:
         "trade_day_timezone": config.get("trade_day_timezone", "UTC"),
         "force": int(args.force),
         "allow_missing_funding": int(args.allow_missing_funding),
+        "source_vendor": "binance",
+        "source_exchange": "binance",
+        "schema_versions": {
+            "cleaned_bars": "cleaned_bars_15m_v1",
+            "funding": "funding_15m_v1",
+        },
     }
     manifest = start_manifest("build_features_v1", run_id, params, inputs, outputs)
     stats: Dict[str, object] = {"symbols": {}}
@@ -108,9 +119,37 @@ def main() -> int:
             ensure_utc_timestamp(bars["timestamp"], "timestamp")
             bars = bars.sort_values("timestamp").reset_index(drop=True)
 
-            inputs.append({"path": str(cleaned_dir), **_collect_stats(bars)})
+            bars_stats = _collect_stats(bars)
+            inputs.append(
+                {
+                    "path": str(cleaned_dir),
+                    **bars_stats,
+                    "provenance": {
+                        "vendor": "binance",
+                        "exchange": "binance",
+                        "schema_version": "cleaned_bars_15m_v1",
+                        "schema_hash": schema_hash_from_columns(bars.columns.tolist()),
+                        "extraction_start": bars_stats.get("start_ts"),
+                        "extraction_end": bars_stats.get("end_ts"),
+                    },
+                }
+            )
             if market == "perp" and not funding.empty:
-                inputs.append({"path": str(funding_dir), **_collect_stats(funding)})
+                funding_stats = _collect_stats(funding)
+                inputs.append(
+                    {
+                        "path": str(funding_dir),
+                        **funding_stats,
+                        "provenance": {
+                            "vendor": "binance",
+                            "exchange": "binance",
+                            "schema_version": "funding_15m_v1",
+                            "schema_hash": schema_hash_from_columns(funding.columns.tolist()),
+                            "extraction_start": funding_stats.get("start_ts"),
+                            "extraction_end": funding_stats.get("end_ts"),
+                        },
+                    }
+                )
 
             if market == "perp" and not funding.empty:
                 funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
@@ -167,6 +206,7 @@ def main() -> int:
                 "partitions_skipped": partitions_skipped,
             }
 
+        validate_input_provenance(inputs)
         finalize_manifest(manifest, "success", stats=stats)
         return 0
     except Exception as exc:
