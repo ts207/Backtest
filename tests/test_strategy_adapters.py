@@ -62,6 +62,29 @@ def test_strategy_adapter_generates_valid_positions() -> None:
     assert set(out.unique()).issubset({-1, 0, 1})
 
 
+def test_strategy_adapter_filters_irrelevant_params(monkeypatch) -> None:
+    strategy = get_strategy("funding_extreme_reversal_v1")
+    captured = {}
+
+    def _fake_generate_positions(bars, features, params):
+        captured.update(params)
+        return pd.Series([0] * len(bars), index=pd.DatetimeIndex(bars["timestamp"]))
+
+    monkeypatch.setattr(strategy._base, "generate_positions", _fake_generate_positions)
+    bars, features = _sample_bars_and_features()
+    strategy.generate_positions(
+        bars,
+        features,
+        params={
+            "trade_day_timezone": "UTC",
+            "compression_rv_pct_max": 10.0,
+            "funding_percentile_entry_min": 98.0,
+        },
+    )
+
+    assert "trade_day_timezone" in captured
+    assert "compression_rv_pct_max" in captured
+    assert "funding_percentile_entry_min" not in captured
 def test_new_strategies_generate_positions_and_metadata() -> None:
     bars, features = _sample_bars_and_features()
 

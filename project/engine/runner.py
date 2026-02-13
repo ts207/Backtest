@@ -5,7 +5,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
@@ -339,6 +339,7 @@ def run_engine(
     params: Dict[str, object],
     cost_bps: float,
     data_root: Path = DATA_ROOT,
+    params_by_strategy: Optional[Dict[str, Dict[str, object]]] = None,
 ) -> Dict[str, object]:
     engine_dir = data_root / "runs" / run_id / "engine"
     ensure_dir(engine_dir)
@@ -352,7 +353,8 @@ def run_engine(
         symbol_results: List[StrategyResult] = []
         for symbol in symbols:
             bars, features = _load_symbol_data(data_root, symbol, run_id=run_id)
-            result = _strategy_returns(symbol, bars, features, strategy_name, params, cost_bps)
+            strategy_params = params_by_strategy.get(strategy_name, params) if params_by_strategy else params
+            result = _strategy_returns(symbol, bars, features, strategy_name, strategy_params, cost_bps)
             symbol_results.append(result)
 
         combined = _aggregate_strategy([res.data for res in symbol_results])
