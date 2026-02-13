@@ -1,0 +1,5 @@
+window_x,window_y,n,p_secondary_shock,delta_realized_vol_mean,p_secondary_monotone_non_decreasing,delta_realized_vol_monotone_non_decreasing
+0,48,147,0.07482993197278912,0.0004996640028146433,False,False
+0,96,147,0.1564625850340136,0.0007919958199250188,False,False
+24,96,147,0.14965986394557823,0.0008068729849555497,False,False
+48,144,147,0.1360544217687075,0.00040345979497966966,False,False

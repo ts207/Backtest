@@ -1,0 +1,87 @@
+[
+  {
+    "dataset_id": "event_calendar_placeholder",
+    "sensor": "expectation",
+    "roles": [
+      "trigger",
+      "state"
+    ],
+    "resolution": "scheduled",
+    "source": "external",
+    "available": false
+  },
+  {
+    "dataset_id": "spot_ohlcv_15m",
+    "sensor": "synchronization",
+    "roles": [
+      "trigger",
+      "confirm"
+    ],
+    "resolution": "15m",
+    "source": "binance",
+    "available": false
+  },
+  {
+    "dataset_id": "um_abma_l1_quotes",
+    "sensor": "liquidity_state",
+    "roles": [
+      "confirm",
+      "invalidate"
+    ],
+    "resolution": "sub_minute",
+    "source": "binance",
+    "available": false
+  },
+  {
+    "dataset_id": "um_abma_l1_trades",
+    "sensor": "liquidity_state",
+    "roles": [
+      "confirm"
+    ],
+    "resolution": "sub_minute",
+    "source": "binance",
+    "available": false
+  },
+  {
+    "dataset_id": "um_funding_rates",
+    "sensor": "crowding",
+    "roles": [
+      "state"
+    ],
+    "resolution": "8h",
+    "source": "binance",
+    "available": true
+  },
+  {
+    "dataset_id": "um_liquidation_snapshot",
+    "sensor": "forced_flow",
+    "roles": [
+      "trigger",
+      "confirm"
+    ],
+    "resolution": "minute",
+    "source": "binance",
+    "available": true
+  },
+  {
+    "dataset_id": "um_open_interest_hist",
+    "sensor": "crowding",
+    "roles": [
+      "state"
+    ],
+    "resolution": "5m",
+    "source": "binance",
+    "available": true
+  },
+  {
+    "dataset_id": "um_perp_ohlcv_15m",
+    "sensor": "liquidity_state",
+    "roles": [
+      "state",
+      "invalidate"
+    ],
+    "resolution": "15m",
+    "source": "binance",
+    "available": true
+  }
+]

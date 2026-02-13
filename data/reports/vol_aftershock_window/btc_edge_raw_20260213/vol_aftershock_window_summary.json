@@ -1,0 +1,41 @@
+{
+  "actions_generated": 0,
+  "controls": 588,
+  "event_type": "vol_aftershock_window",
+  "events": 588,
+  "outputs": {
+    "conditional_hazards": "/workspace/Backtest/data/reports/vol_aftershock_window/btc_edge_raw_20260213/vol_aftershock_window_conditional_hazards.csv",
+    "controls": "/workspace/Backtest/data/reports/vol_aftershock_window/btc_edge_raw_20260213/vol_aftershock_window_controls.csv",
+    "deltas": "/workspace/Backtest/data/reports/vol_aftershock_window/btc_edge_raw_20260213/vol_aftershock_window_matched_deltas.csv",
+    "events": "/workspace/Backtest/data/reports/vol_aftershock_window/btc_edge_raw_20260213/vol_aftershock_window_events.csv",
+    "hazards": "/workspace/Backtest/data/reports/vol_aftershock_window/btc_edge_raw_20260213/vol_aftershock_window_hazards.csv",
+    "phase_stability": "/workspace/Backtest/data/reports/vol_aftershock_window/btc_edge_raw_20260213/vol_aftershock_window_phase_stability.csv",
+    "placebo_deltas": "/workspace/Backtest/data/reports/vol_aftershock_window/btc_edge_raw_20260213/vol_aftershock_window_placebo_deltas.csv",
+    "re_risk_note": "/workspace/Backtest/data/reports/vol_aftershock_window/btc_edge_raw_20260213/vol_aftershock_window_re_risk_note.md",
+    "sign_stability": "/workspace/Backtest/data/reports/vol_aftershock_window/btc_edge_raw_20260213/vol_aftershock_window_sign_stability.csv",
+    "window_sensitivity": "/workspace/Backtest/data/reports/vol_aftershock_window/btc_edge_raw_20260213/vol_aftershock_window_window_sensitivity.csv"
+  },
+  "phase": 1,
+  "window": {
+    "x": 0,
+    "y": 96
+  },
+  "window_sweep": [
+    {
+      "x": 0,
+      "y": 48
+    },
+    {
+      "x": 0,
+      "y": 96
+    },
+    {
+      "x": 24,
+      "y": 96
+    },
+    {
+      "x": 48,
+      "y": 144
+    }
+  ]
+}

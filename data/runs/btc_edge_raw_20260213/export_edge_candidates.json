@@ -1,0 +1,34 @@
+{
+  "error": null,
+  "finished_at": "2026-02-13T21:10:44.868903+00:00",
+  "inputs": [],
+  "outputs": [
+    {
+      "end_ts": null,
+      "path": "/workspace/Backtest/data/reports/edge_candidates/btc_edge_raw_20260213/edge_candidates_normalized.csv",
+      "rows": 10,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/workspace/Backtest/data/reports/edge_candidates/btc_edge_raw_20260213/edge_candidates_normalized.json",
+      "rows": 10,
+      "start_ts": null
+    }
+  ],
+  "parameters": {
+    "execute": 0,
+    "hypothesis_datasets": "auto",
+    "hypothesis_max_fused": 24,
+    "run_hypothesis_generator": 1,
+    "run_id": "btc_edge_raw_20260213",
+    "symbols": "BTCUSDT"
+  },
+  "run_id": "btc_edge_raw_20260213",
+  "stage": "export_edge_candidates",
+  "started_at": "2026-02-13T21:10:44.823473+00:00",
+  "stats": {
+    "candidate_count": 10
+  },
+  "status": "success"
+}

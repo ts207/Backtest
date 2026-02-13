@@ -1,0 +1,77 @@
+{
+  "error": null,
+  "finished_at": "2026-02-13T21:06:36.030247+00:00",
+  "inputs": [],
+  "outputs": [
+    {
+      "end_ts": null,
+      "path": "/workspace/Backtest/data/reports/hypothesis_generator/btc_edge_raw_20260213/dataset_introspection.json",
+      "rows": 8,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/workspace/Backtest/data/reports/hypothesis_generator/btc_edge_raw_20260213/template_hypotheses.json",
+      "rows": 17,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/workspace/Backtest/data/reports/hypothesis_generator/btc_edge_raw_20260213/fusion_hypotheses.json",
+      "rows": 8,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/workspace/Backtest/data/reports/hypothesis_generator/btc_edge_raw_20260213/hypothesis_candidates.json",
+      "rows": 25,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/workspace/Backtest/data/reports/hypothesis_generator/btc_edge_raw_20260213/phase1_hypothesis_queue.jsonl",
+      "rows": 25,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/workspace/Backtest/data/reports/hypothesis_generator/btc_edge_raw_20260213/phase1_hypothesis_queue.csv",
+      "rows": 25,
+      "start_ts": null
+    },
+    {
+      "end_ts": null,
+      "path": "/workspace/Backtest/data/reports/hypothesis_generator/btc_edge_raw_20260213/summary.md",
+      "rows": 25,
+      "start_ts": null
+    }
+  ],
+  "parameters": {
+    "datasets": [
+      "event_calendar_placeholder",
+      "spot_ohlcv_15m",
+      "um_abma_l1_quotes",
+      "um_abma_l1_trades",
+      "um_funding_rates",
+      "um_liquidation_snapshot",
+      "um_open_interest_hist",
+      "um_perp_ohlcv_15m"
+    ],
+    "max_fused": 24,
+    "run_id": "btc_edge_raw_20260213",
+    "symbols": [
+      "BTCUSDT"
+    ]
+  },
+  "run_id": "btc_edge_raw_20260213",
+  "stage": "generate_hypothesis_queue",
+  "started_at": "2026-02-13T21:06:36.013624+00:00",
+  "stats": {
+    "candidate_count": 25,
+    "dataset_count": 8,
+    "fusion_count": 8,
+    "queue_count": 25,
+    "template_count": 17
+  },
+  "status": "success"
+}

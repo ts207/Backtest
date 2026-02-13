@@ -1,0 +1,3 @@
+symbol,outcome,auc_hazard,auc_hazard_control,auc_hazard_delta
+BTCUSDT,range_expansion,2.8803973383929464,1.4453493804292865,1.4350479579636595
+BTCUSDT,secondary_shock,1.8704204314558535,0.037387183144372005,1.8330332483114813
