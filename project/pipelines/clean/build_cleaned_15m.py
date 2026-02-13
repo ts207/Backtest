@@ -17,7 +17,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.config import load_configs
 from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet, write_parquet
-from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from pipelines._lib.run_manifest import (
+    finalize_manifest,
+    schema_hash_from_columns,
+    start_manifest,
+    validate_input_provenance,
+)
 from pipelines._lib.sanity import (
     assert_funding_event_grid,
     assert_funding_sane,
@@ -142,6 +147,12 @@ def main() -> int:
         "allow_missing_funding": int(args.allow_missing_funding),
         "allow_constant_funding": int(args.allow_constant_funding),
         "allow_funding_timestamp_rounding": int(args.allow_funding_timestamp_rounding),
+        "source_vendor": "binance",
+        "source_exchange": "binance",
+        "schema_versions": {
+            "ohlcv": "ohlcv_15m_v1",
+            "funding": "funding_v1",
+        },
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
@@ -231,7 +242,20 @@ def main() -> int:
             funding_rate_std = float(funding_rate_values.std()) if len(funding_rate_values) else None
 
             inputs.append(
-                {"path": str(raw_dir), "rows": int(len(raw)), "start_ts": raw_start.isoformat(), "end_ts": raw_end.isoformat()}
+                {
+                    "path": str(raw_dir),
+                    "rows": int(len(raw)),
+                    "start_ts": raw_start.isoformat(),
+                    "end_ts": raw_end.isoformat(),
+                    "provenance": {
+                        "vendor": "binance",
+                        "exchange": "binance",
+                        "schema_version": "ohlcv_15m_v1",
+                        "schema_hash": schema_hash_from_columns(raw.columns.tolist()),
+                        "extraction_start": raw_start.isoformat(),
+                        "extraction_end": raw_end.isoformat(),
+                    },
+                }
             )
             if market == "perp" and not funding.empty:
                 inputs.append(
@@ -240,6 +264,14 @@ def main() -> int:
                         "rows": int(len(funding)),
                         "start_ts": funding["timestamp"].min().isoformat(),
                         "end_ts": funding["timestamp"].max().isoformat(),
+                        "provenance": {
+                            "vendor": "binance",
+                            "exchange": "binance",
+                            "schema_version": "funding_v1",
+                            "schema_hash": schema_hash_from_columns(funding.columns.tolist()),
+                            "extraction_start": funding["timestamp"].min().isoformat(),
+                            "extraction_end": funding["timestamp"].max().isoformat(),
+                        },
                     }
                 )
 
@@ -357,6 +389,7 @@ def main() -> int:
                 "partitions_skipped": partitions_skipped,
             }
 
+        validate_input_provenance(inputs)
         finalize_manifest(manifest, "success", stats=stats)
         return 0
     except Exception as exc:

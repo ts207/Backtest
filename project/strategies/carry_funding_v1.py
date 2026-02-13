@@ -98,6 +98,10 @@ class CarryFundingV1:
         out.attrs["strategy_metadata"] = {
             "family": "carry",
             "strategy_id": self.name,
+            "required_inputs": {
+                "funding_rate_scaled": "optional (defaults to 0.0 when unavailable)",
+                "borrow_rate_scaled": "optional (defaults to 0.0 when unavailable)",
+            },
             "key_params": {
                 "funding_extreme_threshold": extreme_threshold,
                 "funding_neutral_threshold": neutral_threshold,

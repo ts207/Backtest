@@ -33,6 +33,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--min_expectancy_evidence", type=int, default=1)
     parser.add_argument("--min_robust_survivors", type=int, default=1)
     parser.add_argument("--require_expectancy_exists", type=int, default=1)
+    parser.add_argument("--require_stability_pass", type=int, default=1)
+    parser.add_argument("--require_capacity_pass", type=int, default=1)
     return parser.parse_args()
 
 
@@ -129,6 +131,21 @@ def _build_payload(
     if not survivors_ok:
         reasons.append(f"robust survivors below threshold ({survivor_count} < {args.min_robust_survivors})")
 
+    stability_payload = robustness_payload.get("stability_diagnostics", {}) if isinstance(robustness_payload, dict) else {}
+    capacity_payload = robustness_payload.get("capacity_diagnostics", {}) if isinstance(robustness_payload, dict) else {}
+
+    require_stability = bool(int(args.require_stability_pass))
+    stability_pass = bool(stability_payload.get("pass", False)) if require_stability else True
+    gates.append(_gate_result("stability_pass", stability_pass, bool(stability_payload.get("pass", False)), require_stability))
+    if not stability_pass:
+        reasons.append("stability diagnostics did not pass")
+
+    require_capacity = bool(int(args.require_capacity_pass))
+    capacity_pass = bool(capacity_payload.get("pass", False)) if require_capacity else True
+    gates.append(_gate_result("capacity_pass", capacity_pass, bool(capacity_payload.get("pass", False)), require_capacity))
+    if not capacity_pass:
+        reasons.append("capacity diagnostics did not pass")
+
     decision = "PROMOTE" if all(gate["passed"] for gate in gates) else "KEEP_RESEARCH"
     return {
         "run_id": run_id,
@@ -140,6 +157,8 @@ def _build_payload(
             "min_expectancy_evidence": int(args.min_expectancy_evidence),
             "min_robust_survivors": int(args.min_robust_survivors),
             "require_expectancy_exists": bool(int(args.require_expectancy_exists)),
+            "require_stability_pass": bool(int(args.require_stability_pass)),
+            "require_capacity_pass": bool(int(args.require_capacity_pass)),
         },
         "metrics": {
             "edge_candidate_rows": candidate_rows,
@@ -147,6 +166,8 @@ def _build_payload(
             "expectancy_exists": expectancy_exists,
             "expectancy_evidence_count": expectancy_evidence_count,
             "robust_survivor_count": survivor_count,
+            "stability_pass": bool(stability_payload.get("pass", False)),
+            "capacity_pass": bool(capacity_payload.get("pass", False)),
         },
         "inputs": paths,
     }

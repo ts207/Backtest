@@ -150,6 +150,53 @@ def _bh_adjust(p_values: pd.Series) -> pd.Series:
     return out
 
 
+def build_walk_forward_split_labels(
+    df: pd.DataFrame,
+    *,
+    time_col: str,
+    symbol_col: str = "symbol",
+    train_frac: float = 0.6,
+    validation_frac: float = 0.2,
+) -> pd.Series:
+    """Assign deterministic time-ordered walk-forward labels (train/validation/test)."""
+    if df.empty:
+        return pd.Series(dtype="object", index=df.index)
+
+    out = pd.Series("", index=df.index, dtype="object")
+
+    def _assign_group(group: pd.DataFrame) -> None:
+        ordered = group.sort_values(time_col).index.to_list()
+        n = len(ordered)
+        if n == 0:
+            return
+        train_end = max(1, int(np.floor(n * train_frac)))
+        val_end = max(train_end + 1, int(np.floor(n * (train_frac + validation_frac))))
+        train_end = min(train_end, n - 1) if n > 1 else 1
+        val_end = min(max(val_end, train_end), n - 1) if n > 2 else train_end
+
+        for pos, idx in enumerate(ordered):
+            if pos < train_end:
+                out.at[idx] = "train"
+            elif pos < val_end:
+                out.at[idx] = "validation"
+            else:
+                out.at[idx] = "test"
+
+        if n == 1:
+            out.at[ordered[0]] = "test"
+        elif n == 2:
+            out.at[ordered[0]] = "train"
+            out.at[ordered[1]] = "test"
+
+    if symbol_col in df.columns:
+        for _, g in df.groupby(symbol_col, dropna=False):
+            _assign_group(g)
+    else:
+        _assign_group(df)
+
+    return out
+
+
 def _select_expectancy_candidates(
     combined_df: pd.DataFrame,
     min_samples: int,
@@ -236,6 +283,13 @@ def _analyze_symbol(
     compression = (df[rv_pct_col] <= 10.0) & (df["range_96"] <= 0.8 * df[range_med_col])
     compression = compression.fillna(False)
 
+    oi_delta = pd.to_numeric(df.get("oi_delta_1h", pd.Series(index=df.index, dtype=float)), errors="coerce")
+    oi_positive = (oi_delta > 0).fillna(False)
+    liquidation_notional = pd.to_numeric(df.get("liquidation_notional", pd.Series(index=df.index, dtype=float)), errors="coerce")
+    liq_roll = liquidation_notional.rolling(window=96, min_periods=24).median()
+    liquidation_spike = (liquidation_notional > (liq_roll * 2.0)).fillna(False)
+    revision_lagged = (pd.to_numeric(df.get("revision_lag_bars", 0), errors="coerce").fillna(0) > 0)
+
     condition_returns: Dict[Tuple[str, int], pd.Series] = {}
     rows: List[Dict[str, object]] = []
 
@@ -249,6 +303,9 @@ def _analyze_symbol(
             "compression_plus_funding_low": compression & (funding_bucket == "low"),
             "compression_plus_funding_mid": compression & (funding_bucket == "mid"),
             "compression_plus_funding_high": compression & (funding_bucket == "high"),
+            "compression_plus_oi_positive": compression & oi_positive,
+            "compression_plus_liquidation_spike": compression & liquidation_spike,
+            "compression_plus_revision_lagged": compression & revision_lagged,
         }
 
         for condition_name, mask in masks.items():

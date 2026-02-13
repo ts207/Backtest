@@ -388,6 +388,8 @@ def _cost_components_from_frame(
             "fees": 0.0,
             "slippage": 0.0,
             "impact": 0.0,
+            "funding_pnl": 0.0,
+            "borrow_cost": 0.0,
             "net_alpha": 0.0,
             "turnover_units": 0.0,
         }
@@ -399,12 +401,18 @@ def _cost_components_from_frame(
     fee_cost = float(turnover.sum() * (float(fee_bps) / 10_000.0))
     slippage_cost = float(turnover.sum() * (float(slippage_bps) / 10_000.0))
     impact_cost = float(turnover.sum() * (float(impact_bps) / 10_000.0))
-    net = gross - fee_cost - slippage_cost - impact_cost
+    funding_series = frame["funding_pnl"] if "funding_pnl" in frame.columns else pd.Series(0.0, index=frame.index)
+    borrow_series = frame["borrow_cost"] if "borrow_cost" in frame.columns else pd.Series(0.0, index=frame.index)
+    funding_component = float(pd.to_numeric(funding_series, errors="coerce").fillna(0.0).sum())
+    borrow_component = float(pd.to_numeric(borrow_series, errors="coerce").fillna(0.0).sum())
+    net = gross - fee_cost - slippage_cost - impact_cost + funding_component - borrow_component
     return {
         "gross_alpha": gross,
         "fees": fee_cost,
         "slippage": slippage_cost,
         "impact": impact_cost,
+        "funding_pnl": funding_component,
+        "borrow_cost": borrow_component,
         "net_alpha": net,
         "turnover_units": float(turnover.sum()),
     }
@@ -421,6 +429,8 @@ def _aggregate_cost_components(
         "fees": 0.0,
         "slippage": 0.0,
         "impact": 0.0,
+        "funding_pnl": 0.0,
+        "borrow_cost": 0.0,
         "net_alpha": 0.0,
         "turnover_units": 0.0,
     }

@@ -22,6 +22,7 @@ from pipelines._lib.io_utils import (
     read_parquet,
     run_scoped_lake_path,
 )
+from pipelines.research.analyze_conditional_expectancy import build_walk_forward_split_labels
 
 
 @dataclass
@@ -35,10 +36,14 @@ class CompressionEvent:
     year: int
     vol_q: str
     bull_bear: str
+    enter_ts: pd.Timestamp
 
 
 EVENT_ROW_COLUMNS = [
     "symbol",
+    "event_start_idx",
+    "enter_ts",
+    "split_label",
     "year",
     "vol_q",
     "bull_bear",
@@ -263,6 +268,7 @@ def _extract_compression_events(df: pd.DataFrame, symbol: str, max_duration: int
                 year=int(ts.year),
                 vol_q=str(vol_q) if pd.notna(vol_q) else "na",
                 bull_bear=str(df.at[start, "bull_bear"]),
+                enter_ts=pd.to_datetime(ts, utc=True),
             )
         )
         i = end + 1
@@ -313,6 +319,9 @@ def _event_rows(df: pd.DataFrame, events: List[CompressionEvent], horizons: List
             rows.append(
                 {
                     "symbol": ev.symbol,
+                    "event_start_idx": ev.start_idx,
+                    "enter_ts": ev.enter_ts,
+                    "split_label": "",
                     "year": ev.year,
                     "vol_q": ev.vol_q,
                     "bull_bear": ev.bull_bear,
@@ -381,6 +390,98 @@ def _event_condition_frame(events_df: pd.DataFrame, condition: str, horizon: int
     return frame, ret_col
 
 
+def _split_overlap_diagnostics(events_df: pd.DataFrame, embargo_bars: int) -> Dict[str, object]:
+    if events_df.empty:
+        return {"pass": False, "embargo_bars": int(embargo_bars), "details": []}
+
+    unique_events = events_df.drop_duplicates(subset=["symbol", "event_start_idx"]).copy()
+    details: List[Dict[str, object]] = []
+    global_pass = True
+
+    for symbol, group in unique_events.groupby("symbol", dropna=False):
+        g = group.sort_values("event_start_idx").reset_index(drop=True)
+        boundary_gaps: Dict[str, int] = {}
+        for left, right in [("train", "validation"), ("validation", "test")]:
+            left_idx = g.index[g["split_label"] == left]
+            right_idx = g.index[g["split_label"] == right]
+            if len(left_idx) == 0 or len(right_idx) == 0:
+                boundary_gaps[f"{left}_to_{right}"] = -1
+                global_pass = False
+                continue
+            gap = int(right_idx.min() - left_idx.max() - 1)
+            boundary_gaps[f"{left}_to_{right}"] = gap
+            if gap < int(embargo_bars):
+                global_pass = False
+
+        details.append({"symbol": str(symbol), "boundary_gaps": boundary_gaps})
+
+    return {"pass": bool(global_pass), "embargo_bars": int(embargo_bars), "details": details}
+
+
+def _parameter_stability_diagnostics(
+    trap_df: pd.DataFrame,
+    *,
+    base_min_samples: int,
+    base_tstat_threshold: float,
+    sample_delta: int,
+    tstat_delta: float,
+) -> Dict[str, object]:
+    if trap_df.empty:
+        return {"pass": False, "rank_consistency": 0.0, "performance_decay": 1.0, "scenarios": []}
+
+    scenarios = [
+        {"name": "base", "min_samples": int(base_min_samples), "tstat": float(base_tstat_threshold)},
+        {"name": "tight", "min_samples": int(base_min_samples + sample_delta), "tstat": float(base_tstat_threshold + tstat_delta)},
+        {"name": "loose", "min_samples": max(1, int(base_min_samples - sample_delta)), "tstat": max(0.0, float(base_tstat_threshold - tstat_delta))},
+    ]
+
+    def _survivor_set(min_samples: int, tstat: float) -> set[str]:
+        sub = trap_df[(trap_df["event_samples"] >= min_samples) & (trap_df["event_mean"] > 0) & (trap_df["event_t"] >= tstat)]
+        return {f"{r.condition}|{int(r.horizon)}" for r in sub.itertuples(index=False)}
+
+    base_set = _survivor_set(int(base_min_samples), float(base_tstat_threshold))
+    rows = []
+    overlap_scores = []
+    for sc in scenarios:
+        sset = _survivor_set(int(sc["min_samples"]), float(sc["tstat"]))
+        denom = max(1, len(base_set | sset))
+        jaccard = float(len(base_set & sset) / denom)
+        overlap_scores.append(jaccard)
+        rows.append({**sc, "survivors": len(sset), "jaccard_to_base": jaccard})
+
+    rank_consistency = float(np.mean(overlap_scores)) if overlap_scores else 0.0
+    base_perf = float(trap_df["event_mean"].mean()) if not trap_df.empty else 0.0
+    worst_perf = float(trap_df["event_mean"].min()) if not trap_df.empty else 0.0
+    performance_decay = float(max(0.0, (base_perf - worst_perf) / max(abs(base_perf), 1e-9)))
+    passed = bool(rank_consistency >= 0.3 and performance_decay <= 1.0)
+    return {
+        "pass": passed,
+        "rank_consistency": rank_consistency,
+        "performance_decay": performance_decay,
+        "scenarios": rows,
+    }
+
+
+def _capacity_diagnostics(events_df: pd.DataFrame, symbols: List[str], min_events_per_day: float) -> Dict[str, object]:
+    if events_df.empty:
+        return {"pass": False, "estimated_events_per_day": 0.0, "symbol_details": []}
+    frame = events_df.copy()
+    frame["date"] = pd.to_datetime(frame["enter_ts"], utc=True, errors="coerce").dt.floor("D")
+    per_day = frame.groupby(["symbol", "date"], dropna=True).size().reset_index(name="event_count")
+    details = []
+    for sym in symbols:
+        sym_rows = per_day[per_day["symbol"] == sym]
+        avg_events = float(sym_rows["event_count"].mean()) if not sym_rows.empty else 0.0
+        details.append({"symbol": sym, "avg_events_per_day": avg_events})
+    est = float(np.mean([d["avg_events_per_day"] for d in details])) if details else 0.0
+    return {
+        "pass": bool(est >= float(min_events_per_day)),
+        "estimated_events_per_day": est,
+        "threshold_events_per_day": float(min_events_per_day),
+        "symbol_details": details,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate conditional expectancy against statistical traps (event-level)")
     parser.add_argument("--run_id", required=True)
@@ -394,6 +495,10 @@ def main() -> int:
     parser.add_argument("--mfe_horizon", type=int, default=96)
     parser.add_argument("--tstat_threshold", type=float, default=2.0)
     parser.add_argument("--min_samples", type=int, default=100)
+    parser.add_argument("--embargo_bars", type=int, default=0)
+    parser.add_argument("--stability_sample_delta", type=int, default=20)
+    parser.add_argument("--stability_tstat_delta", type=float, default=0.5)
+    parser.add_argument("--capacity_min_events_per_day", type=float, default=0.5)
     parser.add_argument("--out_dir", default=None)
     args = parser.parse_args()
 
@@ -435,6 +540,11 @@ def main() -> int:
 
     master_bars = pd.concat(all_bar_df, ignore_index=True)
     events_df = pd.DataFrame(all_event_rows, columns=EVENT_ROW_COLUMNS)
+    if not events_df.empty:
+        events_df["enter_ts"] = pd.to_datetime(events_df["enter_ts"], utc=True, errors="coerce")
+        events_df["split_label"] = build_walk_forward_split_labels(events_df, time_col="enter_ts", symbol_col="symbol")
+
+    split_overlap = _split_overlap_diagnostics(events_df, embargo_bars=args.embargo_bars)
 
     conditions = ["compression", "compression_plus_htf_trend", "compression_plus_funding_low"]
     trap_rows = []
@@ -540,6 +650,14 @@ def main() -> int:
         & (trap_df["event_mean"] > 0)
         & (trap_df["event_t"] >= args.tstat_threshold)
     ]
+    stability = _parameter_stability_diagnostics(
+        trap_df,
+        base_min_samples=args.min_samples,
+        base_tstat_threshold=args.tstat_threshold,
+        sample_delta=args.stability_sample_delta,
+        tstat_delta=args.stability_tstat_delta,
+    )
+    capacity = _capacity_diagnostics(events_df, symbols=symbols, min_events_per_day=args.capacity_min_events_per_day)
 
     payload = {
         "run_id": args.run_id,
@@ -549,14 +667,20 @@ def main() -> int:
             "max_event_duration": args.max_event_duration,
             "expansion_lookahead": args.expansion_lookahead,
             "mfe_horizon": args.mfe_horizon,
+            "embargo_bars": args.embargo_bars,
+            "stability_sample_delta": args.stability_sample_delta,
+            "stability_tstat_delta": args.stability_tstat_delta,
+            "capacity_min_events_per_day": args.capacity_min_events_per_day,
         },
         "event_summary": event_summary_df.to_dict(orient="records"),
         "trap_1_overlap_bar_vs_event": trap_df.to_dict(orient="records"),
-        "trap_2_leakage": leakage,
+        "trap_2_leakage": {"feature_leakage": leakage, "split_overlap": split_overlap},
         "trap_3_regimes": split_df.to_dict(orient="records"),
         "trap_4_tails": tail_df.to_dict(orient="records"),
         "trap_5_symmetry": symmetry_df.to_dict(orient="records"),
         "event_expansion_metrics": expansion_df.to_dict(orient="records"),
+        "stability_diagnostics": stability,
+        "capacity_diagnostics": capacity,
         "survivors": survivors.to_dict(orient="records"),
     }
 
@@ -578,12 +702,14 @@ def main() -> int:
     else:
         lines.append(survivors.to_markdown(index=False))
 
-    lines.extend(["", "## Trap 2 Leakage", json.dumps(leakage, indent=2), ""])
+    lines.extend(["", "## Trap 2 Leakage", json.dumps({"feature_leakage": leakage, "split_overlap": split_overlap}, indent=2), ""])
     lines.extend(["## Trap 1 Overlap (Bar vs Event)", trap_df.to_markdown(index=False) if not trap_df.empty else "No rows", ""])
     lines.extend(["## Trap 3 Regime Stability", split_df.to_markdown(index=False) if not split_df.empty else "No rows", ""])
     lines.extend(["## Trap 4 Tail Dominance", tail_df.to_markdown(index=False) if not tail_df.empty else "No rows", ""])
     lines.extend(["## Trap 5 Symmetry", symmetry_df.to_markdown(index=False) if not symmetry_df.empty else "No rows", ""])
     lines.extend(["## Event Metrics", expansion_df.to_markdown(index=False) if not expansion_df.empty else "No rows", ""])
+    lines.extend(["## Stability Diagnostics", json.dumps(stability, indent=2), ""])
+    lines.extend(["## Capacity Diagnostics", json.dumps(capacity, indent=2), ""])
 
     md_path = out_dir / "conditional_expectancy_robustness.md"
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")

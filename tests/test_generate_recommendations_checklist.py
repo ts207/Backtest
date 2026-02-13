@@ -43,6 +43,8 @@ def test_checklist_promote_when_all_gates_pass(monkeypatch, tmp_path: Path) -> N
             {
                 "run_id": run_id,
                 "survivors": [{"condition": "compression", "horizon": 16}],
+                "stability_diagnostics": {"pass": True},
+                "capacity_diagnostics": {"pass": True},
             }
         ),
         encoding="utf-8",
@@ -96,7 +98,7 @@ def test_checklist_keep_research_when_gates_fail(monkeypatch, tmp_path: Path) ->
     )
 
     robustness_path = reports_root / "expectancy" / run_id / "conditional_expectancy_robustness.json"
-    robustness_path.write_text(json.dumps({"run_id": run_id, "survivors": []}), encoding="utf-8")
+    robustness_path.write_text(json.dumps({"run_id": run_id, "survivors": [], "stability_diagnostics": {"pass": False}, "capacity_diagnostics": {"pass": False}}), encoding="utf-8")
 
     out_dir = tmp_path / "out"
     monkeypatch.setattr(
