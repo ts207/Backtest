@@ -109,7 +109,7 @@ def test_backtest_main_writes_cost_decomposition_and_reproducibility(monkeypatch
     payload = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert "cost_decomposition" in payload
     assert "reproducibility" in payload
-    assert set(["gross_alpha", "fees", "slippage", "impact", "net_alpha"]).issubset(payload["cost_decomposition"].keys())
+    assert set(["gross_alpha", "fees", "slippage", "impact", "funding_pnl", "borrow_cost", "net_alpha"]).issubset(payload["cost_decomposition"].keys())
     assert "config_digest" in payload["reproducibility"]
 
 
@@ -171,20 +171,6 @@ def test_backtest_metadata_records_execution_family_without_breakout_only_config
             # Intentionally omit breakout_* keys to validate carry/spread contract.
         },
     )
-                "timestamp": pd.to_datetime(["2024-01-01T00:00:00Z"]),
-                "symbol": ["BTCUSDT"],
-                "pos": [0],
-                "ret": [0.0],
-                "pnl": [0.0],
-                "close": [100.0],
-                "high": [101.0],
-                "low": [99.0],
-                "high_96": [101.0],
-                "low_96": [99.0],
-            }
-        )
-        portfolio = pd.DataFrame({"timestamp": pd.to_datetime(["2024-01-01T00:00:00Z"]), "portfolio_pnl": [0.0]})
-        return {"engine_dir": engine_dir, "strategy_frames": {"funding_extreme_reversal_v1": frame}, "portfolio": portfolio}
 
     cfg = tmp_path / "family.yaml"
     cfg.write_text(
@@ -211,7 +197,6 @@ strategy_families:
             "BTCUSDT",
             "--strategies",
             strategy_id,
-            "funding_extreme_reversal_v1",
             "--config",
             str(cfg),
             "--force",
@@ -225,3 +210,18 @@ strategy_families:
     payload = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert payload["metadata"]["execution_family"] == expected_family
     assert payload["metadata"]["strategy_ids"] == [strategy_id]
+
+
+def test_cost_components_include_funding_and_borrow_in_net_alpha() -> None:
+    frame = pd.DataFrame(
+        {
+            "pos": [0, -1, -1, 0],
+            "ret": [0.0, 0.01, -0.02, 0.0],
+            "funding_pnl": [0.0, 0.001, 0.001, 0.0],
+            "borrow_cost": [0.0, 0.0002, 0.0002, 0.0],
+        }
+    )
+    out = bts._cost_components_from_frame(frame, fee_bps=0.0, slippage_bps=0.0)
+    assert round(out["funding_pnl"], 10) == 0.002
+    assert round(out["borrow_cost"], 10) == 0.0004
+    assert round(out["net_alpha"], 10) == round(out["gross_alpha"] + out["funding_pnl"] - out["borrow_cost"], 10)

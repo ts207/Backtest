@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from datetime import datetime, timezone
@@ -17,6 +18,33 @@ def _manifest_path(run_id: str, stage: str) -> Path:
     out_dir = data_root / "runs" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir / f"{stage}.json"
+
+
+REQUIRED_INPUT_PROVENANCE_KEYS = (
+    "vendor",
+    "exchange",
+    "schema_version",
+    "schema_hash",
+    "extraction_start",
+    "extraction_end",
+)
+
+
+def schema_hash_from_columns(columns: List[str]) -> str:
+    normalized = [str(col) for col in columns]
+    payload = "|".join(normalized)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def validate_input_provenance(inputs: List[Dict[str, Any]]) -> None:
+    for idx, item in enumerate(inputs):
+        provenance = item.get("provenance")
+        if not isinstance(provenance, dict):
+            raise ValueError(f"Input index {idx} missing provenance block")
+        missing = [k for k in REQUIRED_INPUT_PROVENANCE_KEYS if not provenance.get(k)]
+        if missing:
+            path = item.get("path", f"input[{idx}]")
+            raise ValueError(f"Input {path} missing required provenance keys: {missing}")
 
 
 def start_manifest(

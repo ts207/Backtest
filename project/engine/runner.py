@@ -11,7 +11,7 @@ import numpy as np
 
 import pandas as pd
 
-from engine.pnl import compute_pnl, compute_returns
+from engine.pnl import compute_pnl_components, compute_returns
 from pipelines._lib.io_utils import (
     choose_partition_dir,
     ensure_dir,
@@ -115,6 +115,49 @@ def _join_context_features(features: pd.DataFrame, context: pd.DataFrame) -> pd.
     return _apply_context_defaults(joined)
 
 
+def _load_universe_snapshots(data_root: Path, run_id: str) -> pd.DataFrame:
+    candidates = [
+        data_root / "lake" / "runs" / run_id / "metadata" / "universe_snapshots",
+        data_root / "lake" / "metadata" / "universe_snapshots",
+    ]
+    src = choose_partition_dir(candidates)
+    files = list_parquet_files(src) if src else []
+    if not files:
+        return pd.DataFrame(columns=["symbol", "listing_start", "listing_end"])
+    frame = read_parquet(files)
+    if frame.empty:
+        return pd.DataFrame(columns=["symbol", "listing_start", "listing_end"])
+    needed = {"symbol", "listing_start", "listing_end"}
+    if not needed.issubset(set(frame.columns)):
+        return pd.DataFrame(columns=["symbol", "listing_start", "listing_end"])
+    frame = frame[["symbol", "listing_start", "listing_end"]].copy()
+    frame["listing_start"] = pd.to_datetime(frame["listing_start"], utc=True, errors="coerce")
+    frame["listing_end"] = pd.to_datetime(frame["listing_end"], utc=True, errors="coerce")
+    frame = frame.dropna(subset=["symbol", "listing_start", "listing_end"]).copy()
+    frame["symbol"] = frame["symbol"].astype(str)
+    return frame
+
+
+def _symbol_eligibility_mask(timestamps: pd.Series, symbol: str, snapshots: pd.DataFrame) -> pd.Series:
+    if snapshots.empty:
+        return pd.Series(True, index=timestamps.index)
+    rows = snapshots[snapshots["symbol"] == str(symbol)]
+    if rows.empty:
+        return pd.Series(False, index=timestamps.index)
+    mask = pd.Series(False, index=timestamps.index)
+    for _, row in rows.iterrows():
+        mask = mask | ((timestamps >= row["listing_start"]) & (timestamps <= row["listing_end"]))
+    return mask
+
+
+def _is_carry_strategy(strategy_name: str, strategy_metadata: Dict[str, object]) -> bool:
+    family = str(strategy_metadata.get("family", "")).strip().lower() if isinstance(strategy_metadata, dict) else ""
+    if family == "carry":
+        return True
+    name = str(strategy_name).strip().lower()
+    return "carry" in name or "funding_extreme_reversal" in name
+
+
 
 def _load_symbol_data(data_root: Path, symbol: str, run_id: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
     feature_candidates = [
@@ -163,6 +206,7 @@ def _strategy_returns(
     strategy_name: str,
     params: Dict[str, object],
     cost_bps: float,
+    eligibility_mask: pd.Series | None = None,
 ) -> StrategyResult:
     strategy = get_strategy(strategy_name)
     required_features = getattr(strategy, "required_features", []) or []
@@ -202,7 +246,35 @@ def _strategy_returns(
     nan_ret_mask = ret.isna()
     forced_flat_bars = int((nan_ret_mask & (positions != 0)).sum())
     positions = positions.mask(nan_ret_mask, 0).astype(int)
-    pnl = compute_pnl(positions, ret, cost_bps)
+    if eligibility_mask is not None:
+        eligibility_mask = eligibility_mask.reindex(ret.index).fillna(False).astype(bool)
+        ineligible_bars = int((~eligibility_mask).sum())
+        positions = positions.where(eligibility_mask, 0).astype(int)
+    else:
+        ineligible_bars = 0
+
+    features_indexed = features.set_index("timestamp")
+
+    funding_series = (
+        pd.to_numeric(features_indexed.get("funding_rate_scaled", pd.Series(0.0, index=ret.index)).reindex(ret.index), errors="coerce")
+        .fillna(0.0)
+        .astype(float)
+    )
+    borrow_series = (
+        pd.to_numeric(features_indexed.get("borrow_rate_scaled", pd.Series(0.0, index=ret.index)).reindex(ret.index), errors="coerce")
+        .fillna(0.0)
+        .astype(float)
+    )
+
+    use_carry_components = _is_carry_strategy(strategy_name, strategy_metadata)
+    pnl_components = compute_pnl_components(
+        positions,
+        ret,
+        cost_bps,
+        funding_rate=funding_series if use_carry_components else None,
+        borrow_rate=borrow_series if use_carry_components else None,
+    )
+    pnl = pnl_components["pnl"]
     if nan_ret_mask.any():
         LOGGER.info(
             "Gap-safe returns forced flat %s bars for %s/%s.",
@@ -211,7 +283,6 @@ def _strategy_returns(
             strategy_name,
         )
 
-    features_indexed = features.set_index("timestamp")
     features_aligned = features_indexed.reindex(ret.index)
     missing_feature_columns = [col for col in required_features if col not in features_aligned.columns]
     if required_features and not missing_feature_columns:
@@ -229,6 +300,10 @@ def _strategy_returns(
             "pos": positions.values,
             "ret": ret.values,
             "pnl": pnl.values,
+            "gross_pnl": pnl_components["gross_pnl"].values,
+            "trading_cost": pnl_components["trading_cost"].values,
+            "funding_pnl": pnl_components["funding_pnl"].values,
+            "borrow_cost": pnl_components["borrow_cost"].values,
             "close": close.reindex(ret.index).values,
             "high": high.reindex(ret.index).values,
             "low": low.reindex(ret.index).values,
@@ -248,6 +323,7 @@ def _strategy_returns(
         "nan_return_bars": int(nan_ret_mask.sum()),
         "forced_flat_bars": forced_flat_bars,
         "missing_feature_bars": int(missing_feature_mask.sum()),
+        "ineligible_universe_bars": int(ineligible_bars),
         "nan_return_pct": float(nan_ret_mask.mean()) if total_bars else 0.0,
         "forced_flat_pct": float(forced_flat_bars / total_bars) if total_bars else 0.0,
         "missing_feature_pct": float(missing_feature_mask.mean()) if total_bars else 0.0,
@@ -348,13 +424,23 @@ def run_engine(
     metrics: Dict[str, object] = {"strategies": {}}
 
     overlays = [str(o).strip() for o in params.get("overlays", []) if str(o).strip()]
+    universe_snapshots = _load_universe_snapshots(data_root, run_id)
 
     for strategy_name in strategies:
         symbol_results: List[StrategyResult] = []
         for symbol in symbols:
             bars, features = _load_symbol_data(data_root, symbol, run_id=run_id)
             strategy_params = params_by_strategy.get(strategy_name, params) if params_by_strategy else params
-            result = _strategy_returns(symbol, bars, features, strategy_name, strategy_params, cost_bps)
+            eligibility_mask = _symbol_eligibility_mask(bars["timestamp"], symbol, universe_snapshots)
+            result = _strategy_returns(
+                symbol,
+                bars,
+                features,
+                strategy_name,
+                strategy_params,
+                cost_bps,
+                eligibility_mask=eligibility_mask,
+            )
             symbol_results.append(result)
 
         combined = _aggregate_strategy([res.data for res in symbol_results])
@@ -370,6 +456,7 @@ def run_engine(
             "nan_return_bars": sum(res.diagnostics["nan_return_bars"] for res in symbol_results),
             "forced_flat_bars": sum(res.diagnostics["forced_flat_bars"] for res in symbol_results),
             "missing_feature_bars": sum(res.diagnostics["missing_feature_bars"] for res in symbol_results),
+            "ineligible_universe_bars": sum(res.diagnostics.get("ineligible_universe_bars", 0) for res in symbol_results),
         }
         total_bars = diagnostics_total["total_bars"]
         diagnostics = {
