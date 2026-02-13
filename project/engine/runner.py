@@ -5,7 +5,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
@@ -254,6 +254,12 @@ def _strategy_returns(
         ineligible_bars = 0
 
     features_indexed = features.set_index("timestamp")
+    features_aligned = features_indexed.reindex(ret.index)
+    positions, overlay_stats = _apply_runtime_overlays(
+        positions=positions,
+        features_aligned=features_aligned,
+        overlay_runtime=params.get("overlay_runtime", {}) if isinstance(params, dict) else {},
+    )
 
     funding_series = (
         pd.to_numeric(features_indexed.get("funding_rate_scaled", pd.Series(0.0, index=ret.index)).reindex(ret.index), errors="coerce")
@@ -283,7 +289,6 @@ def _strategy_returns(
             strategy_name,
         )
 
-    features_aligned = features_indexed.reindex(ret.index)
     missing_feature_columns = [col for col in required_features if col not in features_aligned.columns]
     if required_features and not missing_feature_columns:
         missing_feature_mask = features_aligned[required_features].isna().any(axis=1)
@@ -324,6 +329,7 @@ def _strategy_returns(
         "forced_flat_bars": forced_flat_bars,
         "missing_feature_bars": int(missing_feature_mask.sum()),
         "ineligible_universe_bars": int(ineligible_bars),
+        "overlay_stats": overlay_stats,
         "nan_return_pct": float(nan_ret_mask.mean()) if total_bars else 0.0,
         "forced_flat_pct": float(forced_flat_bars / total_bars) if total_bars else 0.0,
         "missing_feature_pct": float(missing_feature_mask.mean()) if total_bars else 0.0,
@@ -373,17 +379,20 @@ def _overlay_binding_stats(
     overlays: List[str],
     symbol: str,
     frame: pd.DataFrame,
+    overlay_stats: Dict[str, Dict[str, int]] | None = None,
 ) -> Dict[str, object]:
     entries = _entry_count(frame) if not frame.empty else 0
+    overlay_stats = overlay_stats or {}
     per_overlay = []
     for name in overlays:
+        stats = overlay_stats.get(name, {})
         per_overlay.append(
             {
                 "overlay": name,
                 "symbol": symbol,
-                "blocked_entries": 0,
-                "delayed_entries": 0,
-                "changed_bars": 0,
+                "blocked_entries": int(stats.get("blocked_entries", 0)),
+                "delayed_entries": int(stats.get("delayed_entries", 0)),
+                "changed_bars": int(stats.get("changed_bars", 0)),
                 "entry_count": int(entries),
             }
         )
@@ -399,6 +408,58 @@ def _entry_count(frame: pd.DataFrame) -> int:
     prior = pos.shift(1).fillna(0)
     entries = ((prior == 0) & (pos != 0)).sum()
     return int(entries)
+
+
+def _mev_risk_bps(features_aligned: pd.DataFrame) -> pd.Series:
+    if "mev_risk_bps" in features_aligned.columns:
+        return pd.to_numeric(features_aligned["mev_risk_bps"], errors="coerce").fillna(0.0).abs()
+    if {"liquidation_notional", "oi_notional"}.issubset(set(features_aligned.columns)):
+        liq = pd.to_numeric(features_aligned["liquidation_notional"], errors="coerce").fillna(0.0).abs()
+        oi = pd.to_numeric(features_aligned["oi_notional"], errors="coerce").fillna(0.0).abs()
+        safe_oi = oi.replace(0.0, np.nan)
+        risk = ((liq / safe_oi) * 10_000.0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        return risk.abs()
+    return pd.Series(0.0, index=features_aligned.index, dtype=float)
+
+
+def _apply_runtime_overlays(
+    positions: pd.Series,
+    features_aligned: pd.DataFrame,
+    overlay_runtime: Dict[str, Dict[str, Any]] | None,
+) -> Tuple[pd.Series, Dict[str, Dict[str, int]]]:
+    if not overlay_runtime:
+        return positions.astype(int), {}
+
+    out = positions.astype(int).copy()
+    stats: Dict[str, Dict[str, int]] = {}
+    for overlay_name, runtime_cfg in overlay_runtime.items():
+        if not isinstance(runtime_cfg, dict):
+            continue
+        runtime_type = str(runtime_cfg.get("type", "")).strip().lower()
+        if runtime_type != "mev_aware_risk_filter":
+            continue
+
+        risk_bps = _mev_risk_bps(features_aligned).reindex(out.index).fillna(0.0)
+        throttle_start = float(runtime_cfg.get("throttle_start_bps", 12.0))
+        block_threshold = float(runtime_cfg.get("block_threshold_bps", 25.0))
+        before = out.copy()
+        prior = before.shift(1).fillna(0).astype(int)
+        entry_mask = (prior == 0) & (before != 0)
+        delayed_entries_mask = entry_mask & (risk_bps >= throttle_start) & (risk_bps < block_threshold)
+        blocked_entries_mask = entry_mask & (risk_bps >= block_threshold)
+        gated_entry_mask = delayed_entries_mask | blocked_entries_mask
+        out.loc[gated_entry_mask] = 0
+
+        forced_flat_mask = (before != 0) & (risk_bps >= block_threshold)
+        out.loc[forced_flat_mask] = 0
+        changed_mask = out != before
+        stats[overlay_name] = {
+            "blocked_entries": int(blocked_entries_mask.sum()),
+            "delayed_entries": int(delayed_entries_mask.sum()),
+            "changed_bars": int(changed_mask.sum()),
+        }
+
+    return out.astype(int), stats
 
 
 def _summarize_pnl(series: pd.Series) -> Dict[str, float]:
@@ -484,7 +545,14 @@ def run_engine(
         symbol_bindings = []
         for res in symbol_results:
             sym = str(res.data["symbol"].iloc[0]) if not res.data.empty and "symbol" in res.data.columns else "unknown"
-            symbol_bindings.append(_overlay_binding_stats(overlays, sym, res.data))
+            per_symbol_overlay_stats = (
+                res.diagnostics.get("overlay_stats", {})
+                if isinstance(res.diagnostics, dict) and isinstance(res.diagnostics.get("overlay_stats", {}), dict)
+                else {}
+            )
+            symbol_bindings.append(
+                _overlay_binding_stats(overlays, sym, res.data, overlay_stats=per_symbol_overlay_stats)
+            )
         metrics.setdefault("overlay_bindings", {})[strategy_name] = {
             "applied_overlays": overlays,
             "symbols": symbol_bindings,

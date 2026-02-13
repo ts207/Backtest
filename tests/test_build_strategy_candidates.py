@@ -140,8 +140,9 @@ def test_build_strategy_candidates_can_include_alpha_bundle(monkeypatch, tmp_pat
     payload = json.loads(out_json.read_text(encoding="utf-8"))
     assert len(payload) == 1
     assert payload[0]["source_type"] == "alpha_bundle"
-    assert payload[0]["execution_family"] == "alpha_bundle"
-    assert payload[0]["base_strategy"] == "alpha_bundle_manual"
+    assert payload[0]["execution_family"] == "onchain_flow"
+    assert payload[0]["base_strategy"] == "onchain_flow_v1"
+    assert payload[0]["backtest_ready"] is True
 
 
 def test_build_strategy_candidates_event_specific_template(monkeypatch, tmp_path: Path) -> None:
@@ -223,10 +224,30 @@ def test_build_strategy_candidates_unknown_event_does_not_fallback_to_breakout(m
     run_id = "strategy_builder_unknown"
     _write_edge_inputs(tmp_path, run_id=run_id, event="unknown_edge_family")
 
-    assert payload[0]["execution_family"] == "carry_imbalance"
-    assert payload[0]["base_strategy"] == "carry_imbalance_v1"
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(build_strategy_candidates, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_strategy_candidates.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--include_alpha_bundle",
+            "0",
+        ],
+    )
+
+    assert build_strategy_candidates.main() == 0
+    out_json = tmp_path / "reports" / "strategy_builder" / run_id / "strategy_candidates.json"
+    payload = json.loads(out_json.read_text(encoding="utf-8"))
+    assert payload[0]["execution_family"] == "unmapped"
+    assert payload[0]["base_strategy"] == "unmapped"
     assert payload[0]["backtest_ready"] is False
-    assert payload[0]["backtest_ready_reason"] == ""
+    assert payload[0]["backtest_ready_reason"] == "Unknown event family `unknown_edge_family`; no strategy routing is defined."
+    assert payload[0]["base_strategy"] != "vol_compression_v1"
 
 
 def test_build_strategy_candidates_unknown_event_fails_closed(monkeypatch, tmp_path: Path) -> None:
@@ -258,9 +279,6 @@ def test_build_strategy_candidates_unknown_event_fails_closed(monkeypatch, tmp_p
     assert build_strategy_candidates.main() == 0
     out_json = tmp_path / "reports" / "strategy_builder" / run_id / "strategy_candidates.json"
     payload = json.loads(out_json.read_text(encoding="utf-8"))
-    assert payload[0]["base_strategy"] == "unmapped_event_template_v1"
-    assert payload[0]["base_strategy"] != "vol_compression_v1"
-    assert payload[0]["backtest_ready"] is False
     assert len(payload) == 1
     assert payload[0]["execution_family"] == "unmapped"
     assert payload[0]["base_strategy"] == "unmapped"

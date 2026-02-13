@@ -14,6 +14,7 @@ export BACKTEST_DATA_ROOT=/abs/path/to/data
   --symbols BTCUSDT,ETHUSDT \
   --start 2020-01-01 \
   --end 2025-12-31 \
+  --seed 13 \
   --run_hypothesis_generator 1 \
   --run_phase2_conditional 1 \
   --phase2_event_type all \
@@ -23,6 +24,10 @@ export BACKTEST_DATA_ROOT=/abs/path/to/data
   --run_recommendations_checklist 1 \
   --run_strategy_builder 1
 ```
+
+Checklist enforcement:
+- default (non-blocking): `--strict_recommendations_checklist 0`
+- strict (fail on `KEEP_RESEARCH`): `--strict_recommendations_checklist 1`
 
 Cross-venue specifics:
 - If phase2 includes `cross_venue_desync` (or `all`), `run_all.py` auto-runs:
@@ -77,6 +82,7 @@ Interpretation:
 - `base_strategy` is event-family template mapping.
 - `backtest_ready=true` means executable adapter exists now.
 - `backtest_ready=false` means translate candidate into concrete strategy implementation first.
+- Built-in overlays: `funding_extreme_filter`, `mev_aware_risk_filter`
 
 ## 4) AlphaBundle parallel flow (equal policy)
 Use AlphaBundle when multi-signal, cross-sectional research is required. Keep promotion gates equivalent to mainline.

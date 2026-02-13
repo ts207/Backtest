@@ -34,27 +34,27 @@ EVENT_FAMILY_STRATEGY_ROUTING: Dict[str, Dict[str, str]] = {
     },
     "liquidity_refill_lag_window": {
         "execution_family": "breakout_mechanics",
-        "base_strategy": "vol_compression_v1",
+        "base_strategy": "liquidity_refill_lag_v1",
     },
     "liquidity_absence_window": {
         "execution_family": "breakout_mechanics",
-        "base_strategy": "vol_compression_v1",
+        "base_strategy": "liquidity_absence_gate_v1",
     },
     "liquidity_vacuum": {
         "execution_family": "breakout_mechanics",
-        "base_strategy": "vol_compression_v1",
+        "base_strategy": "liquidity_vacuum_v1",
     },
     "funding_extreme_reversal_window": {
         "execution_family": "carry_imbalance",
-        "base_strategy": "carry_imbalance_v1",
+        "base_strategy": "funding_extreme_reversal_v1",
     },
     "directional_exhaustion_after_forced_flow": {
         "execution_family": "exhaustion_overshoot",
-        "base_strategy": "mean_reversion_exhaustion_v1",
+        "base_strategy": "forced_flow_exhaustion_v1",
     },
     "cross_venue_desync": {
         "execution_family": "spread_dislocation",
-        "base_strategy": "spread_dislocation_v1",
+        "base_strategy": "cross_venue_desync_v1",
     },
 }
 
@@ -145,9 +145,6 @@ def _risk_controls_from_action(action: str) -> Dict[str, object]:
 
 def _route_event_family(event: str) -> Optional[Dict[str, str]]:
     key = str(event).strip().lower()
-    if key in EVENT_BASE_STRATEGY_MAP:
-        return EVENT_BASE_STRATEGY_MAP[key]
-    return "unmapped_event_template_v1"
     return EVENT_FAMILY_STRATEGY_ROUTING.get(key)
 
 
@@ -264,13 +261,15 @@ def _load_alpha_bundle_candidate(run_id: str, symbols: List[str]) -> Dict[str, o
         return None
 
     symbols_csv = ",".join(symbols)
+    alpha_strategy = "onchain_flow_v1"
+    alpha_backtest_ready = alpha_strategy in BACKTEST_READY_BASE_STRATEGIES
     return {
         "strategy_candidate_id": _sanitize_id(f"alpha_bundle_{run_id}"),
         "source_type": "alpha_bundle",
-        "execution_family": "alpha_bundle",
-        "base_strategy": "alpha_bundle_manual",
-        "backtest_ready": False,
-        "backtest_ready_reason": "Manual alpha bundle adapter required.",
+        "execution_family": "onchain_flow",
+        "base_strategy": alpha_strategy,
+        "backtest_ready": alpha_backtest_ready,
+        "backtest_ready_reason": "" if alpha_backtest_ready else "On-chain strategy adapter required.",
         "event": "alpha_bundle",
         "condition": "cross_signal_composite",
         "action": "score_rank",
@@ -286,15 +285,10 @@ def _load_alpha_bundle_candidate(run_id: str, symbols: List[str]) -> Dict[str, o
             "block_entries": False,
             "reentry_mode": "immediate",
         },
-        "manual_backtest_command": (
-            "Run AlphaBundle score generation, then execute manual portfolio backtest with your panel simulator:\n"
-            f"./.venv/bin/python project/pipelines/alpha_bundle/apply_alpha_bundle.py "
-            f"--run_id {run_id} --signals_path <merged_signals.parquet> --ridge_model_path <ridge_model.json>\n"
-            f"# Use output at data/feature_store/alpha_bundle/alpha_bundle_scores.parquet for manual backtest over symbols={symbols_csv}"
-        ),
+        "manual_backtest_command": _manual_backtest_command_for_strategy(alpha_strategy, symbols_csv),
         "notes": [
-            "AlphaBundle candidate is included as a parallel path and should pass the same robustness gates as mainline edges.",
-            "Manual backtest implementation is required for score-to-position mapping and portfolio constraints.",
+            "AlphaBundle candidate is routed to an on-chain execution template for manual validation.",
+            "Keep AlphaBundle and mainline candidates under identical robustness and promotion standards.",
         ],
     }
 

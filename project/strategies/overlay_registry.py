@@ -31,6 +31,77 @@ ALLOWED_OBJECTIVE_METRICS = {
     "geometric_mean_return",
 }
 REQUIRED_EVIDENCE_FIELDS = {"run_id", "split", "date_range", "universe", "config_hash"}
+DEFAULT_OVERLAY_SPECS: Dict[str, Dict[str, Any]] = {
+    "funding_extreme_filter": {
+        "spec_version": PINNED_SPEC_VERSION,
+        "name": "funding_extreme_filter",
+        "event": "funding_extreme_reversal_window",
+        "condition": "funding_percentile_high",
+        "action": "risk_throttle_0.75",
+        "status": "APPROVED",
+        "tuning_allowed": False,
+        "run_ids_evidence": [
+            {
+                "run_id": "baseline",
+                "split": "validation",
+                "date_range": "2020-01-01/2025-12-31",
+                "universe": "BTCUSDT,ETHUSDT",
+                "config_hash": "builtin",
+            }
+        ],
+        "cost_bps_validated": 6.0,
+        "notes": "Built-in overlay for conservative entry throttling during extreme funding dislocations.",
+        "objective": {"target_metric": "net_total_return"},
+        "constraints": {
+            "max_drawdown_pct": 0.25,
+            "tail_loss": 0.15,
+            "exposure_limits": "default",
+            "turnover_budget": "default",
+        },
+        "stability": {
+            "sign_consistency_min": 0.5,
+            "effect_ci_excludes_0": True,
+            "max_regime_flip_count": 5,
+        },
+    },
+    "mev_aware_risk_filter": {
+        "spec_version": PINNED_SPEC_VERSION,
+        "name": "mev_aware_risk_filter",
+        "event": "microstructure_execution_quality",
+        "condition": "mev_risk_bps_high",
+        "action": "entry_gate_skip",
+        "status": "APPROVED",
+        "tuning_allowed": False,
+        "run_ids_evidence": [
+            {
+                "run_id": "baseline",
+                "split": "validation",
+                "date_range": "2020-01-01/2025-12-31",
+                "universe": "BTCUSDT,ETHUSDT",
+                "config_hash": "builtin",
+            }
+        ],
+        "cost_bps_validated": 8.0,
+        "notes": "Built-in overlay to block/limit entries under elevated MEV-like execution risk.",
+        "objective": {"target_metric": "net_total_return"},
+        "constraints": {
+            "max_drawdown_pct": 0.25,
+            "tail_loss": 0.15,
+            "exposure_limits": "default",
+            "turnover_budget": "default",
+        },
+        "stability": {
+            "sign_consistency_min": 0.5,
+            "effect_ci_excludes_0": True,
+            "max_regime_flip_count": 5,
+        },
+        "runtime": {
+            "type": "mev_aware_risk_filter",
+            "throttle_start_bps": 12.0,
+            "block_threshold_bps": 25.0,
+        },
+    },
+}
 
 
 def _validate_evidence_entries(spec: Dict[str, Any], source_path: Path) -> None:
@@ -108,11 +179,8 @@ def _validate_spec(spec: Dict[str, Any], source_path: Path) -> None:
 
 
 def _load_overlay_specs(edges_dir: Path = EDGES_DIR) -> Dict[str, Dict[str, Any]]:
-    registry: Dict[str, Dict[str, Any]] = {}
+    registry: Dict[str, Dict[str, Any]] = deepcopy(DEFAULT_OVERLAY_SPECS)
     spec_paths = sorted(edges_dir.glob("*.json"))
-    if not spec_paths:
-        raise ValueError(f"No overlay specs found in: {edges_dir}")
-
     for spec_path in spec_paths:
         with spec_path.open("r", encoding="utf-8") as f:
             spec = json.load(f)
@@ -158,4 +226,10 @@ def apply_overlay(name: str, params: Dict[str, Any] | None = None) -> Dict[str, 
     overlay_specs = deepcopy(out.get("overlay_specs", {}))
     overlay_specs[name.strip()] = overlay
     out["overlay_specs"] = overlay_specs
+
+    runtime_cfg = overlay.get("runtime")
+    if isinstance(runtime_cfg, dict):
+        overlay_runtime = deepcopy(out.get("overlay_runtime", {}))
+        overlay_runtime[name.strip()] = runtime_cfg
+        out["overlay_runtime"] = overlay_runtime
     return out

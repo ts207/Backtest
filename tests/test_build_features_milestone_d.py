@@ -67,7 +67,18 @@ def test_build_features_includes_oi_liquidation_and_revision_lag(tmp_path: Path)
     else:
         frame = pd.read_parquet(files[0])
 
-    for col in ["oi_notional", "oi_delta_1h", "liquidation_notional", "liquidation_count", "revision_lag_bars", "revision_lag_minutes"]:
+    for col in [
+        "oi_notional",
+        "oi_delta_1h",
+        "liquidation_notional",
+        "liquidation_count",
+        "basis_bps",
+        "basis_zscore",
+        "cross_exchange_spread_z",
+        "spread_zscore",
+        "revision_lag_bars",
+        "revision_lag_minutes",
+    ]:
         assert col in frame.columns
     assert int(frame["revision_lag_bars"].iloc[-1]) == 3
     assert int(frame["revision_lag_minutes"].iloc[-1]) == 45

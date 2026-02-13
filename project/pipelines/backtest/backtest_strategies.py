@@ -36,6 +36,7 @@ STRATEGY_EXECUTION_FAMILY = {
     "funding_extreme_reversal_v1": "carry",
     "cross_venue_desync_v1": "spread",
     "liquidity_vacuum_v1": "mean_reversion",
+    "onchain_flow_v1": "onchain",
 }
 
 

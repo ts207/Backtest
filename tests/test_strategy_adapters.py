@@ -34,6 +34,7 @@ def _sample_bars_and_features() -> tuple[pd.DataFrame, pd.DataFrame]:
             "fp_norm_due": [0, 0, 1, 0, 0, 0],
             "fp_severity": [0.2, 1.8, 1.9, 0.3, 0.1, 0.0],
             "basis_zscore": [0.1, 1.4, 1.6, 0.7, 0.2, 0.1],
+            "onchain_flow_mc": [0.2, 0.4, 0.1, -0.3, -0.5, 0.0],
         }
     )
     return bars, features
@@ -51,6 +52,7 @@ def test_registry_includes_strategy_adapters() -> None:
     assert "carry_funding_v1" in names
     assert "mean_reversion_exhaustion_v1" in names
     assert "spread_desync_v1" in names
+    assert "onchain_flow_v1" in names
 
 
 def test_strategy_adapter_generates_valid_positions() -> None:
@@ -110,6 +112,7 @@ def test_new_strategies_generate_positions_and_metadata() -> None:
         "carry_funding_v1",
         "mean_reversion_exhaustion_v1",
         "spread_desync_v1",
+        "onchain_flow_v1",
     ]
     for name in strategies:
         out = get_strategy(name).generate_positions(bars, features, params={"trade_day_timezone": "UTC"})

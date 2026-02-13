@@ -31,6 +31,7 @@ Standard discovery duration is:
   --symbols BTCUSDT,ETHUSDT \
   --start 2020-01-01 \
   --end 2025-12-31 \
+  --seed 13 \
   --run_hypothesis_generator 1 \
   --run_phase2_conditional 1 \
   --phase2_event_type all \
@@ -62,6 +63,10 @@ Key artifacts:
 - promoted edges: `data/reports/edge_candidates/<run_id>/edge_candidates_normalized.csv`
 - strategy candidates: `data/reports/strategy_builder/<run_id>/strategy_candidates.json`
 
+Runtime control note:
+- Keep checklist non-blocking (default): `--strict_recommendations_checklist 0`
+- Fail pipeline on checklist `KEEP_RESEARCH`: `--strict_recommendations_checklist 1`
+
 ## Why strategy candidates no longer share one base strategy
 Strategy builder now maps event families to strategy templates (for example `funding_extreme_reversal_window -> funding_extreme_reversal_v1`).
 
@@ -77,6 +82,14 @@ Current adapter-backed strategy ids include:
 - `funding_extreme_reversal_v1`
 - `cross_venue_desync_v1`
 - `liquidity_vacuum_v1`
+- `onchain_flow_v1`
+
+Built-in overlays include:
+- `funding_extreme_filter`
+- `mev_aware_risk_filter`
+
+Feature contract note:
+- `features_v1` now includes spread/basis fields (`basis_bps`, `basis_zscore`, `cross_exchange_spread_z`, `spread_zscore`) for spread strategy compatibility.
 
 If `backtest_ready=false`, candidate is still valid research output, but needs adapter implementation before execution.
 

@@ -44,6 +44,19 @@ def test_recommendations_checklist_keep_research_is_non_fatal(monkeypatch, tmp_p
     assert run_all._run_stage("generate_recommendations_checklist", script_without_log, ["--run_id", "x"], "run_x") is True
 
 
+def test_recommendations_checklist_keep_research_is_fatal_when_strict(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path)
+    script_without_log = tmp_path / "without_log.py"
+    script_without_log.write_text("print('hello')", encoding="utf-8")
+
+    def _fake_run(_cmd: list[str]) -> SimpleNamespace:
+        return SimpleNamespace(returncode=1)
+
+    monkeypatch.setattr(run_all.subprocess, "run", _fake_run)
+    monkeypatch.setattr(run_all, "_STRICT_RECOMMENDATIONS_CHECKLIST", True)
+    assert run_all._run_stage("generate_recommendations_checklist", script_without_log, ["--run_id", "x"], "run_x") is False
+
+
 def test_run_all_includes_phase2_chain_when_enabled(monkeypatch) -> None:
     captured = []
 
@@ -84,6 +97,43 @@ def test_run_all_includes_phase2_chain_when_enabled(monkeypatch) -> None:
     assert "--max_conditions" in phase2_args
     assert "--max_actions" in phase2_args
     assert "--require_phase1_pass" in phase2_args
+
+
+def test_run_all_passes_seed_to_seeded_research_stages(monkeypatch) -> None:
+    captured = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, script_path, list(base_args), run_id))
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_seed_passthrough",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_phase2_conditional",
+            "1",
+            "--phase2_event_type",
+            "vol_shock_relaxation",
+            "--seed",
+            "99",
+        ],
+    )
+
+    assert run_all.main() == 0
+    phase1_args = next(base_args for stage, _, base_args, _ in captured if stage == "analyze_vol_shock_relaxation")
+    phase2_args = next(base_args for stage, _, base_args, _ in captured if stage == "phase2_conditional_hypotheses")
+    assert "--seed" in phase1_args and "99" in phase1_args
+    assert "--seed" in phase2_args and "99" in phase2_args
 
 
 def test_run_all_includes_recommendations_checklist_by_default(monkeypatch) -> None:

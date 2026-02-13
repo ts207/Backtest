@@ -23,6 +23,7 @@ PHASE2_EVENT_CHAIN: List[Tuple[str, str, List[str]]] = [
     ("funding_extreme_reversal_window", "analyze_funding_extreme_reversal_window.py", []),
     ("range_compression_breakout_window", "analyze_range_compression_breakout_window.py", []),
 ]
+_STRICT_RECOMMENDATIONS_CHECKLIST = False
 
 
 def _run_id_default() -> str:
@@ -33,6 +34,14 @@ def _run_id_default() -> str:
 def _script_supports_log_path(script_path: Path) -> bool:
     try:
         return "--log_path" in script_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
+@lru_cache(maxsize=None)
+def _script_supports_flag(script_path: Path, flag: str) -> bool:
+    try:
+        return flag in script_path.read_text(encoding="utf-8")
     except OSError:
         return False
 
@@ -48,7 +57,9 @@ def _run_stage(stage: str, script_path: Path, base_args: List[str], run_id: str)
         cmd.extend(["--log_path", str(log_path)])
     result = subprocess.run(cmd)
 
-    allowed_nonzero = {"generate_recommendations_checklist": {1}}
+    allowed_nonzero = {}
+    if not _STRICT_RECOMMENDATIONS_CHECKLIST:
+        allowed_nonzero["generate_recommendations_checklist"] = {1}
     accepted_codes = {0} | allowed_nonzero.get(stage, set())
     if result.returncode not in accepted_codes:
         print(f"Stage failed: {stage}", file=sys.stderr)
@@ -105,6 +116,8 @@ def main() -> int:
     parser.add_argument("--run_expectancy_analysis", type=int, default=0)
     parser.add_argument("--run_expectancy_robustness", type=int, default=0)
     parser.add_argument("--run_recommendations_checklist", type=int, default=1)
+    parser.add_argument("--strict_recommendations_checklist", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--run_backtest", type=int, default=0)
     parser.add_argument("--run_make_report", type=int, default=0)
     parser.add_argument("--fees_bps", type=float, default=None)
@@ -114,6 +127,8 @@ def main() -> int:
     parser.add_argument("--overlays", default="")
 
     args = parser.parse_args()
+    global _STRICT_RECOMMENDATIONS_CHECKLIST
+    _STRICT_RECOMMENDATIONS_CHECKLIST = bool(int(args.strict_recommendations_checklist))
 
     if int(args.run_backtest) and not (args.strategies and str(args.strategies).strip()):
         print("run_backtest requires --strategies (comma-separated strategy ids).", file=sys.stderr)
@@ -391,17 +406,21 @@ def main() -> int:
             selected_chain = [x for x in PHASE2_EVENT_CHAIN if x[0] == args.phase2_event_type]
 
         for event_type, script_name, extra_args in selected_chain:
+            phase1_script = PROJECT_ROOT / "pipelines" / "research" / script_name
+            phase1_args = [
+                "--run_id",
+                run_id,
+                "--symbols",
+                symbols,
+                *extra_args,
+            ]
+            if _script_supports_flag(phase1_script, "--seed"):
+                phase1_args.extend(["--seed", str(int(args.seed))])
             stages.append(
                 (
                     script_name.removesuffix(".py"),
-                    PROJECT_ROOT / "pipelines" / "research" / script_name,
-                    [
-                        "--run_id",
-                        run_id,
-                        "--symbols",
-                        symbols,
-                        *extra_args,
-                    ],
+                    phase1_script,
+                    phase1_args,
                 )
             )
             phase2_stage_name = (
@@ -428,6 +447,8 @@ def main() -> int:
                         str(int(args.phase2_min_regime_stable_splits)),
                         "--require_phase1_pass",
                         _as_flag(args.phase2_require_phase1_pass),
+                        "--seed",
+                        str(int(args.seed)),
                     ],
                 )
             )

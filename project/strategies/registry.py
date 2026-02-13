@@ -6,6 +6,7 @@ from strategies.base import Strategy
 from strategies.adapters import build_adapter_registry
 from strategies.carry_funding_v1 import CarryFundingV1
 from strategies.mean_reversion_exhaustion_v1 import MeanReversionExhaustionV1
+from strategies.onchain_flow_v1 import OnchainFlowV1
 from strategies.spread_desync_v1 import SpreadDesyncV1
 from strategies.vol_compression_v1 import VolCompressionV1
 
@@ -15,6 +16,7 @@ _REGISTRY: Dict[str, Strategy] = {
     "carry_funding_v1": CarryFundingV1(),
     "mean_reversion_exhaustion_v1": MeanReversionExhaustionV1(),
     "spread_desync_v1": SpreadDesyncV1(),
+    "onchain_flow_v1": OnchainFlowV1(),
 }
 _REGISTRY.update(build_adapter_registry())
 

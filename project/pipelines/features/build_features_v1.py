@@ -151,6 +151,56 @@ def _merge_optional_oi_liquidation(
     return out
 
 
+def _rolling_zscore(series: pd.Series, window: int, min_periods: int = 24) -> pd.Series:
+    mean = series.rolling(window=window, min_periods=min_periods).mean()
+    std = series.rolling(window=window, min_periods=min_periods).std(ddof=0)
+    z = (series - mean) / std.replace(0.0, np.nan)
+    return z.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+
+def _load_spot_close_reference(symbol: str, run_id: str) -> pd.DataFrame:
+    candidates = [
+        DATA_ROOT / "lake" / "runs" / run_id / "cleaned" / "spot" / symbol / "bars_15m",
+        DATA_ROOT / "lake" / "cleaned" / "spot" / symbol / "bars_15m",
+    ]
+    for candidate in candidates:
+        frame = _read_optional_time_series(candidate)
+        if frame.empty:
+            continue
+        if "close" not in frame.columns:
+            continue
+        out = frame[["timestamp", "close"]].rename(columns={"close": "spot_close"}).copy()
+        out["spot_close"] = pd.to_numeric(out["spot_close"], errors="coerce")
+        return out.dropna(subset=["spot_close"]).sort_values("timestamp").reset_index(drop=True)
+    return pd.DataFrame(columns=["timestamp", "spot_close"])
+
+
+def _add_basis_features(frame: pd.DataFrame, symbol: str, run_id: str, market: str) -> pd.DataFrame:
+    out = frame.copy()
+    if market != "perp":
+        out["basis_bps"] = 0.0
+        out["basis_zscore"] = 0.0
+        out["cross_exchange_spread_z"] = 0.0
+        out["spread_zscore"] = 0.0
+        return out
+
+    spot = _load_spot_close_reference(symbol=symbol, run_id=run_id)
+    if not spot.empty:
+        out = out.merge(spot, on="timestamp", how="left")
+    else:
+        out["spot_close"] = np.nan
+
+    perp_close = pd.to_numeric(out["close"], errors="coerce")
+    spot_close = pd.to_numeric(out["spot_close"], errors="coerce")
+    ratio = perp_close / spot_close.replace(0.0, np.nan)
+    out["basis_bps"] = ((ratio - 1.0) * 10_000.0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    out["basis_zscore"] = _rolling_zscore(pd.to_numeric(out["basis_bps"], errors="coerce").fillna(0.0), window=96)
+    out["cross_exchange_spread_z"] = out["basis_zscore"]
+    out["spread_zscore"] = out["basis_zscore"]
+    out = out.drop(columns=["spot_close"], errors="ignore")
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build features v1")
     parser.add_argument("--run_id", required=True)
@@ -263,6 +313,7 @@ def main() -> int:
             # Backward-compatible alias for any code still reading funding_rate.
             bars["funding_rate"] = bars["funding_rate_scaled"]
             bars = _merge_optional_oi_liquidation(bars, symbol=symbol, market=market, run_id=run_id)
+            bars = _add_basis_features(bars, symbol=symbol, run_id=run_id, market=market)
             bars["revision_lag_bars"] = int(args.revision_lag_bars)
             bars["revision_lag_minutes"] = int(args.revision_lag_bars) * 15
 
@@ -278,6 +329,10 @@ def main() -> int:
                 "oi_delta_1h",
                 "liquidation_notional",
                 "liquidation_count",
+                "basis_bps",
+                "basis_zscore",
+                "cross_exchange_spread_z",
+                "spread_zscore",
                 "revision_lag_bars",
                 "revision_lag_minutes",
             ]].copy()
