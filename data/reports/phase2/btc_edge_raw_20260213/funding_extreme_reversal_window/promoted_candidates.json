@@ -1,0 +1,10 @@
+{
+  "run_id": "btc_edge_raw_20260213",
+  "event_type": "funding_extreme_reversal_window",
+  "decision": "freeze",
+  "phase1_pass": true,
+  "phase1_structure_pass": true,
+  "phase1_decision": "unknown",
+  "promoted_count": 0,
+  "candidates": []
+}

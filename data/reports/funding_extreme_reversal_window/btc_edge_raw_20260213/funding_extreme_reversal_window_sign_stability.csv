@@ -1,0 +1,6 @@
+year,funding_sign,n,sign_tail_prob,sign_vol
+2020,pos_funding,7,1.0,1.0
+2021,neg_funding,1,1.0,1.0
+2021,pos_funding,46,1.0,1.0
+2022,neg_funding,1,1.0,1.0
+2024,pos_funding,1,1.0,1.0

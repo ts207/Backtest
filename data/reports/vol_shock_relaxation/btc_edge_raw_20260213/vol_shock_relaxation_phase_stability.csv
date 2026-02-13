@@ -1,0 +1,4 @@
+split,status,spread_t_rv_peak,spread_t_half_life,spread_t_relax,fractional_stable
+symbol,pass,0.0,0.0,0.0,True
+bull_bear,pass,1.0,0.0,3.0,True
+vol_regime,pass,1.0,0.0,5.0,True

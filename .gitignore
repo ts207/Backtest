@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Local runtime intermediates
+project/**/__pycache__/
+data/lake/cleaned/
+data/lake/features/
+data/lake/runs/

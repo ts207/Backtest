@@ -1,0 +1,21 @@
+{
+  "actions_generated": 0,
+  "anchor_mode": "taker_imbalance",
+  "anchor_quantile": 0.99,
+  "controls": 105,
+  "event_type": "directional_exhaustion_after_forced_flow",
+  "events": 105,
+  "outputs": {
+    "controls": "/workspace/Backtest/data/reports/directional_exhaustion_after_forced_flow/btc_edge_raw_20260213/directional_exhaustion_after_forced_flow_controls.csv",
+    "deltas": "/workspace/Backtest/data/reports/directional_exhaustion_after_forced_flow/btc_edge_raw_20260213/directional_exhaustion_after_forced_flow_matched_deltas.csv",
+    "events": "/workspace/Backtest/data/reports/directional_exhaustion_after_forced_flow/btc_edge_raw_20260213/directional_exhaustion_after_forced_flow_events.csv",
+    "hazards": "/workspace/Backtest/data/reports/directional_exhaustion_after_forced_flow/btc_edge_raw_20260213/directional_exhaustion_after_forced_flow_hazards.csv",
+    "phase_stability": "/workspace/Backtest/data/reports/directional_exhaustion_after_forced_flow/btc_edge_raw_20260213/directional_exhaustion_after_forced_flow_phase_stability.csv",
+    "sign_stability": "/workspace/Backtest/data/reports/directional_exhaustion_after_forced_flow/btc_edge_raw_20260213/directional_exhaustion_after_forced_flow_sign_stability.csv"
+  },
+  "phase": 1,
+  "window": {
+    "x": 0,
+    "y": 32
+  }
+}

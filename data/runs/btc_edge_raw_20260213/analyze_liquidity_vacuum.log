@@ -1,0 +1,5 @@
+2026-02-13 21:09:44,555 WARNING Calibration did not yield enough events for BTCUSDT; threshold may be unreliable (selected=0.015694675599329078, count=0)
+2026-02-13 21:09:51,428 INFO No liquidity vacuum events detected for BTCUSDT
+2026-02-13 21:09:51,432 INFO Wrote controls scaffold to /workspace/Backtest/data/reports/liquidity_vacuum/btc_edge_raw_20260213/liquidity_vacuum_controls.csv
+2026-02-13 21:09:51,435 INFO Wrote calibration sweep to /workspace/Backtest/data/reports/liquidity_vacuum/btc_edge_raw_20260213/liquidity_vacuum_calibration.csv
+2026-02-13 21:09:51,436 INFO Wrote summary to /workspace/Backtest/data/reports/liquidity_vacuum/btc_edge_raw_20260213/liquidity_vacuum_summary.json
