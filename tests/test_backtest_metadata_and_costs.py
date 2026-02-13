@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "project"))
@@ -112,19 +113,64 @@ def test_backtest_main_writes_cost_decomposition_and_reproducibility(monkeypatch
     assert "config_digest" in payload["reproducibility"]
 
 
-def test_backtest_main_passes_strategy_specific_params(monkeypatch, tmp_path: Path) -> None:
-    run_id = "bt_strategy_params"
+@pytest.mark.parametrize(
+    "strategy_id,expected_family",
+    [
+        ("funding_extreme_reversal_v1", "carry"),
+        ("cross_venue_desync_v1", "spread"),
+    ],
+)
+def test_backtest_metadata_records_execution_family_without_breakout_only_config(
+    monkeypatch,
+    tmp_path: Path,
+    strategy_id: str,
+    expected_family: str,
+) -> None:
+    run_id = f"bt_exec_family_{strategy_id}"
     monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
     monkeypatch.setattr(bts, "DATA_ROOT", tmp_path)
 
-    captured_kwargs = {}
+    runs_dir = tmp_path / "runs" / run_id
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    (runs_dir / "build_cleaned_15m.json").write_text(json.dumps({"ok": 1}), encoding="utf-8")
 
     def _fake_engine(**kwargs):
-        captured_kwargs.update(kwargs)
+        assert kwargs["strategies"] == [strategy_id]
         engine_dir = tmp_path / "runs" / run_id / "engine"
         engine_dir.mkdir(parents=True, exist_ok=True)
         frame = pd.DataFrame(
             {
+                "timestamp": pd.to_datetime(["2024-01-01T00:00:00Z", "2024-01-01T00:15:00Z"]),
+                "symbol": ["BTCUSDT", "BTCUSDT"],
+                "pos": [0, 1],
+                "ret": [0.0, 0.01],
+                "pnl": [0.0, -0.0006],
+                "close": [100.0, 101.0],
+                "high": [101.0, 102.0],
+                "low": [99.0, 100.0],
+                "high_96": [101.0, 102.0],
+                "low_96": [99.0, 100.0],
+            }
+        )
+        portfolio = pd.DataFrame(
+            {
+                "timestamp": pd.to_datetime(["2024-01-01T00:00:00Z", "2024-01-01T00:15:00Z"]),
+                "portfolio_pnl": [0.0, -0.0006],
+            }
+        )
+        return {"engine_dir": engine_dir, "strategy_frames": {strategy_id: frame}, "portfolio": portfolio}
+
+    monkeypatch.setattr(bts, "run_engine", _fake_engine)
+    monkeypatch.setattr(
+        bts,
+        "load_configs",
+        lambda _: {
+            "fee_bps_per_side": 4,
+            "slippage_bps_per_fill": 2,
+            "trade_day_timezone": "UTC",
+            # Intentionally omit breakout_* keys to validate carry/spread contract.
+        },
+    )
                 "timestamp": pd.to_datetime(["2024-01-01T00:00:00Z"]),
                 "symbol": ["BTCUSDT"],
                 "pos": [0],
@@ -164,6 +210,7 @@ strategy_families:
             "--symbols",
             "BTCUSDT",
             "--strategies",
+            strategy_id,
             "funding_extreme_reversal_v1",
             "--config",
             str(cfg),
@@ -173,6 +220,8 @@ strategy_families:
     )
 
     assert bts.main() == 0
-    params_by_strategy = captured_kwargs["params_by_strategy"]
-    assert "funding_extreme_reversal_v1" in params_by_strategy
-    assert params_by_strategy["funding_extreme_reversal_v1"]["funding_percentile_entry_min"] == 96.0
+
+    metrics_path = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id / "metrics.json"
+    payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+    assert payload["metadata"]["execution_family"] == expected_family
+    assert payload["metadata"]["strategy_ids"] == [strategy_id]

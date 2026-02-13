@@ -28,6 +28,29 @@ from strategies.overlay_registry import apply_overlay
 INITIAL_EQUITY = 1_000_000.0
 BARS_PER_YEAR_15M = 365 * 24 * 4
 
+STRATEGY_EXECUTION_FAMILY = {
+    "vol_compression_v1": "breakout",
+    "liquidity_refill_lag_v1": "mean_reversion",
+    "liquidity_absence_gate_v1": "mean_reversion",
+    "forced_flow_exhaustion_v1": "mean_reversion",
+    "funding_extreme_reversal_v1": "carry",
+    "cross_venue_desync_v1": "spread",
+    "liquidity_vacuum_v1": "mean_reversion",
+}
+
+
+def _execution_family_for_strategies(strategies: List[str]) -> str:
+    families = {
+        STRATEGY_EXECUTION_FAMILY.get(str(strategy).strip(), "unknown")
+        for strategy in strategies
+        if str(strategy).strip()
+    }
+    if len(families) == 1:
+        return next(iter(families))
+    if not families:
+        return "unknown"
+    return "hybrid"
+
 
 DEFAULT_STRATEGY_FAMILIES: Dict[str, str] = {
     "funding_extreme_reversal_v1": "Carry",
@@ -547,6 +570,10 @@ def main() -> int:
             "max_drawdown": max_drawdown,
             "ending_equity": ending_equity,
             "sharpe_annualized": sharpe_annualized,
+            "metadata": {
+                "strategy_ids": strategies,
+                "execution_family": _execution_family_for_strategies(strategies),
+            },
             "cost_decomposition": _aggregate_cost_components(
                 engine_results["strategy_frames"],
                 fee_bps=fee_bps,
