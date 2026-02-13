@@ -74,6 +74,21 @@ discover-edges-from-raw:
 		--run_strategy_builder 0 \
 		--run_recommendations_checklist 0
 
+discover-edges-from-raw:
+	$(PYTHON) $(RUN_ALL) \
+		--run_id $(RUN_ID) \
+		--symbols $(SYMBOLS) \
+		--start $(START) \
+		--end $(END) \
+		--skip_ingest_ohlcv 1 \
+		--skip_ingest_funding 1 \
+		--skip_ingest_spot_ohlcv 1 \
+		--enable_cross_venue_spot_pipeline $(ENABLE_CROSS_VENUE_SPOT_PIPELINE) \
+		--run_hypothesis_generator 1 \
+		--run_phase2_conditional 1 \
+		--phase2_event_type all \
+		--run_edge_candidate_universe 1
+
 discover-hybrid:
 	$(PYTHON) $(RUN_ALL) \
 		--run_id $(RUN_ID) \
