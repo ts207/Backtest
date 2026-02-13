@@ -171,6 +171,35 @@ def test_backtest_metadata_records_execution_family_without_breakout_only_config
             # Intentionally omit breakout_* keys to validate carry/spread contract.
         },
     )
+                "timestamp": pd.to_datetime(["2024-01-01T00:00:00Z"]),
+                "symbol": ["BTCUSDT"],
+                "pos": [0],
+                "ret": [0.0],
+                "pnl": [0.0],
+                "close": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "high_96": [101.0],
+                "low_96": [99.0],
+            }
+        )
+        portfolio = pd.DataFrame({"timestamp": pd.to_datetime(["2024-01-01T00:00:00Z"]), "portfolio_pnl": [0.0]})
+        return {"engine_dir": engine_dir, "strategy_frames": {"funding_extreme_reversal_v1": frame}, "portfolio": portfolio}
+
+    cfg = tmp_path / "family.yaml"
+    cfg.write_text(
+        """
+strategy_family_params:
+  Carry:
+    funding_percentile_entry_min: 96.0
+    funding_percentile_entry_max: 99.0
+strategy_families:
+  funding_extreme_reversal_v1: Carry
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(bts, "run_engine", _fake_engine)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -182,6 +211,9 @@ def test_backtest_metadata_records_execution_family_without_breakout_only_config
             "BTCUSDT",
             "--strategies",
             strategy_id,
+            "funding_extreme_reversal_v1",
+            "--config",
+            str(cfg),
             "--force",
             "1",
         ],

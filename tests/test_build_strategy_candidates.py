@@ -84,8 +84,10 @@ def test_build_strategy_candidates_from_promoted_edges(monkeypatch, tmp_path: Pa
     assert out_json.exists()
     payload = json.loads(out_json.read_text(encoding="utf-8"))
     assert len(payload) == 1
+    assert payload[0]["execution_family"] == "breakout_mechanics"
     assert payload[0]["base_strategy"] == "vol_compression_v1"
     assert payload[0]["backtest_ready"] is True
+    assert payload[0]["backtest_ready_reason"] == ""
     assert payload[0]["action"] == "delay_30"
     assert payload[0]["risk_controls"]["entry_delay_bars"] == 30
 
@@ -138,6 +140,8 @@ def test_build_strategy_candidates_can_include_alpha_bundle(monkeypatch, tmp_pat
     payload = json.loads(out_json.read_text(encoding="utf-8"))
     assert len(payload) == 1
     assert payload[0]["source_type"] == "alpha_bundle"
+    assert payload[0]["execution_family"] == "alpha_bundle"
+    assert payload[0]["base_strategy"] == "alpha_bundle_manual"
 
 
 def test_build_strategy_candidates_event_specific_template(monkeypatch, tmp_path: Path) -> None:
@@ -219,6 +223,22 @@ def test_build_strategy_candidates_unknown_event_does_not_fallback_to_breakout(m
     run_id = "strategy_builder_unknown"
     _write_edge_inputs(tmp_path, run_id=run_id, event="unknown_edge_family")
 
+    assert payload[0]["execution_family"] == "carry_imbalance"
+    assert payload[0]["base_strategy"] == "carry_imbalance_v1"
+    assert payload[0]["backtest_ready"] is False
+    assert payload[0]["backtest_ready_reason"] == ""
+
+
+def test_build_strategy_candidates_unknown_event_fails_closed(monkeypatch, tmp_path: Path) -> None:
+    run_id = "strategy_builder_unknown_event"
+    _write_edge_inputs(
+        tmp_path,
+        run_id=run_id,
+        event="totally_unknown_event_family",
+        condition="vol_regime_high",
+        action="no_action",
+    )
+
     monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
     monkeypatch.setattr(build_strategy_candidates, "DATA_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -241,3 +261,9 @@ def test_build_strategy_candidates_unknown_event_does_not_fallback_to_breakout(m
     assert payload[0]["base_strategy"] == "unmapped_event_template_v1"
     assert payload[0]["base_strategy"] != "vol_compression_v1"
     assert payload[0]["backtest_ready"] is False
+    assert len(payload) == 1
+    assert payload[0]["execution_family"] == "unmapped"
+    assert payload[0]["base_strategy"] == "unmapped"
+    assert payload[0]["backtest_ready"] is False
+    assert payload[0]["backtest_ready_reason"] == "Unknown event family `totally_unknown_event_family`; no strategy routing is defined."
+    assert "Unknown event family `totally_unknown_event_family`" in " ".join(payload[0]["notes"])
