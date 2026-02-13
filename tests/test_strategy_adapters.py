@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "project"))
@@ -53,4 +54,23 @@ def test_strategy_adapter_generates_valid_positions() -> None:
 
     assert len(out) == len(bars)
     assert out.index.tz is not None
+    assert set(out.unique()).issubset({-1, 0, 1})
+
+
+@pytest.mark.parametrize(
+    "strategy_id",
+    [
+        "funding_extreme_reversal_v1",
+        "forced_flow_exhaustion_v1",
+        "liquidity_refill_lag_v1",
+        "cross_venue_desync_v1",
+    ],
+)
+def test_new_strategy_ids_are_resolvable_and_instantiable(strategy_id: str) -> None:
+    bars, features = _sample_bars_and_features()
+    strategy = get_strategy(strategy_id)
+    out = strategy.generate_positions(bars, features, params={"trade_day_timezone": "UTC"})
+
+    assert strategy is not None
+    assert len(out) == len(bars)
     assert set(out.unique()).issubset({-1, 0, 1})

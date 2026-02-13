@@ -120,7 +120,7 @@ def _base_strategy_for_event(event: str) -> str:
     key = str(event).strip().lower()
     if key in EVENT_BASE_STRATEGY_MAP:
         return EVENT_BASE_STRATEGY_MAP[key]
-    return "vol_compression_v1"
+    return "unmapped_event_template_v1"
 
 
 def _manual_backtest_command_for_strategy(base_strategy: str, symbols_csv: str) -> str:
