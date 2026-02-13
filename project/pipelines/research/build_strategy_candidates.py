@@ -7,7 +7,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import pandas as pd
 
@@ -19,16 +19,43 @@ from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from strategies.registry import list_strategies
 
-EVENT_BASE_STRATEGY_MAP: Dict[str, str] = {
-    "vol_shock_relaxation": "vol_compression_v1",
-    "vol_aftershock_window": "vol_compression_v1",
-    "range_compression_breakout_window": "vol_compression_v1",
-    "liquidity_refill_lag_window": "liquidity_refill_lag_v1",
-    "liquidity_absence_window": "liquidity_absence_gate_v1",
-    "directional_exhaustion_after_forced_flow": "forced_flow_exhaustion_v1",
-    "funding_extreme_reversal_window": "funding_extreme_reversal_v1",
-    "cross_venue_desync": "cross_venue_desync_v1",
-    "liquidity_vacuum": "liquidity_vacuum_v1",
+EVENT_FAMILY_STRATEGY_ROUTING: Dict[str, Dict[str, str]] = {
+    "vol_shock_relaxation": {
+        "execution_family": "breakout_mechanics",
+        "base_strategy": "vol_compression_v1",
+    },
+    "vol_aftershock_window": {
+        "execution_family": "breakout_mechanics",
+        "base_strategy": "vol_compression_v1",
+    },
+    "range_compression_breakout_window": {
+        "execution_family": "breakout_mechanics",
+        "base_strategy": "vol_compression_v1",
+    },
+    "liquidity_refill_lag_window": {
+        "execution_family": "breakout_mechanics",
+        "base_strategy": "vol_compression_v1",
+    },
+    "liquidity_absence_window": {
+        "execution_family": "breakout_mechanics",
+        "base_strategy": "vol_compression_v1",
+    },
+    "liquidity_vacuum": {
+        "execution_family": "breakout_mechanics",
+        "base_strategy": "vol_compression_v1",
+    },
+    "funding_extreme_reversal_window": {
+        "execution_family": "carry_imbalance",
+        "base_strategy": "carry_imbalance_v1",
+    },
+    "directional_exhaustion_after_forced_flow": {
+        "execution_family": "exhaustion_overshoot",
+        "base_strategy": "mean_reversion_exhaustion_v1",
+    },
+    "cross_venue_desync": {
+        "execution_family": "spread_dislocation",
+        "base_strategy": "spread_dislocation_v1",
+    },
 }
 
 BACKTEST_READY_BASE_STRATEGIES = set(list_strategies())
@@ -116,11 +143,9 @@ def _risk_controls_from_action(action: str) -> Dict[str, object]:
     return controls
 
 
-def _base_strategy_for_event(event: str) -> str:
+def _route_event_family(event: str) -> Optional[Dict[str, str]]:
     key = str(event).strip().lower()
-    if key in EVENT_BASE_STRATEGY_MAP:
-        return EVENT_BASE_STRATEGY_MAP[key]
-    return "vol_compression_v1"
+    return EVENT_FAMILY_STRATEGY_ROUTING.get(key)
 
 
 def _manual_backtest_command_for_strategy(base_strategy: str, symbols_csv: str) -> str:
@@ -153,8 +178,11 @@ def _build_edge_strategy_candidate(
     action = str(detail.get("action", "no_action"))
     selection_score = (0.65 * edge_score) + (0.35 * stability_proxy)
     controls = _risk_controls_from_action(action)
-    base_strategy = _base_strategy_for_event(event)
-    backtest_ready = bool(base_strategy in BACKTEST_READY_BASE_STRATEGIES)
+    route = _route_event_family(event)
+    execution_family = route["execution_family"] if route else "unmapped"
+    base_strategy = route["base_strategy"] if route else "unmapped"
+    routing_reason = "" if route else f"Unknown event family `{event}`; no strategy routing is defined."
+    backtest_ready = bool(route is not None and base_strategy in BACKTEST_READY_BASE_STRATEGIES)
 
     strategy_candidate_id = _sanitize_id(f"{event}_{condition}_{action}_{candidate_id}")
     symbols_csv = ",".join(symbols)
@@ -167,15 +195,20 @@ def _build_edge_strategy_candidate(
     if controls.get("block_entries"):
         notes.append("Action implies full entry block; use as rejection/guard condition, not a standalone trading strategy.")
     if not backtest_ready:
-        notes.append(
-            f"`{base_strategy}` is a strategy template. Add/choose a concrete backtest implementation before execution."
-        )
+        if route is None:
+            notes.append(routing_reason)
+        else:
+            notes.append(
+                f"`{base_strategy}` is a strategy template. Add/choose a concrete backtest implementation before execution."
+            )
 
     return {
         "strategy_candidate_id": strategy_candidate_id,
         "source_type": "edge_candidate",
+        "execution_family": execution_family,
         "base_strategy": base_strategy,
         "backtest_ready": backtest_ready,
+        "backtest_ready_reason": routing_reason if route is None else "",
         "event": event,
         "condition": condition,
         "action": action,
@@ -231,7 +264,10 @@ def _load_alpha_bundle_candidate(run_id: str, symbols: List[str]) -> Dict[str, o
     return {
         "strategy_candidate_id": _sanitize_id(f"alpha_bundle_{run_id}"),
         "source_type": "alpha_bundle",
+        "execution_family": "alpha_bundle",
         "base_strategy": "alpha_bundle_manual",
+        "backtest_ready": False,
+        "backtest_ready_reason": "Manual alpha bundle adapter required.",
         "event": "alpha_bundle",
         "condition": "cross_signal_composite",
         "action": "score_rank",
