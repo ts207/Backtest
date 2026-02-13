@@ -22,6 +22,7 @@ from pipelines._lib.io_utils import (
     read_parquet,
     run_scoped_lake_path,
 )
+from pipelines.research.analyze_conditional_expectancy import build_walk_forward_split_labels
 
 
 @dataclass
@@ -35,10 +36,14 @@ class CompressionEvent:
     year: int
     vol_q: str
     bull_bear: str
+    enter_ts: pd.Timestamp
 
 
 EVENT_ROW_COLUMNS = [
     "symbol",
+    "event_start_idx",
+    "enter_ts",
+    "split_label",
     "year",
     "vol_q",
     "bull_bear",
@@ -263,6 +268,7 @@ def _extract_compression_events(df: pd.DataFrame, symbol: str, max_duration: int
                 year=int(ts.year),
                 vol_q=str(vol_q) if pd.notna(vol_q) else "na",
                 bull_bear=str(df.at[start, "bull_bear"]),
+                enter_ts=pd.to_datetime(ts, utc=True),
             )
         )
         i = end + 1
@@ -313,6 +319,9 @@ def _event_rows(df: pd.DataFrame, events: List[CompressionEvent], horizons: List
             rows.append(
                 {
                     "symbol": ev.symbol,
+                    "event_start_idx": ev.start_idx,
+                    "enter_ts": ev.enter_ts,
+                    "split_label": "",
                     "year": ev.year,
                     "vol_q": ev.vol_q,
                     "bull_bear": ev.bull_bear,
@@ -381,6 +390,34 @@ def _event_condition_frame(events_df: pd.DataFrame, condition: str, horizon: int
     return frame, ret_col
 
 
+def _split_overlap_diagnostics(events_df: pd.DataFrame, embargo_bars: int) -> Dict[str, object]:
+    if events_df.empty:
+        return {"pass": False, "embargo_bars": int(embargo_bars), "details": []}
+
+    unique_events = events_df.drop_duplicates(subset=["symbol", "event_start_idx"]).copy()
+    details: List[Dict[str, object]] = []
+    global_pass = True
+
+    for symbol, group in unique_events.groupby("symbol", dropna=False):
+        g = group.sort_values("event_start_idx").reset_index(drop=True)
+        boundary_gaps: Dict[str, int] = {}
+        for left, right in [("train", "validation"), ("validation", "test")]:
+            left_idx = g.index[g["split_label"] == left]
+            right_idx = g.index[g["split_label"] == right]
+            if len(left_idx) == 0 or len(right_idx) == 0:
+                boundary_gaps[f"{left}_to_{right}"] = -1
+                global_pass = False
+                continue
+            gap = int(right_idx.min() - left_idx.max() - 1)
+            boundary_gaps[f"{left}_to_{right}"] = gap
+            if gap < int(embargo_bars):
+                global_pass = False
+
+        details.append({"symbol": str(symbol), "boundary_gaps": boundary_gaps})
+
+    return {"pass": bool(global_pass), "embargo_bars": int(embargo_bars), "details": details}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate conditional expectancy against statistical traps (event-level)")
     parser.add_argument("--run_id", required=True)
@@ -394,6 +431,7 @@ def main() -> int:
     parser.add_argument("--mfe_horizon", type=int, default=96)
     parser.add_argument("--tstat_threshold", type=float, default=2.0)
     parser.add_argument("--min_samples", type=int, default=100)
+    parser.add_argument("--embargo_bars", type=int, default=0)
     parser.add_argument("--out_dir", default=None)
     args = parser.parse_args()
 
@@ -435,6 +473,11 @@ def main() -> int:
 
     master_bars = pd.concat(all_bar_df, ignore_index=True)
     events_df = pd.DataFrame(all_event_rows, columns=EVENT_ROW_COLUMNS)
+    if not events_df.empty:
+        events_df["enter_ts"] = pd.to_datetime(events_df["enter_ts"], utc=True, errors="coerce")
+        events_df["split_label"] = build_walk_forward_split_labels(events_df, time_col="enter_ts", symbol_col="symbol")
+
+    split_overlap = _split_overlap_diagnostics(events_df, embargo_bars=args.embargo_bars)
 
     conditions = ["compression", "compression_plus_htf_trend", "compression_plus_funding_low"]
     trap_rows = []
@@ -549,10 +592,11 @@ def main() -> int:
             "max_event_duration": args.max_event_duration,
             "expansion_lookahead": args.expansion_lookahead,
             "mfe_horizon": args.mfe_horizon,
+            "embargo_bars": args.embargo_bars,
         },
         "event_summary": event_summary_df.to_dict(orient="records"),
         "trap_1_overlap_bar_vs_event": trap_df.to_dict(orient="records"),
-        "trap_2_leakage": leakage,
+        "trap_2_leakage": {"feature_leakage": leakage, "split_overlap": split_overlap},
         "trap_3_regimes": split_df.to_dict(orient="records"),
         "trap_4_tails": tail_df.to_dict(orient="records"),
         "trap_5_symmetry": symmetry_df.to_dict(orient="records"),
@@ -578,7 +622,7 @@ def main() -> int:
     else:
         lines.append(survivors.to_markdown(index=False))
 
-    lines.extend(["", "## Trap 2 Leakage", json.dumps(leakage, indent=2), ""])
+    lines.extend(["", "## Trap 2 Leakage", json.dumps({"feature_leakage": leakage, "split_overlap": split_overlap}, indent=2), ""])
     lines.extend(["## Trap 1 Overlap (Bar vs Event)", trap_df.to_markdown(index=False) if not trap_df.empty else "No rows", ""])
     lines.extend(["## Trap 3 Regime Stability", split_df.to_markdown(index=False) if not split_df.empty else "No rows", ""])
     lines.extend(["## Trap 4 Tail Dominance", tail_df.to_markdown(index=False) if not tail_df.empty else "No rows", ""])

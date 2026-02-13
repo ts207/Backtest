@@ -265,3 +265,95 @@ def test_gate_regime_stability_can_be_switched_back_to_strict() -> None:
     assert passed is False
     assert stable_splits == 2
     assert required_splits == 3
+
+
+def test_phase2_manifest_and_candidates_include_oos_and_multiplicity_fields(tmp_path: Path) -> None:
+    run_id = "phase2_oos_fields"
+    _write_phase1_fixture(tmp_path=tmp_path, run_id=run_id)
+    _run_phase2(tmp_path=tmp_path, run_id=run_id)
+
+    out_dir = tmp_path / "reports" / "phase2" / run_id / "vol_shock_relaxation"
+    manifest = json.loads((out_dir / "phase2_manifests.json").read_text())
+    assert "hypotheses_tested" in manifest
+    assert "adjusted_pass_count" in manifest
+    assert "oos_pass_count" in manifest
+
+    candidates = pd.read_csv(out_dir / "phase2_candidates.csv")
+    if not candidates.empty:
+        for col in [
+            "train_samples",
+            "validation_samples",
+            "test_samples",
+            "test_p_value",
+            "test_p_value_adj_bh",
+            "gate_oos_validation_test",
+            "gate_multiplicity",
+        ]:
+            assert col in candidates.columns
+
+
+def test_phase2_fails_without_split_or_timestamp(tmp_path: Path) -> None:
+    run_id = "phase2_missing_split"
+    _write_phase1_fixture(tmp_path=tmp_path, run_id=run_id)
+
+    in_dir = tmp_path / "reports" / "vol_shock_relaxation" / run_id
+    events_path = in_dir / "vol_shock_relaxation_events.csv"
+    events = pd.read_csv(events_path)
+    events = events.drop(columns=["enter_ts"])
+    events.to_csv(events_path, index=False)
+
+    env = os.environ.copy()
+    env["BACKTEST_DATA_ROOT"] = str(tmp_path)
+    cmd = [
+        sys.executable,
+        str(ROOT / "project" / "pipelines" / "research" / "phase2_conditional_hypotheses.py"),
+        "--run_id",
+        run_id,
+        "--event_type",
+        "vol_shock_relaxation",
+        "--symbols",
+        "BTCUSDT,ETHUSDT",
+    ]
+    proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    assert proc.returncode != 0
+    assert "split_label" in (proc.stderr + proc.stdout)
+
+
+def test_phase2_oos_gate_blocks_positive_test_split() -> None:
+    n = 90
+    split_label = ["train"] * 30 + ["validation"] * 30 + ["test"] * 30
+    adverse = [0.04] * 30 + [0.03] * 30 + [-0.02] * 30
+    sub = pd.DataFrame(
+        {
+            "year": [2022] * 45 + [2023] * 45,
+            "symbol": ["BTCUSDT"] * n,
+            "vol_regime": ["high"] * n,
+            "split_label": split_label,
+            "baseline_mode": ["matched_controls_excess"] * n,
+            "adverse_proxy_excess": adverse,
+            "opportunity_value_excess": [0.0] * n,
+            "forward_abs_return_h": [0.0] * n,
+            "time_to_secondary_shock": [12.0] * n,
+            "rv_decay_half_life": [20.0] * n,
+        }
+    )
+    condition = ConditionSpec("all", "all", lambda d: pd.Series(True, index=d.index))
+    action = ActionSpec("risk_throttle_0.5", "risk_throttle", {"k": 0.5})
+
+    result = _evaluate_candidate(
+        sub=sub,
+        condition=condition,
+        action=action,
+        bootstrap_iters=200,
+        seed=17,
+        cost_floor=0.0,
+        tail_material_threshold=0.0,
+        opportunity_tight_eps=0.005,
+        opportunity_near_zero_eps=0.001,
+        net_benefit_floor=0.0,
+        simplicity_gate=True,
+    )
+
+    assert result["validation_delta_adverse_mean"] < 0
+    assert result["test_delta_adverse_mean"] > 0
+    assert result["gate_oos_validation_test"] is False
