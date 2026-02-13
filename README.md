@@ -19,6 +19,14 @@ python3 -m venv .venv
 export BACKTEST_DATA_ROOT=/abs/path/to/data
 ```
 
+## Codex Cloud
+- Setup guide: `docs/codex_cloud_setup.md`
+- Codex environment scripts:
+  - `.codex/setup.sh`
+  - `.codex/maintenance.sh`
+- Optional GitHub PR review workflow:
+  - `.github/workflows/codex_pr_review.yml` (trigger with `@codex` comment)
+
 ## Canonical discovery window
 Standard discovery duration is:
 - start: `2020-01-01`
