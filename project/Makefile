@@ -8,14 +8,16 @@ SYMBOLS ?= BTCUSDT,ETHUSDT
 START ?= 2020-06-01
 END ?= 2025-07-10
 STRATEGIES ?=
+ENABLE_CROSS_VENUE_SPOT_PIPELINE ?= 0
 
-.PHONY: help run baseline discover-edges discover-hybrid discover-hybrid-backtest test clean-runtime clean-all-data clean-repo
+.PHONY: help run baseline discover-edges discover-edges-from-raw discover-hybrid discover-hybrid-backtest test clean-runtime clean-all-data clean-repo
 
 help:
 	@echo "Targets:"
 	@echo "  run               - ingest+clean+features+context"
 	@echo "  baseline          - run + backtest + report"
 	@echo "  discover-edges    - run discovery chain (phase1+phase2+export)"
+	@echo "  discover-edges-from-raw - discovery chain using existing raw lake partitions (skips ingest)"
 	@echo "  discover-hybrid   - discover-edges + expectancy checks"
 	@echo "  discover-hybrid-backtest - discover-hybrid + backtest + report"
 	@echo "                          requires STRATEGIES=... (comma-separated)"
@@ -48,6 +50,21 @@ discover-edges:
 		--symbols $(SYMBOLS) \
 		--start $(START) \
 		--end $(END) \
+		--run_hypothesis_generator 1 \
+		--run_phase2_conditional 1 \
+		--phase2_event_type all \
+		--run_edge_candidate_universe 1
+
+discover-edges-from-raw:
+	$(PYTHON) $(RUN_ALL) \
+		--run_id $(RUN_ID) \
+		--symbols $(SYMBOLS) \
+		--start $(START) \
+		--end $(END) \
+		--skip_ingest_ohlcv 1 \
+		--skip_ingest_funding 1 \
+		--skip_ingest_spot_ohlcv 1 \
+		--enable_cross_venue_spot_pipeline $(ENABLE_CROSS_VENUE_SPOT_PIPELINE) \
 		--run_hypothesis_generator 1 \
 		--run_phase2_conditional 1 \
 		--phase2_event_type all \
