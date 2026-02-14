@@ -76,6 +76,7 @@ def _phase2_row_to_candidate(
     opp_delta = _safe_float(row.get("delta_opportunity_mean"), 0.0)
     edge_score = _safe_float(row.get("edge_score"), risk_reduction + max(0.0, opp_delta))
     expected_return_proxy = _safe_float(row.get("expected_return_proxy"), opp_delta)
+    expectancy_per_trade = _safe_float(row.get("expectancy_per_trade"), expected_return_proxy)
 
     gate_cols = [
         "gate_a_ci_separated",
@@ -91,6 +92,14 @@ def _phase2_row_to_candidate(
     else:
         stability_proxy = _safe_float(row.get("stability_proxy"), 0.0)
 
+    robustness_score = _safe_float(row.get("robustness_score"), stability_proxy)
+    event_frequency = _safe_float(row.get("event_frequency"), 0.0)
+    capacity_proxy = _safe_float(row.get("capacity_proxy"), 0.0)
+    profit_density_score = _safe_float(
+        row.get("profit_density_score"),
+        max(0.0, expectancy_per_trade) * max(0.0, robustness_score) * max(0.0, event_frequency),
+    )
+
     return {
         "run_id": run_id,
         "event": event,
@@ -98,7 +107,12 @@ def _phase2_row_to_candidate(
         "status": str(row.get("status", default_status)),
         "edge_score": edge_score,
         "expected_return_proxy": expected_return_proxy,
+        "expectancy_per_trade": expectancy_per_trade,
         "stability_proxy": stability_proxy,
+        "robustness_score": robustness_score,
+        "event_frequency": event_frequency,
+        "capacity_proxy": capacity_proxy,
+        "profit_density_score": profit_density_score,
         "n_events": _safe_int(row.get("sample_size", row.get("n_events", row.get("count", 0))), 0),
         "source_path": str(source_path),
     }
@@ -269,13 +283,18 @@ def main() -> int:
                 "status",
                 "edge_score",
                 "expected_return_proxy",
+                "expectancy_per_trade",
                 "stability_proxy",
+                "robustness_score",
+                "event_frequency",
+                "capacity_proxy",
+                "profit_density_score",
                 "n_events",
                 "source_path",
             ],
         )
         if not df.empty:
-            df = df.sort_values(["edge_score", "stability_proxy"], ascending=[False, False]).reset_index(drop=True)
+            df = df.sort_values(["profit_density_score", "edge_score", "stability_proxy"], ascending=[False, False, False]).reset_index(drop=True)
         df.to_csv(out_csv, index=False)
         out_json.write_text(df.to_json(orient="records", indent=2), encoding="utf-8")
 

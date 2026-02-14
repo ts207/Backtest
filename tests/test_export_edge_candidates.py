@@ -36,6 +36,11 @@ def test_collects_unified_multi_event_phase2_candidates(tmp_path: Path, monkeypa
                         "sample_size": 42,
                         "delta_adverse_mean": -0.05,
                         "delta_opportunity_mean": 0.02,
+                        "expectancy_per_trade": 0.02,
+                        "robustness_score": 0.9,
+                        "event_frequency": 0.3,
+                        "capacity_proxy": 1.2,
+                        "profit_density_score": 0.0054,
                         "gate_a_ci_separated": True,
                         "gate_b_time_stable": True,
                         "gate_c_regime_stable": True,
@@ -58,6 +63,10 @@ def test_collects_unified_multi_event_phase2_candidates(tmp_path: Path, monkeypa
                 "sample_size": 30,
                 "delta_adverse_mean": -0.03,
                 "delta_opportunity_mean": -0.01,
+                "expectancy_per_trade": 0.0,
+                "robustness_score": 0.8,
+                "event_frequency": 0.2,
+                "profit_density_score": 0.0,
                 "gate_all": True,
                 "gate_a_ci_separated": True,
                 "gate_b_time_stable": True,
@@ -96,6 +105,8 @@ def test_collects_unified_multi_event_phase2_candidates(tmp_path: Path, monkeypa
     assert promoted["status"] == "PROMOTED"
     assert promoted["n_events"] == 42
     assert promoted["edge_score"] > 0.0
+    assert promoted["profit_density_score"] > 0.0
+    assert promoted["expectancy_per_trade"] == 0.02
 
     liq_row = out_df[out_df["event"] == "liquidity_absence_window"].iloc[0]
     assert liq_row["n_events"] == 30

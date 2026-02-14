@@ -171,12 +171,20 @@ def _build_edge_strategy_candidate(
     candidate_id = str(row.get("candidate_id", "")).strip()
     edge_score = _safe_float(row.get("edge_score"), 0.0)
     stability_proxy = _safe_float(row.get("stability_proxy"), 0.0)
+    expectancy_per_trade = _safe_float(row.get("expectancy_per_trade"), _safe_float(row.get("expected_return_proxy"), 0.0))
+    robustness_score = _safe_float(row.get("robustness_score"), stability_proxy)
+    event_frequency = _safe_float(row.get("event_frequency"), 0.0)
+    capacity_proxy = _safe_float(row.get("capacity_proxy"), 0.0)
+    profit_density_score = _safe_float(
+        row.get("profit_density_score"),
+        max(0.0, expectancy_per_trade) * max(0.0, robustness_score) * max(0.0, event_frequency),
+    )
     n_events = _safe_int(row.get("n_events"), 0)
     status = str(row.get("status", "PROMOTED")).strip().upper()
 
     condition = str(detail.get("condition", "all"))
     action = str(detail.get("action", "no_action"))
-    selection_score = (0.65 * edge_score) + (0.35 * stability_proxy)
+    selection_score = profit_density_score if profit_density_score > 0.0 else (0.65 * edge_score) + (0.35 * stability_proxy)
     controls = _risk_controls_from_action(action)
     route = _route_event_family(event)
     execution_family = route["execution_family"] if route else "unmapped"
@@ -215,7 +223,12 @@ def _build_edge_strategy_candidate(
         "status": status,
         "n_events": n_events,
         "edge_score": edge_score,
+        "expectancy_per_trade": expectancy_per_trade,
         "stability_proxy": stability_proxy,
+        "robustness_score": robustness_score,
+        "event_frequency": event_frequency,
+        "capacity_proxy": capacity_proxy,
+        "profit_density_score": profit_density_score,
         "selection_score": selection_score,
         "symbols": symbols,
         "risk_controls": controls,
@@ -276,7 +289,12 @@ def _load_alpha_bundle_candidate(run_id: str, symbols: List[str]) -> Dict[str, o
         "status": "PROMOTED",
         "n_events": int(len(score)),
         "edge_score": float(score.abs().mean()),
+        "expectancy_per_trade": float(score.abs().mean()),
         "stability_proxy": float((score.abs() > score.abs().quantile(0.5)).mean()),
+        "robustness_score": 1.0,
+        "event_frequency": 1.0,
+        "capacity_proxy": 0.0,
+        "profit_density_score": float(score.abs().mean()),
         "selection_score": float(score.abs().mean()),
         "symbols": symbols,
         "risk_controls": {
@@ -401,7 +419,12 @@ def main() -> int:
                     "status",
                     "edge_score",
                     "expected_return_proxy",
+                    "expectancy_per_trade",
                     "stability_proxy",
+                    "robustness_score",
+                    "event_frequency",
+                    "capacity_proxy",
+                    "profit_density_score",
                     "n_events",
                     "source_path",
                 ]
@@ -414,7 +437,22 @@ def main() -> int:
 
         strategy_rows: List[Dict[str, object]] = []
         if not edge_df.empty:
-            edge_df["selection_score"] = (0.65 * edge_df["edge_score"]) + (0.35 * edge_df["stability_proxy"])
+            edge_df["expectancy_per_trade"] = pd.to_numeric(edge_df.get("expectancy_per_trade"), errors="coerce").fillna(
+                pd.to_numeric(edge_df.get("expected_return_proxy"), errors="coerce").fillna(0.0)
+            )
+            edge_df["robustness_score"] = pd.to_numeric(edge_df.get("robustness_score"), errors="coerce").fillna(edge_df["stability_proxy"])
+            edge_df["event_frequency"] = pd.to_numeric(edge_df.get("event_frequency"), errors="coerce").fillna(0.0)
+            edge_df["profit_density_score"] = pd.to_numeric(edge_df.get("profit_density_score"), errors="coerce")
+            fallback_pds = (
+                edge_df["expectancy_per_trade"].clip(lower=0.0)
+                * edge_df["robustness_score"].clip(lower=0.0)
+                * edge_df["event_frequency"].clip(lower=0.0)
+            )
+            edge_df["profit_density_score"] = edge_df["profit_density_score"].fillna(fallback_pds)
+            edge_df["selection_score"] = edge_df["profit_density_score"]
+            edge_df.loc[edge_df["selection_score"] <= 0.0, "selection_score"] = (
+                0.65 * edge_df["edge_score"] + 0.35 * edge_df["stability_proxy"]
+            )
             edge_df = edge_df.sort_values(["event", "selection_score"], ascending=[True, False]).reset_index(drop=True)
 
             for event, group in edge_df.groupby("event", sort=True):

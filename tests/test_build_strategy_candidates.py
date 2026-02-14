@@ -50,7 +50,12 @@ def _write_edge_inputs(
                 "status": "PROMOTED",
                 "edge_score": 0.42,
                 "expected_return_proxy": 0.01,
+                "expectancy_per_trade": 0.01,
                 "stability_proxy": 0.9,
+                "robustness_score": 0.9,
+                "event_frequency": 0.5,
+                "capacity_proxy": 1.0,
+                "profit_density_score": 0.0045,
                 "n_events": 120,
                 "source_path": str(source_json),
             }
@@ -90,6 +95,8 @@ def test_build_strategy_candidates_from_promoted_edges(monkeypatch, tmp_path: Pa
     assert payload[0]["backtest_ready_reason"] == ""
     assert payload[0]["action"] == "delay_30"
     assert payload[0]["risk_controls"]["entry_delay_bars"] == 30
+    assert payload[0]["profit_density_score"] == pytest.approx(0.0045)
+    assert payload[0]["selection_score"] == pytest.approx(payload[0]["profit_density_score"])
 
 
 def test_build_strategy_candidates_can_include_alpha_bundle(monkeypatch, tmp_path: Path) -> None:
@@ -103,7 +110,12 @@ def test_build_strategy_candidates_can_include_alpha_bundle(monkeypatch, tmp_pat
             "status",
             "edge_score",
             "expected_return_proxy",
+            "expectancy_per_trade",
             "stability_proxy",
+            "robustness_score",
+            "event_frequency",
+            "capacity_proxy",
+            "profit_density_score",
             "n_events",
             "source_path",
         ]
