@@ -31,6 +31,7 @@ from pipelines.research.analyze_conditional_expectancy import (
 
 
 PRIMARY_OUTPUT_COLUMNS = [
+    "candidate_id",
     "condition",
     "condition_desc",
     "action",
@@ -77,6 +78,24 @@ PRIMARY_OUTPUT_COLUMNS = [
     "gate_pass",
     "gate_all",
     "fail_reasons",
+]
+
+SYMBOL_OUTPUT_COLUMNS = [
+    "candidate_id",
+    "event_type",
+    "condition",
+    "action",
+    "symbol",
+    "sample_size",
+    "ev",
+    "variance",
+    "sharpe_like",
+    "stability_score",
+    "window_consistency",
+    "sign_persistence",
+    "drawdown_profile",
+    "capacity_proxy",
+    "deployable",
 ]
 
 
@@ -884,6 +903,7 @@ def _evaluate_candidate(
         fail_reasons.append("gate_oos_validation_test")
 
     return {
+        "candidate_id": f"{condition.name}__{action.name}",
         "condition": condition.name,
         "condition_desc": condition.description,
         "action": action.name,
@@ -931,6 +951,110 @@ def _evaluate_candidate(
         "gate_all": False,
         "fail_reasons": ",".join(fail_reasons) if fail_reasons else "",
     }
+
+
+def _compute_drawdown_profile(pnl: np.ndarray) -> float:
+    arr = np.asarray(pnl, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if len(arr) == 0:
+        return 0.0
+    cum = np.cumsum(arr)
+    running_peak = np.maximum.accumulate(cum)
+    drawdown = cum - running_peak
+    return float(np.min(drawdown)) if len(drawdown) else 0.0
+
+
+def _build_symbol_evaluation_table(
+    events: pd.DataFrame,
+    candidates: pd.DataFrame,
+    conditions: List[ConditionSpec],
+    actions: List[ActionSpec],
+    event_type: str,
+) -> pd.DataFrame:
+    if events.empty or candidates.empty or "symbol" not in events.columns:
+        return pd.DataFrame(columns=SYMBOL_OUTPUT_COLUMNS)
+
+    condition_map = {c.name: c for c in conditions}
+    action_map = {a.name: a for a in actions}
+    rows: List[Dict[str, object]] = []
+
+    for _, cand in candidates.iterrows():
+        condition_name = str(cand.get("condition", ""))
+        action_name = str(cand.get("action", ""))
+        cond = condition_map.get(condition_name)
+        action = action_map.get(action_name)
+        if cond is None or action is None:
+            continue
+
+        sub = events[cond.mask_fn(events)].copy()
+        if sub.empty or "symbol" not in sub.columns:
+            continue
+
+        adverse_delta_vec, opp_delta_vec, _ = _apply_action_proxy(sub, action)
+        sub["net_benefit_effect"] = (-adverse_delta_vec) - np.maximum(0.0, -opp_delta_vec)
+
+        for symbol, sym_frame in sub.groupby("symbol", sort=True):
+            sym_values = pd.to_numeric(sym_frame["net_benefit_effect"], errors="coerce").dropna().to_numpy(dtype=float)
+            if len(sym_values) == 0:
+                continue
+            ev = float(np.mean(sym_values))
+            variance = float(np.var(sym_values, ddof=1)) if len(sym_values) > 1 else 0.0
+            std = float(np.sqrt(max(variance, 0.0)))
+            sharpe_like = float(ev / std) if std > 1e-12 else 0.0
+
+            splits = []
+            if "split_label" in sym_frame.columns:
+                for _, g in sym_frame.groupby("split_label", sort=True):
+                    vals = pd.to_numeric(g["net_benefit_effect"], errors="coerce").dropna().to_numpy(dtype=float)
+                    if len(vals):
+                        splits.append(float(np.mean(vals)))
+            if not splits:
+                splits = [ev]
+
+            overall_sign = 1 if ev > 0 else -1 if ev < 0 else 0
+            non_zero_split_signs = [1 if x > 0 else -1 if x < 0 else 0 for x in splits if abs(x) > 1e-12]
+            window_consistency = (
+                float(sum(1 for s in non_zero_split_signs if s == overall_sign) / len(non_zero_split_signs))
+                if non_zero_split_signs
+                else 0.0
+            )
+            sign_persistence = (
+                float(sum(1 for s in non_zero_split_signs if s == non_zero_split_signs[0]) / len(non_zero_split_signs))
+                if non_zero_split_signs
+                else 0.0
+            )
+            drawdown_profile = _compute_drawdown_profile(sym_values)
+            drawdown_penalty = float(max(0.0, min(1.0, abs(drawdown_profile))))
+            stability_score = float(max(0.0, min(1.0, (0.45 * window_consistency) + (0.45 * sign_persistence) - (0.1 * drawdown_penalty))))
+            capacity_proxy = _capacity_proxy_from_frame(sym_frame)
+            if not np.isfinite(capacity_proxy):
+                capacity_proxy = 0.0
+
+            deployable = bool(ev > 0.0 and sharpe_like > 0.0 and stability_score >= 0.55)
+            rows.append(
+                {
+                    "candidate_id": str(cand.get("candidate_id", f"{condition_name}__{action_name}")),
+                    "event_type": event_type,
+                    "condition": condition_name,
+                    "action": action_name,
+                    "symbol": str(symbol),
+                    "sample_size": int(len(sym_values)),
+                    "ev": ev,
+                    "variance": variance,
+                    "sharpe_like": sharpe_like,
+                    "stability_score": stability_score,
+                    "window_consistency": window_consistency,
+                    "sign_persistence": sign_persistence,
+                    "drawdown_profile": drawdown_profile,
+                    "capacity_proxy": capacity_proxy,
+                    "deployable": deployable,
+                }
+            )
+
+    if not rows:
+        return pd.DataFrame(columns=SYMBOL_OUTPUT_COLUMNS)
+    out = pd.DataFrame(rows)
+    return out[SYMBOL_OUTPUT_COLUMNS]
 
 
 def main() -> int:
@@ -992,10 +1116,12 @@ def main() -> int:
         ensure_dir(out_dir)
         cand_path = out_dir / "phase2_candidates.csv"
         prom_path = out_dir / "promoted_candidates.json"
+        symbol_eval_path = out_dir / "phase2_symbol_evaluation.csv"
         manifest_path = out_dir / "phase2_manifests.json"
         summary_path = out_dir / "phase2_summary.md"
 
         pd.DataFrame(columns=PRIMARY_OUTPUT_COLUMNS).to_csv(cand_path, index=False)
+        pd.DataFrame(columns=SYMBOL_OUTPUT_COLUMNS).to_csv(symbol_eval_path, index=False)
         prom_payload = {
             "run_id": args.run_id,
             "event_type": args.event_type,
@@ -1137,7 +1263,20 @@ def main() -> int:
                 reasons.append("gate_multiplicity")
             candidates.at[idx, "fail_reasons"] = ",".join(dict.fromkeys(reasons))
 
+    symbol_eval = _build_symbol_evaluation_table(
+        events=events,
+        candidates=candidates,
+        conditions=conditions,
+        actions=actions,
+        event_type=args.event_type,
+    )
+
     promoted = candidates[candidates.get("gate_all", False)].copy() if not candidates.empty else pd.DataFrame()
+    if not promoted.empty and not symbol_eval.empty:
+        deployable_ids = set(
+            symbol_eval[symbol_eval["deployable"].astype(bool)]["candidate_id"].astype(str).unique().tolist()
+        )
+        promoted = promoted[promoted["candidate_id"].astype(str).isin(deployable_ids)].copy()
     if not promoted.empty:
         promoted = promoted.sort_values(
             ["profit_density_score", "delta_adverse_mean", "delta_opportunity_mean"],
@@ -1150,11 +1289,13 @@ def main() -> int:
     ensure_dir(out_dir)
 
     cand_path = out_dir / "phase2_candidates.csv"
+    symbol_eval_path = out_dir / "phase2_symbol_evaluation.csv"
     prom_path = out_dir / "promoted_candidates.json"
     manifest_path = out_dir / "phase2_manifests.json"
     summary_path = out_dir / "phase2_summary.md"
 
     candidates.to_csv(cand_path, index=False)
+    symbol_eval.to_csv(symbol_eval_path, index=False)
     prom_payload = {
         "run_id": args.run_id,
         "event_type": args.event_type,
@@ -1200,6 +1341,8 @@ def main() -> int:
         "hypotheses_tested": int(len(candidates)),
         "adjusted_pass_count": int(candidates["gate_multiplicity"].sum()) if not candidates.empty and "gate_multiplicity" in candidates.columns else 0,
         "oos_pass_count": int(candidates["gate_oos_validation_test"].sum()) if not candidates.empty and "gate_oos_validation_test" in candidates.columns else 0,
+        "symbol_evaluations": int(len(symbol_eval)),
+        "deployable_symbol_rows": int(symbol_eval["deployable"].astype(bool).sum()) if not symbol_eval.empty else 0,
     }
     manifest_path.write_text(json.dumps(manifest_payload, indent=2), encoding="utf-8")
 
@@ -1232,12 +1375,20 @@ def main() -> int:
         if not fail_rows.empty
         else "No failures",
         "",
+        "## Symbol-level deployability",
+        _table_text(
+            symbol_eval.sort_values(["deployable", "stability_score", "ev"], ascending=[False, False, False]).head(10)
+        )
+        if not symbol_eval.empty
+        else "No symbol-level evaluations",
+        "",
         "## Promoted",
         _table_text(promoted) if isinstance(promoted, pd.DataFrame) and not promoted.empty else "None",
     ]
     summary_path.write_text("\n".join(lines), encoding="utf-8")
 
     logging.info("Wrote %s", cand_path)
+    logging.info("Wrote %s", symbol_eval_path)
     logging.info("Wrote %s", prom_path)
     logging.info("Wrote %s", manifest_path)
     logging.info("Wrote %s", summary_path)

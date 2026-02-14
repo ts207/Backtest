@@ -106,6 +106,7 @@ def test_phase2_caps_and_outputs(tmp_path: Path) -> None:
 
     out_dir = tmp_path / "reports" / "phase2" / run_id / "vol_shock_relaxation"
     assert (out_dir / "phase2_candidates.csv").exists()
+    assert (out_dir / "phase2_symbol_evaluation.csv").exists()
     assert (out_dir / "promoted_candidates.json").exists()
     assert (out_dir / "phase2_manifests.json").exists()
     assert (out_dir / "phase2_summary.md").exists()
@@ -284,6 +285,25 @@ def test_phase2_manifest_and_candidates_include_oos_and_multiplicity_fields(tmp_
     assert "hypotheses_tested" in manifest
     assert "adjusted_pass_count" in manifest
     assert "oos_pass_count" in manifest
+    assert "symbol_evaluations" in manifest
+    assert "deployable_symbol_rows" in manifest
+
+    symbol_eval = pd.read_csv(out_dir / "phase2_symbol_evaluation.csv")
+    if not symbol_eval.empty:
+        for col in [
+            "candidate_id",
+            "symbol",
+            "ev",
+            "variance",
+            "sharpe_like",
+            "stability_score",
+            "window_consistency",
+            "sign_persistence",
+            "drawdown_profile",
+            "capacity_proxy",
+            "deployable",
+        ]:
+            assert col in symbol_eval.columns
 
     candidates = pd.read_csv(out_dir / "phase2_candidates.csv")
     if not candidates.empty:
