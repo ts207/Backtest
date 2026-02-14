@@ -1,0 +1,38 @@
+{
+  "run_id": "btc_edge_raw_20260213",
+  "command": "RUN_ID=btc_edge_raw_20260213 SYMBOLS=BTCUSDT START=2020-01-01 END=2025-12-31 make discover-edges-from-raw",
+  "artifact_count_reports": 122,
+  "artifact_count_run_logs": 25,
+  "top_candidates": [
+    {
+      "event": "vol_shock_relaxation",
+      "candidate_id": "vol_shock_relaxation_0",
+      "edge_score": 0.4416741774683423,
+      "n_events": 97
+    },
+    {
+      "event": "vol_shock_relaxation",
+      "candidate_id": "vol_shock_relaxation_1",
+      "edge_score": 0.4416741774683423,
+      "n_events": 97
+    },
+    {
+      "event": "liquidity_refill_lag_window",
+      "candidate_id": "liquidity_refill_lag_window_0",
+      "edge_score": 0.1562169189085092,
+      "n_events": 211
+    },
+    {
+      "event": "liquidity_refill_lag_window",
+      "candidate_id": "liquidity_refill_lag_window_1",
+      "edge_score": 0.1562169189085092,
+      "n_events": 211
+    },
+    {
+      "event": "range_compression_breakout_window",
+      "candidate_id": "range_compression_breakout_window_0",
+      "edge_score": 0.1240993969535867,
+      "n_events": 189
+    }
+  ]
+}

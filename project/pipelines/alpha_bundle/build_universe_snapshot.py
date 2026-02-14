@@ -66,7 +66,7 @@ def main() -> int:
             raise FileNotFoundError(f"No cleaned bars for {sym} at {bdir}")
         dfb = read_parquet(files)
         tcol = "ts_event" if "ts_event" in dfb.columns else "timestamp"
-        dfb[tcol] = ensure_utc_timestamp(dfb[tcol])
+        dfb[tcol] = ensure_utc_timestamp(dfb[tcol], tcol)
         dfb = dfb.sort_values(tcol).reset_index(drop=True)
         # Filter date range
         if args.start:
@@ -127,7 +127,7 @@ def main() -> int:
         })
 
     df = pd.DataFrame(rows)
-    df["ts_event"] = ensure_utc_timestamp(df["ts_event"])
+    df["ts_event"] = ensure_utc_timestamp(df["ts_event"], "ts_event")
     out_path = out_dir / f"universe_snapshot_{args.universe_id}.parquet"
     write_parquet(df, out_path)
 

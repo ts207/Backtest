@@ -1,0 +1,51 @@
+{
+  "error": null,
+  "finished_at": "2026-02-13T21:06:34.291752+00:00",
+  "inputs": [
+    {
+      "end_ts": "2025-07-31T23:45:00+00:00",
+      "path": "/workspace/Backtest/data/lake/features/perp/BTCUSDT/15m/features_v1",
+      "rows": 181152,
+      "start_ts": "2020-06-01T00:00:00+00:00"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "/workspace/Backtest/data/lake/runs/btc_edge_raw_20260213/context/market_state/BTCUSDT/15m.parquet",
+      "rows": 181152,
+      "storage_format": "parquet"
+    }
+  ],
+  "parameters": {
+    "end_exclusive": "2026-01-01T00:00:00+00:00",
+    "force": 0,
+    "out_dir": "/workspace/Backtest/data/lake/runs/btc_edge_raw_20260213/context/market_state",
+    "start": "2020-01-01T00:00:00+00:00",
+    "symbols": [
+      "BTCUSDT"
+    ],
+    "timeframe": "15m"
+  },
+  "run_id": "btc_edge_raw_20260213",
+  "stage": "build_market_context",
+  "started_at": "2026-02-13T21:06:31.567960+00:00",
+  "stats": {
+    "symbols": {
+      "BTCUSDT": {
+        "funding_regime_counts": {
+          "negative": 59778,
+          "neutral": 32247,
+          "positive": 89127
+        },
+        "rows": 181152,
+        "vol_regime_counts": {
+          "high": 52085,
+          "low": 59099,
+          "mid": 52593,
+          "unknown": 17375
+        }
+      }
+    }
+  },
+  "status": "success"
+}

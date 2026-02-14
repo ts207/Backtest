@@ -21,3 +21,9 @@ data/reports/*
 
 # Local run outputs
 project/runs/
+
+# Local runtime intermediates
+project/**/__pycache__/
+data/lake/cleaned/
+data/lake/features/
+data/lake/runs/
