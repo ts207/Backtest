@@ -1,32 +1,38 @@
 {
   "error": null,
-  "finished_at": "2026-02-13T21:06:23.925605+00:00",
+  "finished_at": "2026-02-14T00:54:39.400379+00:00",
   "inputs": [
     {
-      "end_ts": "2025-07-31T23:45:00+00:00",
-      "path": "/workspace/Backtest/data/lake/runs/btc_edge_raw_20260213/cleaned/perp/BTCUSDT/bars_15m",
-      "rows": 181152,
-      "start_ts": "2020-06-01T00:00:00+00:00"
+      "end_ts": "2025-12-31T23:45:00+00:00",
+      "path": "/home/tstuv/snap/Backtest/data/lake/runs/btc_edge_raw_20260213/cleaned/perp/BTCUSDT/bars_15m",
+      "rows": 210432,
+      "start_ts": "2020-01-01T00:00:00+00:00"
+    },
+    {
+      "end_ts": "2025-12-31T23:45:00+00:00",
+      "path": "/home/tstuv/snap/Backtest/data/lake/runs/btc_edge_raw_20260213/cleaned/perp/ETHUSDT/bars_15m",
+      "rows": 210432,
+      "start_ts": "2020-01-01T00:00:00+00:00"
     }
   ],
   "outputs": [
     {
       "end_ts": null,
-      "path": "/workspace/Backtest/data/lake/runs/btc_edge_raw_20260213/metadata/universe_snapshots/universe_snapshots.parquet",
-      "rows": 1,
+      "path": "/home/tstuv/snap/Backtest/data/lake/runs/btc_edge_raw_20260213/metadata/universe_snapshots/universe_snapshots.parquet",
+      "rows": 2,
       "start_ts": null,
       "storage": "parquet"
     },
     {
       "end_ts": null,
-      "path": "/workspace/Backtest/data/reports/universe/btc_edge_raw_20260213/universe_membership.json",
+      "path": "/home/tstuv/snap/Backtest/data/reports/universe/btc_edge_raw_20260213/universe_membership.json",
       "rows": 1,
       "start_ts": null
     },
     {
       "end_ts": null,
-      "path": "/workspace/Backtest/data/reports/universe/btc_edge_raw_20260213/universe_membership.md",
-      "rows": 4,
+      "path": "/home/tstuv/snap/Backtest/data/reports/universe/btc_edge_raw_20260213/universe_membership.md",
+      "rows": 6,
       "start_ts": null
     }
   ],
@@ -34,207 +40,316 @@
     "force": 0,
     "market": "perp",
     "symbols": [
-      "BTCUSDT"
+      "BTCUSDT",
+      "ETHUSDT"
     ]
   },
   "run_id": "btc_edge_raw_20260213",
   "stage": "build_universe_snapshots",
-  "started_at": "2026-02-13T21:06:23.182762+00:00",
+  "started_at": "2026-02-14T00:54:38.771696+00:00",
   "stats": {
     "monthly_membership": {
+      "2020-01": [
+        "BTCUSDT",
+        "ETHUSDT"
+      ],
+      "2020-02": [
+        "BTCUSDT",
+        "ETHUSDT"
+      ],
+      "2020-03": [
+        "BTCUSDT",
+        "ETHUSDT"
+      ],
+      "2020-04": [
+        "BTCUSDT",
+        "ETHUSDT"
+      ],
+      "2020-05": [
+        "BTCUSDT",
+        "ETHUSDT"
+      ],
       "2020-06": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2020-07": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2020-08": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2020-09": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2020-10": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2020-11": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2020-12": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2021-01": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2021-02": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2021-03": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2021-04": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2021-05": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2021-06": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2021-07": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2021-08": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2021-09": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2021-10": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2021-11": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2021-12": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2022-01": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2022-02": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2022-03": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2022-04": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2022-05": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2022-06": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2022-07": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2022-08": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2022-09": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2022-10": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2022-11": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2022-12": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2023-01": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2023-02": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2023-03": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2023-04": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2023-05": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2023-06": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2023-07": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2023-08": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2023-09": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2023-10": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2023-11": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2023-12": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2024-01": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2024-02": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2024-03": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2024-04": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2024-05": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2024-06": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2024-07": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2024-08": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2024-09": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2024-10": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2024-11": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2024-12": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2025-01": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2025-02": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2025-03": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2025-04": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2025-05": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2025-06": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
       ],
       "2025-07": [
-        "BTCUSDT"
+        "BTCUSDT",
+        "ETHUSDT"
+      ],
+      "2025-08": [
+        "BTCUSDT",
+        "ETHUSDT"
+      ],
+      "2025-09": [
+        "BTCUSDT",
+        "ETHUSDT"
+      ],
+      "2025-10": [
+        "BTCUSDT",
+        "ETHUSDT"
+      ],
+      "2025-11": [
+        "BTCUSDT",
+        "ETHUSDT"
+      ],
+      "2025-12": [
+        "BTCUSDT",
+        "ETHUSDT"
       ]
     },
     "symbols": {
       "BTCUSDT": {
         "listed": true,
-        "listing_end": "2025-07-31T23:45:00+00:00",
-        "listing_start": "2020-06-01T00:00:00+00:00",
-        "rows": 181152
+        "listing_end": "2025-12-31T23:45:00+00:00",
+        "listing_start": "2020-01-01T00:00:00+00:00",
+        "rows": 210432
+      },
+      "ETHUSDT": {
+        "listed": true,
+        "listing_end": "2025-12-31T23:45:00+00:00",
+        "listing_start": "2020-01-01T00:00:00+00:00",
+        "rows": 210432
       }
     }
   },
