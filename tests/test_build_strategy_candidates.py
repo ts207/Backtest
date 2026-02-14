@@ -97,6 +97,8 @@ def test_build_strategy_candidates_from_promoted_edges(monkeypatch, tmp_path: Pa
     assert payload[0]["risk_controls"]["entry_delay_bars"] == 30
     assert payload[0]["profit_density_score"] == pytest.approx(0.0045)
     assert payload[0]["selection_score"] == pytest.approx(payload[0]["profit_density_score"])
+    assert payload[0]["candidate_symbol"] == "ALL"
+    assert payload[0]["run_symbols"] == ["BTCUSDT", "ETHUSDT"]
 
 
 def test_build_strategy_candidates_can_include_alpha_bundle(monkeypatch, tmp_path: Path) -> None:
@@ -297,3 +299,34 @@ def test_build_strategy_candidates_unknown_event_fails_closed(monkeypatch, tmp_p
     assert payload[0]["backtest_ready"] is False
     assert payload[0]["backtest_ready_reason"] == "Unknown event family `totally_unknown_event_family`; no strategy routing is defined."
     assert "Unknown event family `totally_unknown_event_family`" in " ".join(payload[0]["notes"])
+
+
+def test_build_strategy_candidates_preserves_candidate_symbol_from_edge(monkeypatch, tmp_path: Path) -> None:
+    run_id = "strategy_builder_symbol_scope"
+    _write_edge_inputs(tmp_path, run_id=run_id)
+
+    edge_csv = tmp_path / "reports" / "edge_candidates" / run_id / "edge_candidates_normalized.csv"
+    df = pd.read_csv(edge_csv)
+    df["candidate_symbol"] = ["ETHUSDT"]
+    df.to_csv(edge_csv, index=False)
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(build_strategy_candidates, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_strategy_candidates.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--include_alpha_bundle",
+            "0",
+        ],
+    )
+
+    assert build_strategy_candidates.main() == 0
+    out_json = tmp_path / "reports" / "strategy_builder" / run_id / "strategy_candidates.json"
+    payload = json.loads(out_json.read_text(encoding="utf-8"))
+    assert payload[0]["candidate_symbol"] == "ETHUSDT"

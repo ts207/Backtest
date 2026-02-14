@@ -74,10 +74,33 @@ def _as_flag(value: int) -> str:
     return str(int(value))
 
 
+def _parse_symbols_csv(symbols_csv: str) -> List[str]:
+    symbols = [s.strip().upper() for s in str(symbols_csv).split(",") if s.strip()]
+    unique_symbols: List[str] = []
+    seen = set()
+    for symbol in symbols:
+        if symbol not in seen:
+            unique_symbols.append(symbol)
+            seen.add(symbol)
+    return unique_symbols
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run discovery-first pipeline")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run discovery-first pipeline for multi-symbol idea generation under one run_id; "
+            "validate per-symbol before deployment."
+        )
+    )
     parser.add_argument("--run_id", required=False)
-    parser.add_argument("--symbols", required=True)
+    parser.add_argument(
+        "--symbols",
+        required=True,
+        help=(
+            "Comma-separated symbols for a single discovery run_id "
+            "(example: BTCUSDT,ETHUSDT,SOLUSDT)."
+        ),
+    )
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
     parser.add_argument("--force", type=int, default=0)
@@ -136,7 +159,11 @@ def main() -> int:
         return 1
 
     run_id = args.run_id or _run_id_default()
-    symbols = args.symbols
+    parsed_symbols = _parse_symbols_csv(args.symbols)
+    if not parsed_symbols:
+        print("--symbols must include at least one symbol (comma-separated).", file=sys.stderr)
+        return 1
+    symbols = ",".join(parsed_symbols)
     start = args.start
     end = args.end
     force_flag = _as_flag(args.force)

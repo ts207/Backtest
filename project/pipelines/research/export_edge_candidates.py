@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Sequence
 
 import pandas as pd
 
@@ -30,6 +30,32 @@ PHASE2_EVENT_CHAIN = [
     ("range_compression_breakout_window", "analyze_range_compression_breakout_window.py", []),
 ]
 
+
+
+
+def _parse_symbols_csv(symbols_csv: str) -> List[str]:
+    symbols = [s.strip().upper() for s in str(symbols_csv).split(",") if s.strip()]
+    ordered: List[str] = []
+    seen = set()
+    for symbol in symbols:
+        if symbol not in seen:
+            ordered.append(symbol)
+            seen.add(symbol)
+    return ordered
+
+
+def _infer_symbol_tag(row: Dict[str, object], run_symbols: Sequence[str]) -> str:
+    symbol_value = str(row.get("symbol", "")).strip().upper()
+    if symbol_value:
+        return symbol_value
+    condition = str(row.get("condition", "")).strip().lower()
+    if condition.startswith("symbol_"):
+        inferred = condition.removeprefix("symbol_").upper()
+        if inferred:
+            return inferred
+    if len(run_symbols) == 1:
+        return str(run_symbols[0]).upper()
+    return "ALL"
 
 def _safe_float(value: object, default: float = 0.0) -> float:
     try:
@@ -71,6 +97,7 @@ def _phase2_row_to_candidate(
     idx: int,
     source_path: Path,
     default_status: str,
+    run_symbols: Sequence[str],
 ) -> Dict[str, object]:
     risk_reduction = max(0.0, -_safe_float(row.get("delta_adverse_mean"), 0.0))
     opp_delta = _safe_float(row.get("delta_opportunity_mean"), 0.0)
@@ -100,8 +127,12 @@ def _phase2_row_to_candidate(
         max(0.0, expectancy_per_trade) * max(0.0, robustness_score) * max(0.0, event_frequency),
     )
 
+    candidate_symbol = _infer_symbol_tag(row=row, run_symbols=run_symbols)
+
     return {
         "run_id": run_id,
+        "candidate_symbol": candidate_symbol,
+        "run_symbols": list(run_symbols),
         "event": event,
         "candidate_id": str(row.get("candidate_id", f"{event}_{idx}")),
         "status": str(row.get("status", default_status)),
@@ -178,7 +209,7 @@ def _run_research_chain(
             logging.warning("Phase2 stage failed (non-blocking): %s", event_type)
 
 
-def _collect_phase2_candidates(run_id: str) -> List[Dict[str, object]]:
+def _collect_phase2_candidates(run_id: str, run_symbols: Sequence[str]) -> List[Dict[str, object]]:
     rows: List[Dict[str, object]] = []
     phase2_root = DATA_ROOT / "reports" / "phase2" / run_id
     if not phase2_root.exists():
@@ -203,6 +234,7 @@ def _collect_phase2_candidates(run_id: str) -> List[Dict[str, object]]:
                         idx=idx,
                         source_path=promoted_json,
                         default_status="PROMOTED",
+                        run_symbols=run_symbols,
                     )
                 )
 
@@ -221,6 +253,7 @@ def _collect_phase2_candidates(run_id: str) -> List[Dict[str, object]]:
                                 idx=idx,
                                 source_path=candidate_csv,
                                 default_status="DRAFT",
+                                run_symbols=run_symbols,
                             )
                         )
 
@@ -231,7 +264,7 @@ def _collect_phase2_candidates(run_id: str) -> List[Dict[str, object]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Expand and normalize edge candidate universe")
     parser.add_argument("--run_id", required=True)
-    parser.add_argument("--symbols", required=True)
+    parser.add_argument("--symbols", required=True, help="Comma-separated discovery symbols for this run")
     parser.add_argument("--execute", type=int, default=0)
     parser.add_argument("--run_hypothesis_generator", type=int, default=1)
     parser.add_argument("--hypothesis_datasets", default="auto")
@@ -245,9 +278,14 @@ def main() -> int:
         log_handlers.append(logging.FileHandler(args.log_path))
     logging.basicConfig(level=logging.INFO, handlers=log_handlers, format="%(asctime)s %(levelname)s %(message)s")
 
+    run_symbols = _parse_symbols_csv(args.symbols)
+    if not run_symbols:
+        print("--symbols must include at least one symbol", file=sys.stderr)
+        return 1
+
     params = {
         "run_id": args.run_id,
-        "symbols": args.symbols,
+        "symbols": run_symbols,
         "execute": int(args.execute),
         "run_hypothesis_generator": int(args.run_hypothesis_generator),
         "hypothesis_datasets": str(args.hypothesis_datasets),
@@ -267,7 +305,7 @@ def main() -> int:
                 hypothesis_max_fused=int(args.hypothesis_max_fused),
             )
 
-        rows = _collect_phase2_candidates(args.run_id)
+        rows = _collect_phase2_candidates(args.run_id, run_symbols=run_symbols)
 
         out_dir = DATA_ROOT / "reports" / "edge_candidates" / args.run_id
         ensure_dir(out_dir)
@@ -278,6 +316,8 @@ def main() -> int:
             rows,
             columns=[
                 "run_id",
+                "candidate_symbol",
+                "run_symbols",
                 "event",
                 "candidate_id",
                 "status",
