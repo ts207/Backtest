@@ -32,6 +32,11 @@ Standard discovery duration is:
 - start: `2020-01-01`
 - end: `2025-12-31`
 
+## Discovery scope note (multi-symbol first)
+- `--symbols` accepts comma-separated symbols and is intended for broad idea-generation runs under one `run_id`.
+- Discovery outputs retain explicit symbol tags per candidate/hypothesis so downstream filtering can be done per symbol.
+- Treat pooled discovery as sample-efficiency tooling only; do **not** deploy pooled candidates without per-symbol validation/backtests.
+
 ## One-command discovery + strategy builder
 ```bash
 ./.venv/bin/python project/pipelines/run_all.py \

@@ -405,3 +405,34 @@ def test_run_all_can_disable_spot_ingest_for_cross_venue(monkeypatch) -> None:
     assert "ingest_binance_spot_ohlcv_15m" not in captured
     assert "build_cleaned_15m_spot" in captured
     assert "build_features_v1_spot" in captured
+
+
+def test_run_all_normalizes_multi_symbol_csv(monkeypatch) -> None:
+    captured = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_symbols_norm",
+            "--symbols",
+            " btcusdt ,ETHUSDT,btcusdt ",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+        ],
+    )
+
+    assert run_all.main() == 0
+    first_stage_args = captured[0][1]
+    assert "--symbols" in first_stage_args
+    symbols_value = first_stage_args[first_stage_args.index("--symbols") + 1]
+    assert symbols_value == "BTCUSDT,ETHUSDT"

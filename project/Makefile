@@ -6,6 +6,7 @@ CLEAN_SCRIPT := $(ROOT_DIR)/project/scripts/clean_data.sh
 
 RUN_ID ?= discovery_2020_2025
 SYMBOLS ?= BTCUSDT,ETHUSDT
+# Discovery defaults support multi-symbol idea generation under one RUN_ID.
 START ?= 2020-06-01
 END ?= 2025-07-10
 STRATEGIES ?=
@@ -17,9 +18,9 @@ help:
 	@echo "Targets:"
 	@echo "  run               - ingest+clean+features+context"
 	@echo "  baseline          - run + backtest + report"
-	@echo "  discover-edges    - run discovery chain (phase1+phase2+export)"
+	@echo "  discover-edges    - run multi-symbol discovery chain (phase1+phase2+export)"
 	@echo "  discover-edges-from-raw - discovery chain using existing raw lake partitions (skips ingest)"
-	@echo "  discover-hybrid   - discover-edges + expectancy checks"
+	@echo "  discover-hybrid   - discover-edges + expectancy checks (research-speed mode)"
 	@echo "  discover-hybrid-backtest - discover-hybrid + backtest + report"
 	@echo "                          requires STRATEGIES=... (comma-separated)"
 	@echo "  test              - run test suite"

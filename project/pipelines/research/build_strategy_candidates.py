@@ -118,6 +118,22 @@ def _sanitize_id(value: str) -> str:
     return re.sub(r"[^a-z0-9_]+", "_", str(value).strip().lower()).strip("_")
 
 
+def _symbol_scope_from_row(row: Dict[str, object], symbols: List[str]) -> Dict[str, object]:
+    run_symbols = [str(s).strip().upper() for s in symbols if str(s).strip()]
+    candidate_symbol = str(row.get("candidate_symbol", "")).strip().upper()
+    if not candidate_symbol:
+        raw_symbol = str(row.get("symbol", "")).strip().upper()
+        if raw_symbol:
+            candidate_symbol = raw_symbol
+    if not candidate_symbol:
+        condition = str(row.get("condition", "")).strip().lower()
+        if condition.startswith("symbol_"):
+            candidate_symbol = condition.removeprefix("symbol_").upper()
+    if not candidate_symbol:
+        candidate_symbol = run_symbols[0] if len(run_symbols) == 1 else "ALL"
+    return {"candidate_symbol": candidate_symbol, "run_symbols": run_symbols}
+
+
 def _risk_controls_from_action(action: str) -> Dict[str, object]:
     controls: Dict[str, object] = {
         "entry_delay_bars": 0,
@@ -195,6 +211,7 @@ def _build_edge_strategy_candidate(
     strategy_candidate_id = _sanitize_id(f"{event}_{condition}_{action}_{candidate_id}")
     symbols_csv = ",".join(symbols)
     manual_backtest_command = _manual_backtest_command_for_strategy(base_strategy, symbols_csv)
+    symbol_scope = _symbol_scope_from_row(row=row, symbols=symbols)
 
     notes: List[str] = [
         f"Derived from promoted edge candidate {candidate_id} ({event}).",
@@ -231,6 +248,8 @@ def _build_edge_strategy_candidate(
         "profit_density_score": profit_density_score,
         "selection_score": selection_score,
         "symbols": symbols,
+        "candidate_symbol": symbol_scope["candidate_symbol"],
+        "run_symbols": symbol_scope["run_symbols"],
         "risk_controls": controls,
         "manual_backtest_command": manual_backtest_command,
         "notes": notes,
@@ -297,6 +316,8 @@ def _load_alpha_bundle_candidate(run_id: str, symbols: List[str]) -> Dict[str, o
         "profit_density_score": float(score.abs().mean()),
         "selection_score": float(score.abs().mean()),
         "symbols": symbols,
+        "candidate_symbol": "ALL" if len(symbols) > 1 else symbols[0],
+        "run_symbols": symbols,
         "risk_controls": {
             "entry_delay_bars": 0,
             "size_scale": 1.0,
@@ -371,9 +392,9 @@ def _render_manual_instructions(run_id: str, symbols: List[str], candidates: Lis
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build manual-backtest strategy candidates from promoted edges")
+    parser = argparse.ArgumentParser(description="Build manual-backtest strategy candidates from promoted edges (multi-symbol aware)")
     parser.add_argument("--run_id", required=True)
-    parser.add_argument("--symbols", required=True)
+    parser.add_argument("--symbols", required=True, help="Comma-separated discovery symbols sharing one run_id")
     parser.add_argument("--top_k_per_event", type=int, default=2)
     parser.add_argument("--max_candidates", type=int, default=20)
     parser.add_argument("--min_edge_score", type=float, default=0.0)
@@ -382,7 +403,17 @@ def main() -> int:
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
 
-    symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+    symbols = []
+    seen_symbols = set()
+    for raw_symbol in str(args.symbols).split(","):
+        symbol = raw_symbol.strip().upper()
+        if not symbol or symbol in seen_symbols:
+            continue
+        symbols.append(symbol)
+        seen_symbols.add(symbol)
+    if not symbols:
+        print("--symbols must include at least one symbol", file=sys.stderr)
+        return 1
     out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "strategy_builder" / args.run_id
     ensure_dir(out_dir)
 
@@ -414,6 +445,8 @@ def main() -> int:
             edge_df = pd.DataFrame(
                 columns=[
                     "run_id",
+                    "candidate_symbol",
+                    "run_symbols",
                     "event",
                     "candidate_id",
                     "status",

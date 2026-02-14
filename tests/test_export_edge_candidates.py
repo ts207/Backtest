@@ -107,10 +107,12 @@ def test_collects_unified_multi_event_phase2_candidates(tmp_path: Path, monkeypa
     assert promoted["edge_score"] > 0.0
     assert promoted["profit_density_score"] > 0.0
     assert promoted["expectancy_per_trade"] == 0.02
+    assert promoted["candidate_symbol"] == "ALL"
 
     liq_row = out_df[out_df["event"] == "liquidity_absence_window"].iloc[0]
     assert liq_row["n_events"] == 30
     assert liq_row["status"] == "DRAFT"
+    assert liq_row["candidate_symbol"] == "ALL"
 
 
 def test_run_research_chain_executes_phase1_and_phase2_for_all_events(monkeypatch) -> None:
@@ -145,3 +147,25 @@ def test_run_research_chain_executes_phase1_and_phase2_for_all_events(monkeypatc
 
     phase2_calls = [c for c in captured_cmds if c[1].endswith("phase2_conditional_hypotheses.py")]
     assert len(phase2_calls) == len(export_edge_candidates.PHASE2_EVENT_CHAIN)
+
+
+def test_collect_phase2_candidates_infers_symbol_from_condition(tmp_path: Path, monkeypatch) -> None:
+    run_id = "edge_symbol_scope"
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(export_edge_candidates, "DATA_ROOT", tmp_path)
+
+    event_dir = tmp_path / "reports" / "phase2" / run_id / "vol_shock_relaxation"
+    event_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([
+        {
+            "condition": "symbol_BTCUSDT",
+            "action": "delay_8",
+            "sample_size": 10,
+            "delta_adverse_mean": -0.01,
+            "delta_opportunity_mean": 0.01,
+            "gate_all": True,
+        }
+    ]).to_csv(event_dir / "phase2_candidates.csv", index=False)
+
+    rows = export_edge_candidates._collect_phase2_candidates(run_id, run_symbols=["BTCUSDT", "ETHUSDT"])
+    assert rows and rows[0]["candidate_symbol"] == "BTCUSDT"
