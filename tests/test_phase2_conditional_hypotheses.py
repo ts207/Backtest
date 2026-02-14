@@ -287,6 +287,8 @@ def test_phase2_manifest_and_candidates_include_oos_and_multiplicity_fields(tmp_
     assert "oos_pass_count" in manifest
     assert "symbol_evaluations" in manifest
     assert "deployable_symbol_rows" in manifest
+    assert "rejected_symbol_rows" in manifest
+    assert "rejected_symbol_rows_by_reason" in manifest
 
     symbol_eval = pd.read_csv(out_dir / "phase2_symbol_evaluation.csv")
     if not symbol_eval.empty:
@@ -301,6 +303,8 @@ def test_phase2_manifest_and_candidates_include_oos_and_multiplicity_fields(tmp_
             "sign_persistence",
             "drawdown_profile",
             "capacity_proxy",
+            "rejection_reason_codes",
+            "promotion_status",
             "deployable",
         ]:
             assert col in symbol_eval.columns
@@ -318,6 +322,47 @@ def test_phase2_manifest_and_candidates_include_oos_and_multiplicity_fields(tmp_
         ]:
             assert col in candidates.columns
 
+
+
+
+def test_phase2_promotion_rejection_reason_codes_and_summary_counts(tmp_path: Path) -> None:
+    run_id = "phase2_rejection_reasons"
+    _write_phase1_fixture(tmp_path=tmp_path, run_id=run_id)
+    _run_phase2(
+        tmp_path=tmp_path,
+        run_id=run_id,
+        extra_args=[
+            "--promotion_min_ev",
+            "0.5",
+            "--promotion_min_stability_score",
+            "1.0",
+            "--promotion_min_sample_size",
+            "500",
+        ],
+    )
+
+    out_dir = tmp_path / "reports" / "phase2" / run_id / "vol_shock_relaxation"
+    manifest = json.loads((out_dir / "phase2_manifests.json").read_text())
+    promoted_payload = json.loads((out_dir / "promoted_candidates.json").read_text())
+    symbol_eval = pd.read_csv(out_dir / "phase2_symbol_evaluation.csv")
+
+    if symbol_eval.empty:
+        assert manifest["rejected_symbol_rows"] == 0
+        assert promoted_payload["rejected_count"] == 0
+        assert promoted_payload["rejected_by_reason"] == {}
+        return
+
+    assert (symbol_eval["promotion_status"] == "rejected").all()
+    assert (symbol_eval["deployable"] == False).all()  # noqa: E712
+    assert symbol_eval["rejection_reason_codes"].str.contains("NEGATIVE_EV").any()
+    assert symbol_eval["rejection_reason_codes"].str.contains("UNSTABLE").any()
+    assert symbol_eval["rejection_reason_codes"].str.contains("LOW_SAMPLE").any()
+
+    assert int(manifest["rejected_symbol_rows"]) == int(len(symbol_eval))
+    assert int(promoted_payload["rejected_count"]) == int(len(symbol_eval))
+    rejected_by_reason = manifest["rejected_symbol_rows_by_reason"]
+    assert rejected_by_reason == promoted_payload["rejected_by_reason"]
+    assert {"NEGATIVE_EV", "UNSTABLE", "LOW_SAMPLE"}.issubset(set(rejected_by_reason.keys()))
 
 def test_phase2_fails_without_split_or_timestamp(tmp_path: Path) -> None:
     run_id = "phase2_missing_split"
