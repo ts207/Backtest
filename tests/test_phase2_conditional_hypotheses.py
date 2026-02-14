@@ -121,11 +121,18 @@ def test_phase2_caps_and_outputs(tmp_path: Path) -> None:
     if not candidates.empty:
         assert "gate_e_simplicity" in candidates.columns
         assert "fail_reasons" in candidates.columns
+        assert "profit_density_score" in candidates.columns
+        assert "expectancy_per_trade" in candidates.columns
+        assert "robustness_score" in candidates.columns
+        assert "event_frequency" in candidates.columns
         assert candidates["gate_e_simplicity"].all()
 
     promoted = json.loads((out_dir / "promoted_candidates.json").read_text())
     assert promoted["phase1_pass"] is True
     assert promoted["promoted_count"] <= 2
+    if promoted["promoted_count"] > 1:
+        scores = [float(x.get("profit_density_score", 0.0)) for x in promoted["candidates"]]
+        assert scores == sorted(scores, reverse=True)
 
 
 def test_phase2_simplicity_gate_blocks_when_caps_exceeded(tmp_path: Path) -> None:

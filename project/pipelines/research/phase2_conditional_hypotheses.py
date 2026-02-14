@@ -52,6 +52,11 @@ PRIMARY_OUTPUT_COLUMNS = [
     "opportunity_composite_mean",
     "opportunity_cost_mean",
     "net_benefit_mean",
+    "expectancy_per_trade",
+    "robustness_score",
+    "event_frequency",
+    "capacity_proxy",
+    "profit_density_score",
     "gate_a_ci_separated",
     "gate_b_time_stable",
     "gate_b_year_signs",
@@ -751,6 +756,18 @@ def _split_t_stat_and_p_value(sub: pd.DataFrame, split_label: str, col: str) -> 
     return t_stat, float(_two_sided_p_from_t(t_stat))
 
 
+def _capacity_proxy_from_frame(sub: pd.DataFrame) -> float:
+    for col in ["quote_volume", "volume", "notional", "turnover", "liquidation_notional"]:
+        if col not in sub.columns:
+            continue
+        vals = pd.to_numeric(sub[col], errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+        vals = vals[vals > 0]
+        if vals.empty:
+            continue
+        return float(np.log1p(float(vals.median())))
+    return np.nan
+
+
 def _evaluate_candidate(
     sub: pd.DataFrame,
     condition: ConditionSpec,
@@ -764,6 +781,7 @@ def _evaluate_candidate(
     net_benefit_floor: float,
     simplicity_gate: bool,
     min_regime_stable_splits: int = 2,
+    total_event_count: int = 0,
 ) -> Dict[str, object]:
     adverse_delta_vec, opp_delta_vec, exposure_delta_vec = _apply_action_proxy(sub, action)
 
@@ -804,6 +822,7 @@ def _evaluate_candidate(
 
     opportunity_cost = float(max(0.0, -mean_opp)) if np.isfinite(mean_opp) else np.nan
     net_benefit = float(risk_reduction - opportunity_cost) if np.isfinite(risk_reduction) and np.isfinite(opportunity_cost) else np.nan
+    expectancy_per_trade = float(net_benefit) if np.isfinite(net_benefit) else 0.0
 
     opportunity_ci_tight_overlap = bool(
         np.isfinite(ci_low_opp)
@@ -820,7 +839,11 @@ def _evaluate_candidate(
     gate_g = bool(np.isfinite(net_benefit) and net_benefit >= net_benefit_floor)
     gate_e = bool(simplicity_gate)
 
+    gate_values = [gate_a, gate_b, gate_c, gate_d, gate_f, gate_g]
+    robustness_score = float(np.mean([1.0 if g else 0.0 for g in gate_values]))
+
     train_samples = _split_count(sub, "train")
+
     validation_samples = _split_count(sub, "validation")
     test_samples = _split_count(sub, "test")
     validation_delta_adverse_mean = _split_mean(tmp, "validation", "adverse_effect")
@@ -834,6 +857,13 @@ def _evaluate_candidate(
         and validation_delta_adverse_mean < 0.0
         and test_delta_adverse_mean < 0.0
     )
+    if gate_oos:
+        robustness_score = min(1.0, robustness_score + 0.1)
+
+    sample_size = int(len(sub))
+    event_frequency = float(sample_size / total_event_count) if total_event_count > 0 else 0.0
+    capacity_proxy = _capacity_proxy_from_frame(sub)
+    profit_density_score = float(expectancy_per_trade * robustness_score * event_frequency)
 
     fail_reasons = []
     if not gate_a:
@@ -882,6 +912,11 @@ def _evaluate_candidate(
         "opportunity_composite_mean": opportunity_composite,
         "opportunity_cost_mean": opportunity_cost,
         "net_benefit_mean": net_benefit,
+        "expectancy_per_trade": expectancy_per_trade,
+        "robustness_score": robustness_score,
+        "event_frequency": event_frequency,
+        "capacity_proxy": capacity_proxy,
+        "profit_density_score": profit_density_score,
         "gate_f_exposure_guard": gate_f,
         "gate_g_net_benefit": gate_g,
         "gate_e_simplicity": gate_e,
@@ -1070,6 +1105,7 @@ def main() -> int:
                     net_benefit_floor=args.net_benefit_floor,
                     simplicity_gate=simplicity_pass,
                     min_regime_stable_splits=args.min_regime_stable_splits,
+                    total_event_count=len(events),
                 )
                 rows.append(res)
 
@@ -1080,6 +1116,16 @@ def main() -> int:
         candidates["test_p_value"] = pd.to_numeric(candidates.get("test_p_value"), errors="coerce")
         candidates["test_p_value_adj_bh"] = _bh_adjust(candidates["test_p_value"].fillna(1.0))
         candidates["gate_multiplicity"] = candidates["test_p_value_adj_bh"] <= 0.05
+        if "robustness_score" in candidates.columns:
+            candidates["robustness_score"] = (
+                pd.to_numeric(candidates["robustness_score"], errors="coerce").fillna(0.0)
+                * np.where(candidates["gate_multiplicity"].astype(bool), 1.0, 0.75)
+            )
+        candidates["expectancy_per_trade"] = pd.to_numeric(candidates.get("expectancy_per_trade"), errors="coerce").fillna(0.0)
+        candidates["event_frequency"] = pd.to_numeric(candidates.get("event_frequency"), errors="coerce").fillna(0.0)
+        candidates["profit_density_score"] = (
+            candidates["expectancy_per_trade"] * candidates["robustness_score"] * candidates["event_frequency"]
+        )
         candidates["gate_all"] = (
             candidates["gate_pass"].astype(bool)
             & candidates["gate_oos_validation_test"].astype(bool)
@@ -1093,7 +1139,10 @@ def main() -> int:
 
     promoted = candidates[candidates.get("gate_all", False)].copy() if not candidates.empty else pd.DataFrame()
     if not promoted.empty:
-        promoted = promoted.sort_values(["delta_adverse_mean", "delta_opportunity_mean"], ascending=[True, False]).head(2)
+        promoted = promoted.sort_values(
+            ["profit_density_score", "delta_adverse_mean", "delta_opportunity_mean"],
+            ascending=[False, True, False],
+        ).head(2)
 
     summary_decision = "promote" if (phase1_pass and not promoted.empty) else "freeze"
 
