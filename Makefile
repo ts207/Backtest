@@ -1,4 +1,4 @@
-.PHONY: help run discover-edges discover-edges-from-raw discover-hybrid clean-runtime clean-all-data clean-repo test
+.PHONY: help run discover-edges discover-edges-from-raw discover-hybrid clean-runtime clean-all-data clean-repo test compile
 
 help:
 	$(MAKE) -f project/Makefile help
@@ -26,3 +26,6 @@ clean-repo:
 
 test:
 	$(MAKE) -f project/Makefile test
+
+compile:
+	$(MAKE) -f project/Makefile compile

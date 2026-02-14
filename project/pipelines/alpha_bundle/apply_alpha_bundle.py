@@ -50,7 +50,7 @@ def main() -> int:
     run_id = args.run_id
     project_root = PROJECT_ROOT
     data_root = Path(os.getenv("BACKTEST_DATA_ROOT", project_root.parent / "data"))
-    out_dir = Path(args.out_dir) if args.out_dir else data_root / "feature_store" / "alpha_bundle"
+    out_dir = Path(args.out_dir) if args.out_dir else data_root / "feature_store" / "alpha_bundle" / run_id
     ensure_dir(out_dir)
 
     stage = "alpha_apply_bundle"
@@ -68,7 +68,7 @@ def main() -> int:
     else:
         sig = read_parquet([sp])
     tcol = "ts_event" if "ts_event" in sig.columns else "timestamp"
-    sig[tcol] = ensure_utc_timestamp(sig[tcol])
+    sig[tcol] = ensure_utc_timestamp(sig[tcol], tcol)
 
     with open(args.ridge_model_path, "r", encoding="utf-8") as f:
         model = json.load(f)
@@ -101,7 +101,7 @@ def main() -> int:
     if args.regime_path:
         reg = read_parquet([Path(args.regime_path)])
         rtcol = "ts_event" if "ts_event" in reg.columns else "timestamp"
-        reg[rtcol] = ensure_utc_timestamp(reg[rtcol])
+        reg[rtcol] = ensure_utc_timestamp(reg[rtcol], rtcol)
         reg = reg.sort_values(rtcol, kind="mergesort")
         base = pd.merge_asof(sig[[tcol]].sort_values(tcol), reg[[rtcol, "gate_scalar", "regime_label"]].rename(columns={rtcol: tcol}), on=tcol, direction="backward")
         gate_scalar = base["gate_scalar"].astype(float).fillna(1.0).to_numpy(dtype=np.float64)
@@ -119,7 +119,9 @@ def main() -> int:
     out_path = out_dir / "alpha_bundle_scores.parquet"
     write_parquet(out, out_path)
 
-    finalize_manifest(manifest, status="success", stats={"rows": int(len(out)), "out": str(out_path)})
+    result = {"run_id": run_id, "rows": int(len(out)), "out": str(out_path)}
+    finalize_manifest(manifest, status="success", stats=result)
+    print(json.dumps(result, indent=2))
     return 0
 
 if __name__ == "__main__":

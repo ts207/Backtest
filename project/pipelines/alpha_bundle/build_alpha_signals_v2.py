@@ -111,7 +111,7 @@ def main() -> int:
 
         bars = read_parquet([Path(p) for p in bars_files])
         tcol = "ts_event" if "ts_event" in bars.columns else "timestamp"
-        bars[tcol] = ensure_utc_timestamp(bars[tcol])
+        bars[tcol] = ensure_utc_timestamp(bars[tcol], tcol)
         price_col = "mid" if "mid" in bars.columns else ("close" if "close" in bars.columns else None)
         if price_col is None:
             raise ValueError("bars must contain 'mid' or 'close'")
@@ -155,7 +155,7 @@ def main() -> int:
         if funding_files:
             fund = read_parquet([Path(p) for p in funding_files])
             ftcol = "ts_event" if "ts_event" in fund.columns else "timestamp"
-            fund[ftcol] = ensure_utc_timestamp(fund[ftcol])
+            fund[ftcol] = ensure_utc_timestamp(fund[ftcol], ftcol)
             fund = fund.sort_values(ftcol)
             fcol = "funding_rate" if "funding_rate" in fund.columns else ("funding_rate_scaled" if "funding_rate_scaled" in fund.columns else "rate")
             fund = fund[[ftcol, fcol]].rename(columns={ftcol: tcol, fcol: "funding_rate"})
@@ -170,7 +170,7 @@ def main() -> int:
         if oi_files:
             oi = read_parquet([Path(p) for p in oi_files])
             otcol = "ts_event" if "ts_event" in oi.columns else "timestamp"
-            oi[otcol] = ensure_utc_timestamp(oi[otcol])
+            oi[otcol] = ensure_utc_timestamp(oi[otcol], otcol)
             oi = oi.sort_values(otcol)
             ocol = "oi_usd" if "oi_usd" in oi.columns else ("oi" if "oi" in oi.columns else ("open_interest" if "open_interest" in oi.columns else None))
             if ocol:
@@ -205,7 +205,7 @@ def main() -> int:
             if spot_files:
                 spot = read_parquet([Path(p) for p in spot_files])
                 stcol = "ts_event" if "ts_event" in spot.columns else "timestamp"
-                spot[stcol] = ensure_utc_timestamp(spot[stcol])
+                spot[stcol] = ensure_utc_timestamp(spot[stcol], stcol)
                 spot = spot.sort_values(stcol).reset_index(drop=True)
                 sp_col = "mid" if "mid" in spot.columns else ("close" if "close" in spot.columns else None)
                 if sp_col is not None:
