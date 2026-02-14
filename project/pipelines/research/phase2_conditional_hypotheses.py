@@ -95,8 +95,14 @@ SYMBOL_OUTPUT_COLUMNS = [
     "sign_persistence",
     "drawdown_profile",
     "capacity_proxy",
+    "rejection_reason_codes",
+    "promotion_status",
     "deployable",
 ]
+
+REJECTION_NEGATIVE_EV = "NEGATIVE_EV"
+REJECTION_UNSTABLE = "UNSTABLE"
+REJECTION_LOW_SAMPLE = "LOW_SAMPLE"
 
 
 @dataclass(frozen=True)
@@ -970,6 +976,9 @@ def _build_symbol_evaluation_table(
     conditions: List[ConditionSpec],
     actions: List[ActionSpec],
     event_type: str,
+    min_ev: float,
+    min_stability_score: float,
+    min_sample_size: int,
 ) -> pd.DataFrame:
     if events.empty or candidates.empty or "symbol" not in events.columns:
         return pd.DataFrame(columns=SYMBOL_OUTPUT_COLUMNS)
@@ -1030,7 +1039,15 @@ def _build_symbol_evaluation_table(
             if not np.isfinite(capacity_proxy):
                 capacity_proxy = 0.0
 
-            deployable = bool(ev > 0.0 and sharpe_like > 0.0 and stability_score >= 0.55)
+            rejection_reasons: List[str] = []
+            if ev <= min_ev:
+                rejection_reasons.append(REJECTION_NEGATIVE_EV)
+            if stability_score < min_stability_score:
+                rejection_reasons.append(REJECTION_UNSTABLE)
+            if len(sym_values) < min_sample_size:
+                rejection_reasons.append(REJECTION_LOW_SAMPLE)
+
+            deployable = len(rejection_reasons) == 0
             rows.append(
                 {
                     "candidate_id": str(cand.get("candidate_id", f"{condition_name}__{action_name}")),
@@ -1047,6 +1064,8 @@ def _build_symbol_evaluation_table(
                     "sign_persistence": sign_persistence,
                     "drawdown_profile": drawdown_profile,
                     "capacity_proxy": capacity_proxy,
+                    "rejection_reason_codes": ",".join(rejection_reasons),
+                    "promotion_status": "promoted" if deployable else "rejected",
                     "deployable": deployable,
                 }
             )
@@ -1074,6 +1093,9 @@ def main() -> int:
     parser.add_argument("--net_benefit_floor", type=float, default=0.0)
     parser.add_argument("--min_regime_stable_splits", type=int, default=2)
     parser.add_argument("--min_sample_size", type=int, default=20)
+    parser.add_argument("--promotion_min_ev", type=float, default=0.0)
+    parser.add_argument("--promotion_min_stability_score", type=float, default=0.55)
+    parser.add_argument("--promotion_min_sample_size", type=int, default=20)
     parser.add_argument("--require_phase1_pass", type=int, default=1)
     parser.add_argument("--out_dir", default=None)
     parser.add_argument("--log_path", default=None)
@@ -1269,7 +1291,16 @@ def main() -> int:
         conditions=conditions,
         actions=actions,
         event_type=args.event_type,
+        min_ev=float(args.promotion_min_ev),
+        min_stability_score=float(args.promotion_min_stability_score),
+        min_sample_size=int(args.promotion_min_sample_size),
     )
+
+    rejection_reason_counts: Dict[str, int] = {}
+    if not symbol_eval.empty and "rejection_reason_codes" in symbol_eval.columns:
+        for reason_codes in symbol_eval["rejection_reason_codes"].fillna("").astype(str):
+            for reason in [x for x in reason_codes.split(",") if x]:
+                rejection_reason_counts[reason] = rejection_reason_counts.get(reason, 0) + 1
 
     promoted = candidates[candidates.get("gate_all", False)].copy() if not candidates.empty else pd.DataFrame()
     if not promoted.empty and not symbol_eval.empty:
@@ -1304,6 +1335,8 @@ def main() -> int:
         "phase1_structure_pass": bool(phase1_structure_pass),
         "phase1_decision": phase1_decision,
         "promoted_count": int(len(promoted)) if isinstance(promoted, pd.DataFrame) else 0,
+        "rejected_count": int((~symbol_eval["deployable"].astype(bool)).sum()) if not symbol_eval.empty else 0,
+        "rejected_by_reason": dict(sorted(rejection_reason_counts.items())),
         "candidates": promoted.to_dict(orient="records") if isinstance(promoted, pd.DataFrame) and not promoted.empty else [],
     }
     prom_path.write_text(json.dumps(prom_payload, indent=2), encoding="utf-8")
@@ -1334,6 +1367,9 @@ def main() -> int:
         },
         "gates": {
             "min_regime_stable_splits": int(args.min_regime_stable_splits),
+            "promotion_min_ev": float(args.promotion_min_ev),
+            "promotion_min_stability_score": float(args.promotion_min_stability_score),
+            "promotion_min_sample_size": int(args.promotion_min_sample_size),
             "oos_gate": "validation_and_test_adverse_improvement_required",
             "multiplicity_method": "benjamini_hochberg",
             "multiplicity_alpha": 0.05,
@@ -1343,6 +1379,8 @@ def main() -> int:
         "oos_pass_count": int(candidates["gate_oos_validation_test"].sum()) if not candidates.empty and "gate_oos_validation_test" in candidates.columns else 0,
         "symbol_evaluations": int(len(symbol_eval)),
         "deployable_symbol_rows": int(symbol_eval["deployable"].astype(bool).sum()) if not symbol_eval.empty else 0,
+        "rejected_symbol_rows": int((~symbol_eval["deployable"].astype(bool)).sum()) if not symbol_eval.empty else 0,
+        "rejected_symbol_rows_by_reason": dict(sorted(rejection_reason_counts.items())),
     }
     manifest_path.write_text(json.dumps(manifest_payload, indent=2), encoding="utf-8")
 
@@ -1366,6 +1404,12 @@ def main() -> int:
         f"- Candidate rows evaluated: {len(candidates)}",
         f"- Simplicity gate pass: {simplicity_pass}",
         f"- Regime stability required splits: {int(args.min_regime_stable_splits)}",
+        f"- Promotion min EV: {float(args.promotion_min_ev):.6f}",
+        f"- Promotion min stability score: {float(args.promotion_min_stability_score):.3f}",
+        f"- Promotion min sample size: {int(args.promotion_min_sample_size)}",
+        f"- Symbol rows promoted: {int(symbol_eval['deployable'].astype(bool).sum()) if not symbol_eval.empty else 0}",
+        f"- Symbol rows rejected: {int((~symbol_eval['deployable'].astype(bool)).sum()) if not symbol_eval.empty else 0}",
+        f"- Rejected by reason: {dict(sorted(rejection_reason_counts.items())) if rejection_reason_counts else {}}",
         "",
         "## Top candidates",
         _table_text(candidates.sort_values("delta_adverse_mean").head(3)) if not candidates.empty else "No candidates",
