@@ -58,6 +58,28 @@ def test_collects_unified_multi_event_phase2_candidates(tmp_path: Path, monkeypa
     pd.DataFrame(
         [
             {
+                "candidate_id": "all__risk_throttle_0.5",
+                "event_type": "vol_shock_relaxation",
+                "condition": "all",
+                "action": "risk_throttle_0.5",
+                "symbol": "BTCUSDT",
+                "sample_size": 42,
+                "ev": 0.03,
+                "variance": 0.0004,
+                "sharpe_like": 1.5,
+                "stability_score": 0.8,
+                "window_consistency": 1.0,
+                "sign_persistence": 1.0,
+                "drawdown_profile": -0.01,
+                "capacity_proxy": 1.8,
+                "deployable": True,
+            }
+        ]
+    ).to_csv(vsr_dir / "phase2_symbol_evaluation.csv", index=False)
+
+    pd.DataFrame(
+        [
+            {
                 "condition": "session_us",
                 "action": "delay_8",
                 "sample_size": 30,
@@ -106,8 +128,9 @@ def test_collects_unified_multi_event_phase2_candidates(tmp_path: Path, monkeypa
     assert promoted["n_events"] == 42
     assert promoted["edge_score"] > 0.0
     assert promoted["profit_density_score"] > 0.0
-    assert promoted["expectancy_per_trade"] == 0.02
-    assert promoted["candidate_symbol"] == "ALL"
+    assert promoted["expectancy_per_trade"] == 0.03
+    assert promoted["capacity_proxy"] == 1.8
+    assert promoted["candidate_symbol"] == "BTCUSDT"
 
     liq_row = out_df[out_df["event"] == "liquidity_absence_window"].iloc[0]
     assert liq_row["n_events"] == 30

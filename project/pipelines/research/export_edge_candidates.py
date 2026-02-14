@@ -149,6 +149,47 @@ def _phase2_row_to_candidate(
     }
 
 
+def _build_symbol_eval_lookup(event_dir: Path) -> Dict[str, Dict[str, object]]:
+    path = event_dir / "phase2_symbol_evaluation.csv"
+    if not path.exists():
+        return {}
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return {}
+    if df.empty:
+        return {}
+
+    lookup: Dict[str, Dict[str, object]] = {}
+    for _, row in df.iterrows():
+        cid = str(row.get("candidate_id", "")).strip()
+        if not cid:
+            continue
+        deployable = _as_bool(row.get("deployable", False))
+        ev = _safe_float(row.get("ev"), 0.0)
+        variance = _safe_float(row.get("variance"), 0.0)
+        sharpe_like = _safe_float(row.get("sharpe_like"), 0.0)
+        stability_score = _safe_float(row.get("stability_score"), 0.0)
+        capacity_proxy = _safe_float(row.get("capacity_proxy"), 0.0)
+        row_score = ev * max(0.0, sharpe_like) * max(0.0, stability_score)
+        current = lookup.get(cid)
+        if current is None or row_score > float(current.get("_row_score", -1e18)):
+            lookup[cid] = {
+                "candidate_symbol": str(row.get("symbol", "ALL")).strip().upper() or "ALL",
+                "symbol": str(row.get("symbol", "ALL")).strip().upper() or "ALL",
+                "expectancy_per_trade": ev,
+                "stability_proxy": stability_score,
+                "robustness_score": stability_score,
+                "capacity_proxy": capacity_proxy,
+                "profit_density_score": row_score,
+                "status": "PROMOTED" if deployable else "DRAFT",
+                "_row_score": row_score,
+            }
+    for cid in list(lookup.keys()):
+        lookup[cid].pop("_row_score", None)
+    return lookup
+
+
 def _run_research_chain(
     run_id: str,
     symbols: str,
@@ -218,6 +259,7 @@ def _collect_phase2_candidates(run_id: str, run_symbols: Sequence[str]) -> List[
     for event_dir in sorted([p for p in phase2_root.iterdir() if p.is_dir()]):
         promoted_json = event_dir / "promoted_candidates.json"
         candidate_csv = event_dir / "phase2_candidates.csv"
+        symbol_eval_lookup = _build_symbol_eval_lookup(event_dir)
         event_rows: List[Dict[str, object]] = []
 
         if promoted_json.exists():
@@ -226,11 +268,21 @@ def _collect_phase2_candidates(run_id: str, run_symbols: Sequence[str]) -> List[
             for idx, candidate in enumerate(promoted):
                 if not isinstance(candidate, dict):
                     continue
+                candidate_row = dict(candidate)
+                cid = str(candidate_row.get("candidate_id", "")).strip()
+                if not cid:
+                    cond = str(candidate_row.get("condition", "")).strip()
+                    act = str(candidate_row.get("action", "")).strip()
+                    if cond and act:
+                        cid = f"{cond}__{act}"
+                        candidate_row["candidate_id"] = cid
+                if cid and cid in symbol_eval_lookup:
+                    candidate_row.update(symbol_eval_lookup[cid])
                 event_rows.append(
                     _phase2_row_to_candidate(
                         run_id=run_id,
                         event=event_dir.name,
-                        row=candidate,
+                        row=candidate_row,
                         idx=idx,
                         source_path=promoted_json,
                         default_status="PROMOTED",
@@ -245,11 +297,21 @@ def _collect_phase2_candidates(run_id: str, run_symbols: Sequence[str]) -> List[
                     df = df[df["gate_all"].map(_as_bool)].copy()
                 if not df.empty:
                     for idx, row in df.iterrows():
+                        row_payload = row.to_dict()
+                        cid = str(row_payload.get("candidate_id", "")).strip()
+                        if not cid:
+                            cond = str(row_payload.get("condition", "")).strip()
+                            act = str(row_payload.get("action", "")).strip()
+                            if cond and act:
+                                cid = f"{cond}__{act}"
+                                row_payload["candidate_id"] = cid
+                        if cid and cid in symbol_eval_lookup:
+                            row_payload.update(symbol_eval_lookup[cid])
                         event_rows.append(
                             _phase2_row_to_candidate(
                                 run_id=run_id,
                                 event=event_dir.name,
-                                row=row.to_dict(),
+                                row=row_payload,
                                 idx=idx,
                                 source_path=candidate_csv,
                                 default_status="DRAFT",
