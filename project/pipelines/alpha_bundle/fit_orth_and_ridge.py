@@ -119,14 +119,19 @@ def main() -> int:
     sig = read_parquet([Path(args.signals_path)])
     lab = read_parquet([Path(args.label_path)])
     tcol = "ts_event" if "ts_event" in sig.columns else "timestamp"
-    sig[tcol] = ensure_utc_timestamp(sig[tcol])
-    lab[tcol] = ensure_utc_timestamp(lab[tcol])
+    lcol = "ts_event" if "ts_event" in lab.columns else "timestamp"
+    sig[tcol] = ensure_utc_timestamp(sig[tcol], tcol)
+    lab[lcol] = ensure_utc_timestamp(lab[lcol], lcol)
+    if lcol != tcol:
+        lab = lab.rename(columns={lcol: tcol})
 
     # Multi-universe: merge by (ts_event, symbol)
     if "symbol" not in sig.columns or "symbol" not in lab.columns:
         raise ValueError("signals_path and label_path must include a 'symbol' column for multi-universe fitting")
-    df = pd.merge(sig, lab[[tcol, "symbol", args.label_col]], on=[tcol, "symbol"], how="inner").dropna()
+    df = pd.merge(sig, lab[[tcol, "symbol", args.label_col]], on=[tcol, "symbol"], how="inner")
     cols = [c.strip() for c in args.signal_cols.split(",") if c.strip()]
+    required_cols = [tcol, "symbol", args.label_col, *cols]
+    df = df.dropna(subset=required_cols)
     # Deterministic row ordering
     df = df.sort_values([tcol, "symbol"], kind="mergesort").reset_index(drop=True)
     X = df[cols].to_numpy(dtype=np.float64)

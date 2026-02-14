@@ -1,5 +1,6 @@
 ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 PYTHON ?= $(ROOT_DIR)/.venv/bin/python
+PYTHON_COMPILE ?= $(if $(wildcard $(ROOT_DIR)/.venv/bin/python),$(ROOT_DIR)/.venv/bin/python,python3)
 RUN_ALL := $(ROOT_DIR)/project/pipelines/run_all.py
 CLEAN_SCRIPT := $(ROOT_DIR)/project/scripts/clean_data.sh
 
@@ -10,7 +11,7 @@ END ?= 2025-07-10
 STRATEGIES ?=
 ENABLE_CROSS_VENUE_SPOT_PIPELINE ?= 0
 
-.PHONY: help run baseline discover-edges discover-edges-from-raw discover-hybrid discover-hybrid-backtest test clean-runtime clean-all-data clean-repo
+.PHONY: help run baseline discover-edges discover-edges-from-raw discover-hybrid discover-hybrid-backtest test compile clean-runtime clean-all-data clean-repo
 
 help:
 	@echo "Targets:"
@@ -22,6 +23,7 @@ help:
 	@echo "  discover-hybrid-backtest - discover-hybrid + backtest + report"
 	@echo "                          requires STRATEGIES=... (comma-separated)"
 	@echo "  test              - run test suite"
+	@echo "  compile           - byte-compile all Python modules under project/"
 	@echo "  clean-runtime     - clean run/report artifacts"
 	@echo "  clean-all-data    - clean all local data artifacts"
 	@echo "  clean-repo        - clean local runtime/cache artifacts in repo tree"
@@ -106,6 +108,9 @@ discover-hybrid-backtest:
 
 test:
 	$(PYTHON) -m pytest -q
+
+compile:
+	$(PYTHON_COMPILE) -m compileall $(ROOT_DIR)/project
 
 clean-runtime:
 	$(CLEAN_SCRIPT) runtime

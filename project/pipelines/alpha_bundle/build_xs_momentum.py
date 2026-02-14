@@ -62,7 +62,7 @@ def main() -> int:
     )
 
     snap = read_parquet([Path(args.universe_snapshot_path)])
-    snap["ts_event"] = ensure_utc_timestamp(snap["ts_event"])
+    snap["ts_event"] = ensure_utc_timestamp(snap["ts_event"], "ts_event")
     sample_row = snap.iloc[0]
     symbols_sorted = list(sample_row["symbols_sorted"])
     universe_id = str(sample_row["universe_id"])
@@ -79,7 +79,7 @@ def main() -> int:
             continue
         bars = read_parquet([Path(p) for p in files])
         tcol = "ts_event" if "ts_event" in bars.columns else "timestamp"
-        bars[tcol] = ensure_utc_timestamp(bars[tcol])
+        bars[tcol] = ensure_utc_timestamp(bars[tcol], tcol)
         price_col = "mid" if "mid" in bars.columns else ("close" if "close" in bars.columns else None)
         if price_col is None:
             continue
@@ -124,7 +124,7 @@ def main() -> int:
         finalize_manifest(manifest, status="success", stats={"rows": 0, "note": "no CS rows"})
         return 0
 
-    cs["ts_event"] = ensure_utc_timestamp(cs["ts_event"])
+    cs["ts_event"] = ensure_utc_timestamp(cs["ts_event"], "ts_event")
     cs = cs.sort_values(["ts_event", "symbol"], kind="mergesort").reset_index(drop=True)
     cs["xs_momentum"] = (2.0 * cs["cs_rank"].astype(float) - 1.0).astype(float)
     out = cs[["ts_event", "symbol", "xs_momentum"]].copy()

@@ -66,7 +66,7 @@ def main() -> int:
     manifest = start_manifest(stage, run_id, params={"base_feature_name": args.base_feature_name}, inputs=[{"path": args.universe_snapshot_path}], outputs=[{"path": str(out_dir)}])
 
     snap = read_parquet([Path(args.universe_snapshot_path)])
-    snap["ts_event"] = ensure_utc_timestamp(snap["ts_event"])
+    snap["ts_event"] = ensure_utc_timestamp(snap["ts_event"], "ts_event")
     # Multi-snapshot mode: compute cross-sectional stats at each ts_event using the UniverseSnapshot at that same ts_event.
     # Base feature per symbol is expected as a parquet file at <base_feature_dir>/<symbol>.parquet
     # with columns: ts_event (or timestamp) and <base_feature_name>.
@@ -84,7 +84,7 @@ def main() -> int:
             continue
         df = read_parquet([fpath])
         tcol = "ts_event" if "ts_event" in df.columns else "timestamp"
-        df[tcol] = ensure_utc_timestamp(df[tcol])
+        df[tcol] = ensure_utc_timestamp(df[tcol], tcol)
         if args.base_feature_name not in df.columns:
             continue
         s = df.set_index(tcol)[args.base_feature_name].astype(float)
@@ -150,7 +150,7 @@ def main() -> int:
         finalize_manifest(manifest, status="success", stats={"rows": 0, "note": "no rows emitted"})
         return 0
 
-    out["ts_event"] = ensure_utc_timestamp(out["ts_event"])
+    out["ts_event"] = ensure_utc_timestamp(out["ts_event"], "ts_event")
     out_path = out_dir / f"cs_{universe_id}_{args.base_feature_name}.parquet"
     write_parquet(out, out_path)
 

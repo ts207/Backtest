@@ -87,7 +87,7 @@ def main() -> int:
         finalize_manifest(manifest, status="success", stats={"rows": 0, "note": "empty onchain input"})
         return 0
 
-    oc["ts_event"] = ensure_utc_timestamp(oc["ts_event"])
+    oc["ts_event"] = ensure_utc_timestamp(oc["ts_event"], "ts_event")
     required = {"ts_event", "asset", "netflow_coin", "mcap_usd"}
     missing = required - set(oc.columns)
     if missing:
@@ -113,7 +113,7 @@ def main() -> int:
             continue
         bars = read_parquet([Path(p) for p in files])
         tcol = "ts_event" if "ts_event" in bars.columns else "timestamp"
-        bars[tcol] = ensure_utc_timestamp(bars[tcol])
+        bars[tcol] = ensure_utc_timestamp(bars[tcol], tcol)
         price_col = "mid" if "mid" in bars.columns else ("close" if "close" in bars.columns else None)
         if price_col is None:
             continue
@@ -133,7 +133,7 @@ def main() -> int:
         return 0
 
     out = pd.concat(out_rows, ignore_index=True)
-    out["ts_event"] = ensure_utc_timestamp(out["ts_event"])
+    out["ts_event"] = ensure_utc_timestamp(out["ts_event"], "ts_event")
     out = out.sort_values(["ts_event", "symbol"], kind="mergesort").reset_index(drop=True)
     out_path = out_dir / "onchain_flow_mc.parquet"
     write_parquet(out, out_path)

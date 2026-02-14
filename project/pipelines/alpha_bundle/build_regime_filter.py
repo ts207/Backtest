@@ -82,7 +82,7 @@ def main() -> int:
 
     bars = read_parquet([Path(p) for p in files])
     tcol = "ts_event" if "ts_event" in bars.columns else "timestamp"
-    bars[tcol] = ensure_utc_timestamp(bars[tcol])
+    bars[tcol] = ensure_utc_timestamp(bars[tcol], tcol)
     price_col = "mid" if "mid" in bars.columns else ("close" if "close" in bars.columns else None)
     if price_col is None:
         raise ValueError("bars must contain 'mid' or 'close'")
@@ -109,7 +109,7 @@ def main() -> int:
         finalize_manifest(manifest, status="success", stats={"rows": 0, "note": "insufficient history"})
         return 0
 
-    out["ts_event"] = ensure_utc_timestamp(out["ts_event"])
+    out["ts_event"] = ensure_utc_timestamp(out["ts_event"], "ts_event")
     out = out.sort_values("ts_event", kind="mergesort").reset_index(drop=True)
     out_path = out_dir / "vol_regime.parquet"
     write_parquet(out, out_path)

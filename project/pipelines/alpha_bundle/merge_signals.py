@@ -69,7 +69,7 @@ def main() -> int:
 
     sig = _read_signals_dir(Path(args.signals_dir))
     tcol = "ts_event" if "ts_event" in sig.columns else "timestamp"
-    sig[tcol] = ensure_utc_timestamp(sig[tcol])
+    sig[tcol] = ensure_utc_timestamp(sig[tcol], tcol)
     if "symbol" not in sig.columns:
         raise ValueError("signals must include symbol")
     sig = sig.sort_values([tcol, "symbol"], kind="mergesort").reset_index(drop=True)
@@ -94,7 +94,7 @@ def main() -> int:
     # Optional: XS momentum
     if args.xs_momentum_path:
         xs = read_parquet([Path(args.xs_momentum_path)])
-        xs["ts_event"] = ensure_utc_timestamp(xs["ts_event"])
+        xs["ts_event"] = ensure_utc_timestamp(xs["ts_event"], "ts_event")
         xs = xs[["ts_event", "symbol", "xs_momentum"]].dropna().sort_values(["ts_event", "symbol"], kind="mergesort")
         df = pd.merge(df, xs, left_on=[tcol, "symbol"], right_on=["ts_event", "symbol"], how="left")
         df = df.drop(columns=["ts_event"], errors="ignore")
@@ -104,7 +104,7 @@ def main() -> int:
     # Optional: on-chain flow
     if args.onchain_flow_path:
         oc = read_parquet([Path(args.onchain_flow_path)])
-        oc["ts_event"] = ensure_utc_timestamp(oc["ts_event"])
+        oc["ts_event"] = ensure_utc_timestamp(oc["ts_event"], "ts_event")
         oc = oc[["ts_event", "symbol", "onchain_flow_mc"]].dropna().sort_values(["ts_event", "symbol"], kind="mergesort")
         df = pd.merge(df, oc, left_on=[tcol, "symbol"], right_on=["ts_event", "symbol"], how="left")
         df = df.drop(columns=["ts_event"], errors="ignore")
