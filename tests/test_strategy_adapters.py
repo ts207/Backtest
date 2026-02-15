@@ -123,3 +123,16 @@ def test_new_strategies_generate_positions_and_metadata() -> None:
         assert out.attrs["strategy_metadata"].get("strategy_id") == name
         assert "family" in out.attrs["strategy_metadata"]
         assert isinstance(out.attrs["strategy_metadata"].get("key_params"), dict)
+
+
+def test_symbol_specific_strategy_name_is_resolvable() -> None:
+    bars, features = _sample_bars_and_features()
+    strategy = get_strategy("funding_extreme_reversal_v1_BTCUSDT")
+    out = strategy.generate_positions(bars, features, params={"trade_day_timezone": "UTC"})
+
+    assert len(out) == len(bars)
+    assert "strategy_metadata" in out.attrs
+    metadata = out.attrs["strategy_metadata"]
+    assert metadata.get("strategy_id") == "funding_extreme_reversal_v1_BTCUSDT"
+    assert metadata.get("strategy_symbol") == "BTCUSDT"
+    assert metadata.get("base_strategy_id") == "funding_extreme_reversal_v1"

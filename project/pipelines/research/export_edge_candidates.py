@@ -133,6 +133,8 @@ def _phase2_row_to_candidate(
         "run_id": run_id,
         "candidate_symbol": candidate_symbol,
         "run_symbols": list(run_symbols),
+        "symbol_scores": row.get("symbol_scores", "{}"),
+        "rollout_eligible": _as_bool(row.get("rollout_eligible", False)),
         "event": event,
         "candidate_id": str(row.get("candidate_id", f"{event}_{idx}")),
         "status": str(row.get("status", default_status)),
@@ -161,11 +163,12 @@ def _build_symbol_eval_lookup(event_dir: Path) -> Dict[str, Dict[str, object]]:
     if df.empty:
         return {}
 
-    lookup: Dict[str, Dict[str, object]] = {}
+    grouped: Dict[str, List[Dict[str, object]]] = {}
     for _, row in df.iterrows():
         cid = str(row.get("candidate_id", "")).strip()
         if not cid:
             continue
+        symbol = str(row.get("symbol", "ALL")).strip().upper() or "ALL"
         deployable = _as_bool(row.get("deployable", False))
         ev = _safe_float(row.get("ev"), 0.0)
         variance = _safe_float(row.get("variance"), 0.0)
@@ -173,22 +176,48 @@ def _build_symbol_eval_lookup(event_dir: Path) -> Dict[str, Dict[str, object]]:
         stability_score = _safe_float(row.get("stability_score"), 0.0)
         capacity_proxy = _safe_float(row.get("capacity_proxy"), 0.0)
         row_score = ev * max(0.0, sharpe_like) * max(0.0, stability_score)
-        current = lookup.get(cid)
-        if current is None or row_score > float(current.get("_row_score", -1e18)):
-            lookup[cid] = {
-                "candidate_symbol": str(row.get("symbol", "ALL")).strip().upper() or "ALL",
-                "symbol": str(row.get("symbol", "ALL")).strip().upper() or "ALL",
-                "expectancy_per_trade": ev,
+        grouped.setdefault(cid, []).append(
+            {
+                "symbol": symbol,
+                "deployable": deployable,
+                "ev": ev,
                 "variance": variance,
-                "stability_proxy": stability_score,
-                "robustness_score": stability_score,
+                "stability_score": stability_score,
                 "capacity_proxy": capacity_proxy,
-                "profit_density_score": row_score,
-                "status": "PROMOTED" if deployable else "DRAFT",
-                "_row_score": row_score,
+                "row_score": row_score,
             }
-    for cid in list(lookup.keys()):
-        lookup[cid].pop("_row_score", None)
+        )
+
+    lookup: Dict[str, Dict[str, object]] = {}
+    for cid, items in grouped.items():
+        if not items:
+            continue
+        best = max(items, key=lambda item: float(item.get("row_score", -1e18)))
+        symbol_scores = {
+            str(item.get("symbol", "ALL")).strip().upper() or "ALL": _safe_float(item.get("row_score"), 0.0)
+            for item in items
+        }
+        positive_scores = [score for score in symbol_scores.values() if score > 0.0]
+        similar_score_band = True
+        if len(positive_scores) > 1:
+            max_score = max(positive_scores)
+            min_score = min(positive_scores)
+            similar_score_band = bool(min_score >= (0.75 * max_score))
+        deployable_symbols = [item for item in items if bool(item.get("deployable", False))]
+        rollout_eligible = bool(len(deployable_symbols) > 1 and similar_score_band)
+        lookup[cid] = {
+            "candidate_symbol": str(best.get("symbol", "ALL")).strip().upper() or "ALL",
+            "symbol": str(best.get("symbol", "ALL")).strip().upper() or "ALL",
+            "symbol_scores": json.dumps(symbol_scores),
+            "rollout_eligible": rollout_eligible,
+            "expectancy_per_trade": _safe_float(best.get("ev"), 0.0),
+            "variance": _safe_float(best.get("variance"), 0.0),
+            "stability_proxy": _safe_float(best.get("stability_score"), 0.0),
+            "robustness_score": _safe_float(best.get("stability_score"), 0.0),
+            "capacity_proxy": _safe_float(best.get("capacity_proxy"), 0.0),
+            "profit_density_score": _safe_float(best.get("row_score"), 0.0),
+            "status": "PROMOTED" if bool(best.get("deployable", False)) else "DRAFT",
+        }
     return lookup
 
 
