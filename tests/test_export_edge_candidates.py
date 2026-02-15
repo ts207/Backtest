@@ -129,6 +129,7 @@ def test_collects_unified_multi_event_phase2_candidates(tmp_path: Path, monkeypa
     assert promoted["edge_score"] > 0.0
     assert promoted["profit_density_score"] > 0.0
     assert promoted["expectancy_per_trade"] == 0.03
+    assert promoted["variance"] == 0.0004
     assert promoted["capacity_proxy"] == 1.8
     assert promoted["candidate_symbol"] == "BTCUSDT"
 

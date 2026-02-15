@@ -17,6 +17,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from pipelines._lib.config import load_configs
 from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from pipelines.report.capital_allocation import AllocationConfig, allocation_metadata, build_allocation_weights
 
 
 
@@ -151,6 +152,10 @@ def main() -> int:
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--out_dir", default=None)
     parser.add_argument("--config", action="append", default=[])
+    parser.add_argument("--allocation_max_weight", type=float, default=0.45)
+    parser.add_argument("--allocation_min_weight", type=float, default=0.02)
+    parser.add_argument("--allocation_volatility_target", type=float, default=0.0)
+    parser.add_argument("--allocation_volatility_adjustment_cap", type=float, default=3.0)
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
 
@@ -207,6 +212,21 @@ def main() -> int:
         report_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "vol_compression_expansion_v1" / run_id
         report_dir.mkdir(parents=True, exist_ok=True)
         report_path = report_dir / "summary.md"
+
+        allocation_input_path = DATA_ROOT / "reports" / "edge_candidates" / run_id / "edge_candidates_normalized.csv"
+        allocation_df = pd.DataFrame()
+        allocation_meta = {}
+        if allocation_input_path.exists():
+            candidate_df = pd.read_csv(allocation_input_path)
+            allocation_config = AllocationConfig(
+                max_weight=float(args.allocation_max_weight),
+                min_weight=float(args.allocation_min_weight),
+                volatility_target=float(args.allocation_volatility_target),
+                volatility_adjustment_cap=float(args.allocation_volatility_adjustment_cap),
+            )
+            allocation_df = build_allocation_weights(candidate_df, allocation_config)
+            allocation_meta = allocation_metadata(allocation_config, allocation_df)
+            inputs.append({"path": str(allocation_input_path), "rows": int(len(candidate_df)), "start_ts": None, "end_ts": None})
 
         metrics_total_trades = int(metrics.get("total_trades", 0) or 0)
         metrics_avg_r = float(metrics.get("avg_r", 0.0) or 0.0)
@@ -418,6 +438,17 @@ def main() -> int:
                         )
                 lines.append(_table_text(pd.DataFrame(sym_rows)) if sym_rows else "No binding stats")
 
+        lines.extend(["", "## Capital Allocation Weights", ""])
+        if allocation_df.empty:
+            lines.append("No promoted symbol-level edge metrics available for allocation sizing.")
+        else:
+            lines.append(_table_text(allocation_df[["symbol", "ev", "variance", "symbol_vol", "final_weight", "allocation_rank"]]))
+            lines.append("")
+            lines.append("Allocation constraints:")
+            lines.append(f"- max_weight: {allocation_meta.get('max_weight', 0.0):.2%}")
+            lines.append(f"- min_weight: {allocation_meta.get('min_weight', 0.0):.2%}")
+            lines.append(f"- volatility_target: {allocation_meta.get('volatility_target', 0.0):.6f}")
+
         report_path.write_text("\n".join(lines), encoding="utf-8")
         outputs.append({"path": str(report_path), "rows": len(lines), "start_ts": None, "end_ts": None})
 
@@ -438,6 +469,8 @@ def main() -> int:
             "universe_membership": universe_report.get("monthly_membership", {}) if isinstance(universe_report, dict) else {},
             "engine_diagnostics": engine_diagnostics,
             "overlay_bindings": engine_metrics.get("overlay_bindings", {}) if isinstance(engine_metrics, dict) else {},
+            "capital_allocation": allocation_df.to_dict(orient="records") if not allocation_df.empty else [],
+            "capital_allocation_metadata": allocation_meta,
             "context_segmentation": {
                 "by_active": context_by_active.to_dict(orient="records") if not context_by_active.empty else [],
                 "by_age_bucket": context_by_age.to_dict(orient="records") if not context_by_age.empty else [],
@@ -446,6 +479,19 @@ def main() -> int:
         summary_path = report_dir / "summary.json"
         summary_path.write_text(json.dumps(summary_json, indent=2, sort_keys=True), encoding="utf-8")
         outputs.append({"path": str(summary_path), "rows": 1, "start_ts": None, "end_ts": None})
+
+        allocation_csv_path = report_dir / "allocation_weights.csv"
+        allocation_json_path = report_dir / "allocation_weights.json"
+        allocation_df.to_csv(allocation_csv_path, index=False)
+        allocation_payload = {
+            "run_id": run_id,
+            "allocation": allocation_df.to_dict(orient="records"),
+            "metadata": allocation_meta,
+            "source": str(allocation_input_path),
+        }
+        allocation_json_path.write_text(json.dumps(allocation_payload, indent=2, sort_keys=True), encoding="utf-8")
+        outputs.append({"path": str(allocation_csv_path), "rows": int(len(allocation_df)), "start_ts": None, "end_ts": None})
+        outputs.append({"path": str(allocation_json_path), "rows": int(len(allocation_df)), "start_ts": None, "end_ts": None})
 
         finalize_manifest(manifest, "success", stats=stats)
         return 0
