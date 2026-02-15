@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "project"))
 from pipelines.research.phase2_conditional_hypotheses import (
     ActionSpec,
     ConditionSpec,
+    _deployment_mode_from_symbol_dispersion,
     _evaluate_candidate,
     _gate_regime_stability,
 )
@@ -429,3 +430,61 @@ def test_phase2_oos_gate_blocks_positive_test_split() -> None:
     assert result["validation_delta_adverse_mean"] < 0
     assert result["test_delta_adverse_mean"] > 0
     assert result["gate_oos_validation_test"] is False
+
+
+def test_deployment_mode_concentrate_when_top_symbol_clearly_dominates() -> None:
+    symbol_eval = pd.DataFrame(
+        [
+            {
+                "symbol": "BTCUSDT",
+                "deployable": True,
+                "ev": 0.12,
+                "stability_score": 0.95,
+                "variance": 0.0001,
+                "sample_size": 80,
+            },
+            {
+                "symbol": "ETHUSDT",
+                "deployable": True,
+                "ev": 0.02,
+                "stability_score": 0.60,
+                "variance": 0.0025,
+                "sample_size": 80,
+            },
+        ]
+    )
+
+    decision = _deployment_mode_from_symbol_dispersion(symbol_eval)
+
+    assert decision["deployment_mode"] == "concentrate"
+    assert decision["dominance_detected"] is True
+    assert decision["dispersion_metrics"]["confidence_overlap"] is False
+
+
+def test_deployment_mode_diversify_when_scores_overlap() -> None:
+    symbol_eval = pd.DataFrame(
+        [
+            {
+                "symbol": "BTCUSDT",
+                "deployable": True,
+                "ev": 0.06,
+                "stability_score": 0.85,
+                "variance": 0.02,
+                "sample_size": 30,
+            },
+            {
+                "symbol": "ETHUSDT",
+                "deployable": True,
+                "ev": 0.058,
+                "stability_score": 0.83,
+                "variance": 0.02,
+                "sample_size": 30,
+            },
+        ]
+    )
+
+    decision = _deployment_mode_from_symbol_dispersion(symbol_eval)
+
+    assert decision["deployment_mode"] == "diversify"
+    assert decision["dominance_detected"] is False
+    assert decision["dispersion_metrics"]["confidence_overlap"] is True

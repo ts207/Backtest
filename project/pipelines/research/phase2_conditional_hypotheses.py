@@ -104,6 +104,9 @@ REJECTION_NEGATIVE_EV = "NEGATIVE_EV"
 REJECTION_UNSTABLE = "UNSTABLE"
 REJECTION_LOW_SAMPLE = "LOW_SAMPLE"
 
+DEPLOYMENT_MODE_CONCENTRATE = "concentrate"
+DEPLOYMENT_MODE_DIVERSIFY = "diversify"
+
 
 @dataclass(frozen=True)
 class Phase1EventSource:
@@ -1076,6 +1079,109 @@ def _build_symbol_evaluation_table(
     return out[SYMBOL_OUTPUT_COLUMNS]
 
 
+def _deployment_mode_from_symbol_dispersion(symbol_eval: pd.DataFrame) -> Dict[str, object]:
+    deployable = symbol_eval[symbol_eval.get("deployable", False).astype(bool)].copy() if not symbol_eval.empty else pd.DataFrame()
+    if deployable.empty:
+        return {
+            "deployment_mode": DEPLOYMENT_MODE_DIVERSIFY,
+            "rationale": "No deployable symbols passed promotion gates; defaulting to diversify mode until promotion resumes.",
+            "dominance_detected": False,
+            "top_symbols_considered": [],
+            "dispersion_metrics": {
+                "score_gap": 0.0,
+                "relative_gap": 0.0,
+                "confidence_overlap": True,
+                "stability_adjusted_spread": 0.0,
+            },
+            "policy_thresholds": {
+                "relative_gap_min": 0.25,
+                "stability_adjusted_spread_min": 1.0,
+                "confidence_overlap_required_for_diversify": True,
+            },
+        }
+
+    ranked = deployable.copy()
+    ranked["ev"] = pd.to_numeric(ranked.get("ev"), errors="coerce").fillna(0.0)
+    ranked["stability_score"] = pd.to_numeric(ranked.get("stability_score"), errors="coerce").fillna(0.0)
+    ranked["variance"] = pd.to_numeric(ranked.get("variance"), errors="coerce").fillna(0.0).clip(lower=0.0)
+    ranked["sample_size"] = pd.to_numeric(ranked.get("sample_size"), errors="coerce").fillna(0).astype(int)
+    ranked["stability_adjusted_score"] = ranked["ev"] * ranked["stability_score"]
+    ranked["score_std_err"] = np.sqrt(ranked["variance"] / ranked["sample_size"].clip(lower=1))
+    ranked["score_ci_low"] = ranked["stability_adjusted_score"] - (1.96 * ranked["score_std_err"])
+    ranked["score_ci_high"] = ranked["stability_adjusted_score"] + (1.96 * ranked["score_std_err"])
+
+    ranked = ranked.sort_values(["stability_adjusted_score", "ev"], ascending=[False, False]).head(2)
+    top_rows = ranked.to_dict(orient="records")
+    if len(ranked) == 1:
+        top_symbol = str(ranked.iloc[0].get("symbol", "unknown"))
+        return {
+            "deployment_mode": DEPLOYMENT_MODE_CONCENTRATE,
+            "rationale": f"Only one deployable symbol ({top_symbol}) is available, so concentration is required.",
+            "dominance_detected": True,
+            "top_symbols_considered": top_rows,
+            "dispersion_metrics": {
+                "score_gap": float(ranked.iloc[0].get("stability_adjusted_score", 0.0)),
+                "relative_gap": 1.0,
+                "confidence_overlap": False,
+                "stability_adjusted_spread": float("inf"),
+            },
+            "policy_thresholds": {
+                "relative_gap_min": 0.25,
+                "stability_adjusted_spread_min": 1.0,
+                "confidence_overlap_required_for_diversify": True,
+            },
+        }
+
+    top = ranked.iloc[0]
+    second = ranked.iloc[1]
+    top_score = float(top.get("stability_adjusted_score", 0.0))
+    second_score = float(second.get("stability_adjusted_score", 0.0))
+    score_gap = float(top_score - second_score)
+    relative_gap = float(score_gap / max(abs(top_score), 1e-9))
+    top_low = float(top.get("score_ci_low", np.nan))
+    top_high = float(top.get("score_ci_high", np.nan))
+    second_low = float(second.get("score_ci_low", np.nan))
+    second_high = float(second.get("score_ci_high", np.nan))
+    confidence_overlap = bool(max(top_low, second_low) <= min(top_high, second_high))
+    pooled_std = float(np.sqrt(float(top.get("score_std_err", 0.0)) ** 2 + float(second.get("score_std_err", 0.0)) ** 2))
+    stability_adjusted_spread = float(score_gap / pooled_std) if pooled_std > 1e-9 else float("inf")
+
+    relative_gap_min = 0.25
+    spread_min = 1.0
+    dominance_detected = bool(
+        (relative_gap >= relative_gap_min)
+        and (stability_adjusted_spread >= spread_min)
+        and (not confidence_overlap)
+    )
+    mode = DEPLOYMENT_MODE_CONCENTRATE if dominance_detected else DEPLOYMENT_MODE_DIVERSIFY
+    rationale = (
+        f"{top.get('symbol', 'Top symbol')} clearly dominates by score gap={score_gap:.6f}, "
+        f"relative_gap={relative_gap:.3f}, spread={stability_adjusted_spread:.3f}, and non-overlapping confidence intervals."
+        if dominance_detected
+        else (
+            "Top symbols are statistically similar after accounting for confidence overlap and stability-adjusted spread; "
+            "allocate in diversify mode."
+        )
+    )
+    return {
+        "deployment_mode": mode,
+        "rationale": rationale,
+        "dominance_detected": dominance_detected,
+        "top_symbols_considered": top_rows,
+        "dispersion_metrics": {
+            "score_gap": score_gap,
+            "relative_gap": relative_gap,
+            "confidence_overlap": confidence_overlap,
+            "stability_adjusted_spread": stability_adjusted_spread,
+        },
+        "policy_thresholds": {
+            "relative_gap_min": relative_gap_min,
+            "stability_adjusted_spread_min": spread_min,
+            "confidence_overlap_required_for_diversify": True,
+        },
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Phase 2 Conditional Edge Hypothesis (non-optimization)")
     parser.add_argument("--run_id", required=True)
@@ -1152,6 +1258,20 @@ def main() -> int:
             "phase1_structure_pass": bool(phase1_structure_pass),
             "phase1_decision": phase1_decision,
             "promoted_count": 0,
+            "deployment_mode": DEPLOYMENT_MODE_DIVERSIFY,
+            "deployment_mode_rationale": "No phase-1 events are available, so deployment defaults to diversify mode.",
+            "deployment_dispersion_test": {
+                "deployment_mode": DEPLOYMENT_MODE_DIVERSIFY,
+                "rationale": "No phase-1 events are available, so deployment defaults to diversify mode.",
+                "dominance_detected": False,
+                "top_symbols_considered": [],
+                "dispersion_metrics": {
+                    "score_gap": 0.0,
+                    "relative_gap": 0.0,
+                    "confidence_overlap": True,
+                    "stability_adjusted_spread": 0.0,
+                },
+            },
             "candidates": [],
             "reason": "no_phase1_events",
             "phase1_events_file_exists": bool(phase1_events_file_exists),
@@ -1184,6 +1304,8 @@ def main() -> int:
             },
             "no_phase1_events": True,
             "phase1_events_file_exists": bool(phase1_events_file_exists),
+            "deployment_mode": DEPLOYMENT_MODE_DIVERSIFY,
+            "deployment_mode_rationale": "No phase-1 events are available, so deployment defaults to diversify mode.",
         }
         manifest_path.write_text(json.dumps(manifest_payload, indent=2), encoding="utf-8")
         summary_path.write_text(
@@ -1197,6 +1319,8 @@ def main() -> int:
                     f"Phase 1 status: `{phase1_decision}`",
                     "",
                     "No Phase 1 events were available for the requested symbols.",
+                    f"Deployment mode: {DEPLOYMENT_MODE_DIVERSIFY}",
+                    "Deployment rationale: No phase-1 events are available, so deployment defaults to diversify mode.",
                 ]
             ),
             encoding="utf-8",
@@ -1314,6 +1438,7 @@ def main() -> int:
             ascending=[False, True, False],
         ).head(2)
 
+    deployment_policy = _deployment_mode_from_symbol_dispersion(symbol_eval)
     summary_decision = "promote" if (phase1_pass and not promoted.empty) else "freeze"
 
     out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "phase2" / args.run_id / args.event_type
@@ -1337,6 +1462,9 @@ def main() -> int:
         "promoted_count": int(len(promoted)) if isinstance(promoted, pd.DataFrame) else 0,
         "rejected_count": int((~symbol_eval["deployable"].astype(bool)).sum()) if not symbol_eval.empty else 0,
         "rejected_by_reason": dict(sorted(rejection_reason_counts.items())),
+        "deployment_mode": str(deployment_policy.get("deployment_mode", DEPLOYMENT_MODE_DIVERSIFY)),
+        "deployment_mode_rationale": str(deployment_policy.get("rationale", "")),
+        "deployment_dispersion_test": deployment_policy,
         "candidates": promoted.to_dict(orient="records") if isinstance(promoted, pd.DataFrame) and not promoted.empty else [],
     }
     prom_path.write_text(json.dumps(prom_payload, indent=2), encoding="utf-8")
@@ -1381,6 +1509,8 @@ def main() -> int:
         "deployable_symbol_rows": int(symbol_eval["deployable"].astype(bool).sum()) if not symbol_eval.empty else 0,
         "rejected_symbol_rows": int((~symbol_eval["deployable"].astype(bool)).sum()) if not symbol_eval.empty else 0,
         "rejected_symbol_rows_by_reason": dict(sorted(rejection_reason_counts.items())),
+        "deployment_mode": str(deployment_policy.get("deployment_mode", DEPLOYMENT_MODE_DIVERSIFY)),
+        "deployment_mode_rationale": str(deployment_policy.get("rationale", "")),
     }
     manifest_path.write_text(json.dumps(manifest_payload, indent=2), encoding="utf-8")
 
@@ -1410,6 +1540,12 @@ def main() -> int:
         f"- Symbol rows promoted: {int(symbol_eval['deployable'].astype(bool).sum()) if not symbol_eval.empty else 0}",
         f"- Symbol rows rejected: {int((~symbol_eval['deployable'].astype(bool)).sum()) if not symbol_eval.empty else 0}",
         f"- Rejected by reason: {dict(sorted(rejection_reason_counts.items())) if rejection_reason_counts else {}}",
+        f"- Deployment mode: {deployment_policy.get('deployment_mode', DEPLOYMENT_MODE_DIVERSIFY)}",
+        f"- Deployment rationale: {deployment_policy.get('rationale', '')}",
+        "",
+        "## Deployment dispersion test",
+        f"- Metrics: {deployment_policy.get('dispersion_metrics', {})}",
+        f"- Thresholds: {deployment_policy.get('policy_thresholds', {})}",
         "",
         "## Top candidates",
         _table_text(candidates.sort_values("delta_adverse_mean").head(3)) if not candidates.empty else "No candidates",
