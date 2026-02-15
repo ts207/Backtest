@@ -99,6 +99,13 @@ def test_build_strategy_candidates_from_promoted_edges(monkeypatch, tmp_path: Pa
     assert payload[0]["selection_score"] == pytest.approx(payload[0]["profit_density_score"])
     assert payload[0]["candidate_symbol"] == "ALL"
     assert payload[0]["run_symbols"] == ["BTCUSDT", "ETHUSDT"]
+    assert payload[0]["deployment_type"] == "single_symbol"
+    assert payload[0]["deployment_symbols"] == ["BTCUSDT"]
+    assert payload[0]["strategy_instances"][0]["strategy_id"] == "vol_compression_v1_BTCUSDT"
+
+    out_manifest = tmp_path / "reports" / "strategy_builder" / run_id / "deployment_manifest.json"
+    manifest = json.loads(out_manifest.read_text(encoding="utf-8"))
+    assert manifest["strategies"][0]["deployment_type"] == "single_symbol"
 
 
 def test_build_strategy_candidates_can_include_alpha_bundle(monkeypatch, tmp_path: Path) -> None:
@@ -330,3 +337,40 @@ def test_build_strategy_candidates_preserves_candidate_symbol_from_edge(monkeypa
     out_json = tmp_path / "reports" / "strategy_builder" / run_id / "strategy_candidates.json"
     payload = json.loads(out_json.read_text(encoding="utf-8"))
     assert payload[0]["candidate_symbol"] == "ETHUSDT"
+    assert payload[0]["deployment_type"] == "single_symbol"
+    assert payload[0]["deployment_symbols"] == ["ETHUSDT"]
+    assert payload[0]["strategy_instances"][0]["strategy_id"] == "vol_compression_v1_ETHUSDT"
+
+
+def test_build_strategy_candidates_allows_multi_symbol_rollout_when_similar_scores(monkeypatch, tmp_path: Path) -> None:
+    run_id = "strategy_builder_rollout"
+    _write_edge_inputs(tmp_path, run_id=run_id)
+
+    edge_csv = tmp_path / "reports" / "edge_candidates" / run_id / "edge_candidates_normalized.csv"
+    df = pd.read_csv(edge_csv)
+    df["rollout_eligible"] = [True]
+    df["symbol_scores"] = [json.dumps({"BTCUSDT": 0.5, "ETHUSDT": 0.48})]
+    df.to_csv(edge_csv, index=False)
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(build_strategy_candidates, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_strategy_candidates.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--include_alpha_bundle",
+            "0",
+        ],
+    )
+
+    assert build_strategy_candidates.main() == 0
+    out_json = tmp_path / "reports" / "strategy_builder" / run_id / "strategy_candidates.json"
+    payload = json.loads(out_json.read_text(encoding="utf-8"))
+    assert payload[0]["deployment_type"] == "multi_symbol"
+    assert payload[0]["deployment_symbols"] == ["BTCUSDT", "ETHUSDT"]
+    assert len(payload[0]["strategy_instances"]) == 2

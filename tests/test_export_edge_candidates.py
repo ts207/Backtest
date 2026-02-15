@@ -193,3 +193,48 @@ def test_collect_phase2_candidates_infers_symbol_from_condition(tmp_path: Path, 
 
     rows = export_edge_candidates._collect_phase2_candidates(run_id, run_symbols=["BTCUSDT", "ETHUSDT"])
     assert rows and rows[0]["candidate_symbol"] == "BTCUSDT"
+
+
+def test_collect_phase2_candidates_adds_symbol_scores_and_rollout_gate(tmp_path: Path, monkeypatch) -> None:
+    run_id = "edge_rollout_gate"
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(export_edge_candidates, "DATA_ROOT", tmp_path)
+
+    event_dir = tmp_path / "reports" / "phase2" / run_id / "vol_shock_relaxation"
+    event_dir.mkdir(parents=True, exist_ok=True)
+    (event_dir / "promoted_candidates.json").write_text(
+        json.dumps({"run_id": run_id, "event_type": "vol_shock_relaxation", "candidates": [{"candidate_id": "c0"}]}),
+        encoding="utf-8",
+    )
+    pd.DataFrame(
+        [
+            {
+                "candidate_id": "c0",
+                "symbol": "BTCUSDT",
+                "ev": 0.03,
+                "variance": 0.1,
+                "sharpe_like": 1.0,
+                "stability_score": 0.8,
+                "capacity_proxy": 1.0,
+                "deployable": True,
+            },
+            {
+                "candidate_id": "c0",
+                "symbol": "ETHUSDT",
+                "ev": 0.005,
+                "variance": 0.1,
+                "sharpe_like": 1.0,
+                "stability_score": 0.8,
+                "capacity_proxy": 1.0,
+                "deployable": True,
+            },
+        ]
+    ).to_csv(event_dir / "phase2_symbol_evaluation.csv", index=False)
+
+    rows = export_edge_candidates._collect_phase2_candidates(run_id, run_symbols=["BTCUSDT", "ETHUSDT"])
+    assert rows
+    row = rows[0]
+    assert row["candidate_symbol"] == "BTCUSDT"
+    assert row["rollout_eligible"] is False
+    symbol_scores = json.loads(row["symbol_scores"])
+    assert set(symbol_scores.keys()) == {"BTCUSDT", "ETHUSDT"}

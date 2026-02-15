@@ -178,6 +178,63 @@ def _manual_backtest_command_for_strategy(base_strategy: str, symbols_csv: str) 
     )
 
 
+def _parse_symbol_scores(value: object) -> Dict[str, float]:
+    if isinstance(value, dict):
+        parsed = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            return {}
+    out: Dict[str, float] = {}
+    for symbol, score in parsed.items():
+        symbol_key = str(symbol).strip().upper()
+        if not symbol_key:
+            continue
+        out[symbol_key] = _safe_float(score, 0.0)
+    return out
+
+
+def _resolve_deployment_scope(
+    candidate_symbol: str,
+    run_symbols: List[str],
+    symbol_scores: Dict[str, float],
+    rollout_eligible: bool,
+) -> Dict[str, object]:
+    normalized_run_symbols = [str(symbol).strip().upper() for symbol in run_symbols if str(symbol).strip()]
+    if not normalized_run_symbols:
+        return {"deployment_type": "single_symbol", "deployment_symbols": [], "rollout_eligible": False}
+
+    candidate_symbol = str(candidate_symbol).strip().upper()
+    if candidate_symbol and candidate_symbol != "ALL":
+        target = candidate_symbol if candidate_symbol in normalized_run_symbols else normalized_run_symbols[0]
+        return {"deployment_type": "single_symbol", "deployment_symbols": [target], "rollout_eligible": False}
+
+    if len(normalized_run_symbols) == 1:
+        return {"deployment_type": "single_symbol", "deployment_symbols": normalized_run_symbols, "rollout_eligible": False}
+
+    if rollout_eligible:
+        return {
+            "deployment_type": "multi_symbol",
+            "deployment_symbols": normalized_run_symbols,
+            "rollout_eligible": True,
+        }
+
+    best_symbol = normalized_run_symbols[0]
+    if symbol_scores:
+        ranked = sorted(
+            ((symbol, score) for symbol, score in symbol_scores.items() if symbol in normalized_run_symbols),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        if ranked:
+            best_symbol = ranked[0][0]
+    return {"deployment_type": "single_symbol", "deployment_symbols": [best_symbol], "rollout_eligible": False}
+
+
 def _build_edge_strategy_candidate(
     row: Dict[str, object],
     detail: Dict[str, object],
@@ -212,6 +269,39 @@ def _build_edge_strategy_candidate(
     symbols_csv = ",".join(symbols)
     manual_backtest_command = _manual_backtest_command_for_strategy(base_strategy, symbols_csv)
     symbol_scope = _symbol_scope_from_row(row=row, symbols=symbols)
+    symbol_scores = _parse_symbol_scores(row.get("symbol_scores", {}))
+    rollout_eligible = bool(row.get("rollout_eligible", False))
+    deployment_scope = _resolve_deployment_scope(
+        candidate_symbol=str(symbol_scope["candidate_symbol"]),
+        run_symbols=symbol_scope["run_symbols"],
+        symbol_scores=symbol_scores,
+        rollout_eligible=rollout_eligible,
+    )
+    deployment_symbols = deployment_scope["deployment_symbols"]
+    strategy_instances = [
+        {
+            "strategy_id": f"{base_strategy}_{symbol}",
+            "base_strategy": base_strategy,
+            "symbol": symbol,
+            "strategy_params": {
+                "promotion_thresholds": {
+                    "edge_score": edge_score,
+                    "expectancy_per_trade": expectancy_per_trade,
+                    "stability_proxy": stability_proxy,
+                    "robustness_score": robustness_score,
+                    "event_frequency": event_frequency,
+                    "capacity_proxy": capacity_proxy,
+                    "profit_density_score": profit_density_score,
+                    "selection_score": selection_score,
+                    "symbol_score": _safe_float(symbol_scores.get(symbol), selection_score),
+                },
+                "risk_controls": controls,
+                "condition": condition,
+                "action": action,
+            },
+        }
+        for symbol in deployment_symbols
+    ]
 
     notes: List[str] = [
         f"Derived from promoted edge candidate {candidate_id} ({event}).",
@@ -226,6 +316,8 @@ def _build_edge_strategy_candidate(
             notes.append(
                 f"`{base_strategy}` is a strategy template. Add/choose a concrete backtest implementation before execution."
             )
+    if symbol_scope["candidate_symbol"] == "ALL" and not deployment_scope["rollout_eligible"] and len(symbols) > 1:
+        notes.append("Cross-symbol rollout disabled: scores are not similar enough across symbols.")
 
     return {
         "strategy_candidate_id": strategy_candidate_id,
@@ -250,6 +342,11 @@ def _build_edge_strategy_candidate(
         "symbols": symbols,
         "candidate_symbol": symbol_scope["candidate_symbol"],
         "run_symbols": symbol_scope["run_symbols"],
+        "symbol_scores": symbol_scores,
+        "rollout_eligible": deployment_scope["rollout_eligible"],
+        "deployment_type": deployment_scope["deployment_type"],
+        "deployment_symbols": deployment_symbols,
+        "strategy_instances": strategy_instances,
         "risk_controls": controls,
         "manual_backtest_command": manual_backtest_command,
         "notes": notes,
@@ -295,6 +392,25 @@ def _load_alpha_bundle_candidate(run_id: str, symbols: List[str]) -> Dict[str, o
     symbols_csv = ",".join(symbols)
     alpha_strategy = "onchain_flow_v1"
     alpha_backtest_ready = alpha_strategy in BACKTEST_READY_BASE_STRATEGIES
+    strategy_instances = [
+        {
+            "strategy_id": f"{alpha_strategy}_{symbol}",
+            "base_strategy": alpha_strategy,
+            "symbol": symbol,
+            "strategy_params": {
+                "promotion_thresholds": {"selection_score": float(score.abs().mean())},
+                "risk_controls": {
+                    "entry_delay_bars": 0,
+                    "size_scale": 1.0,
+                    "block_entries": False,
+                    "reentry_mode": "immediate",
+                },
+                "condition": "cross_signal_composite",
+                "action": "score_rank",
+            },
+        }
+        for symbol in symbols
+    ]
     return {
         "strategy_candidate_id": _sanitize_id(f"alpha_bundle_{run_id}"),
         "source_type": "alpha_bundle",
@@ -318,6 +434,11 @@ def _load_alpha_bundle_candidate(run_id: str, symbols: List[str]) -> Dict[str, o
         "symbols": symbols,
         "candidate_symbol": "ALL" if len(symbols) > 1 else symbols[0],
         "run_symbols": symbols,
+        "symbol_scores": {},
+        "rollout_eligible": True if len(symbols) > 1 else False,
+        "deployment_type": "multi_symbol" if len(symbols) > 1 else "single_symbol",
+        "deployment_symbols": symbols,
+        "strategy_instances": strategy_instances,
         "risk_controls": {
             "entry_delay_bars": 0,
             "size_scale": 1.0,
@@ -508,10 +629,25 @@ def main() -> int:
             row["rank"] = rank
 
         out_json = out_dir / "strategy_candidates.json"
+        out_deploy = out_dir / "deployment_manifest.json"
         out_md = out_dir / "selection_summary.md"
         out_manual = out_dir / "manual_backtest_instructions.md"
 
         out_json.write_text(json.dumps(strategy_rows, indent=2), encoding="utf-8")
+        deployment_manifest = {
+            "run_id": args.run_id,
+            "strategies": [
+                {
+                    "strategy_candidate_id": row["strategy_candidate_id"],
+                    "base_strategy": row["base_strategy"],
+                    "deployment_type": row.get("deployment_type", "single_symbol"),
+                    "deployment_symbols": row.get("deployment_symbols", []),
+                    "strategy_instances": row.get("strategy_instances", []),
+                }
+                for row in strategy_rows
+            ],
+        }
+        out_deploy.write_text(json.dumps(deployment_manifest, indent=2), encoding="utf-8")
         out_md.write_text(_render_summary_md(run_id=args.run_id, candidates=strategy_rows), encoding="utf-8")
         out_manual.write_text(
             _render_manual_instructions(run_id=args.run_id, symbols=symbols, candidates=strategy_rows),
@@ -519,6 +655,7 @@ def main() -> int:
         )
 
         outputs.append({"path": str(out_json), "rows": int(len(strategy_rows)), "start_ts": None, "end_ts": None})
+        outputs.append({"path": str(out_deploy), "rows": int(len(strategy_rows)), "start_ts": None, "end_ts": None})
         outputs.append({"path": str(out_md), "rows": int(len(strategy_rows)), "start_ts": None, "end_ts": None})
         outputs.append({"path": str(out_manual), "rows": int(len(strategy_rows)), "start_ts": None, "end_ts": None})
 
