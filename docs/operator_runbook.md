@@ -68,6 +68,10 @@ Manual command template:
   --force 1
 ```
 
+## 2.1) Run the report stage
+- After strategy builder exports promoted edges, use `./.venv/bin/python project/pipelines/report/make_report.py --run_id <run_id>` to create `reports/vol_compression_expansion_v1/<run_id>/allocation_weights.{csv,json}` and the associated metadata.
+- That report relies on `pipelines/report/capital_allocation.build_allocation_weights`, which enforces the max/min weight caps and volatility targets referenced in the README summary and has a test in `tests/test_capital_allocation.py`.
+
 ## 3) Strategy-builder direct run (optional)
 ```bash
 ./.venv/bin/python project/pipelines/research/build_strategy_candidates.py \

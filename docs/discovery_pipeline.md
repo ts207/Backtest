@@ -22,6 +22,10 @@ This document explains what happens during discovery, how edges are promoted, an
 - Phase 2 ranks condition/action hypotheses by edge/stability and promotes gate-passing candidates.
 - Expectancy + robustness reports are applied after export to avoid strategy decisions from one noisy metric.
 
+## Reporting follow-up
+- After the strategy builder, `project/pipelines/report/make_report.py` (the `vol_compression_expansion_v1` report) consumes the promoted edges and writes `allocation_weights.csv`/`.json` plus related metadata. Refer to `project/pipelines/report/capital_allocation.py` for the caps/floors and volatility adjustments that keep symbol weights normalized.
+- The report stage is covered by `tests/test_capital_allocation.py`, which validates the allocation values and ensures artifacts land under `reports/<report_name>/<run_id>/allocation_weights.*`.
+
 ## Why cross-venue can show zero events
 - `cross_venue_desync` needs both perp and spot feature sets.
 - If spot features are missing, phase1 event count is zero and phase2 freezes.
