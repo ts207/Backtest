@@ -182,7 +182,15 @@ def main() -> int:
     stats: Dict[str, object] = {}
 
     try:
-        trades_dir = DATA_ROOT / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id
+        backtests_root = DATA_ROOT / "lake" / "trades" / "backtests"
+        preferred_strategy = "vol_compression_expansion_v1"
+        trades_dir = backtests_root / preferred_strategy / run_id
+        if not (trades_dir / "metrics.json").exists():
+            fallback_dirs = sorted(
+                path for path in backtests_root.glob(f"*/{run_id}") if (path / "metrics.json").exists()
+            )
+            if fallback_dirs:
+                trades_dir = fallback_dirs[0]
         metrics_path = trades_dir / "metrics.json"
         equity_curve_path = trades_dir / "equity_curve.csv"
         fee_path = trades_dir / "fee_sensitivity.json"
