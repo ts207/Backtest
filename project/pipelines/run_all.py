@@ -74,6 +74,21 @@ def _as_flag(value: int) -> str:
     return str(int(value))
 
 
+def _print_artifact_summary(run_id: str) -> None:
+    artifact_paths = [
+        ("runs", DATA_ROOT / "runs" / run_id),
+        ("phase2", DATA_ROOT / "reports" / "phase2" / run_id),
+        ("edge_candidates", DATA_ROOT / "reports" / "edge_candidates" / run_id / "edge_candidates_normalized.csv"),
+        ("strategy_builder", DATA_ROOT / "reports" / "strategy_builder" / run_id),
+        ("report", DATA_ROOT / "reports" / "vol_compression_expansion_v1" / run_id / "summary.md"),
+    ]
+    print("Artifact summary:")
+    print(f"  - BACKTEST_DATA_ROOT: {DATA_ROOT}")
+    for label, path in artifact_paths:
+        status = "found" if path.exists() else "missing"
+        print(f"  - {label} ({status}): {path}")
+
+
 def _parse_symbols_csv(symbols_csv: str) -> List[str]:
     symbols = [s.strip().upper() for s in str(symbols_csv).split(",") if s.strip()]
     unique_symbols: List[str] = []
@@ -629,6 +644,7 @@ def main() -> int:
         print(f"  - {stage_name}: {duration:.1f}s")
 
     print(f"Pipeline run completed: {run_id}")
+    _print_artifact_summary(run_id)
     return 0
 
 
