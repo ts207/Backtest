@@ -182,11 +182,20 @@ def main() -> int:
     stats: Dict[str, object] = {}
 
     try:
-        trades_dir = DATA_ROOT / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id
+        backtests_root = DATA_ROOT / "lake" / "trades" / "backtests"
+        preferred_strategy = "vol_compression_expansion_v1"
+        trades_dir = backtests_root / preferred_strategy / run_id
+        if not (trades_dir / "metrics.json").exists():
+            fallback_dirs = sorted(
+                path for path in backtests_root.glob(f"*/{run_id}") if (path / "metrics.json").exists()
+            )
+            if fallback_dirs:
+                trades_dir = fallback_dirs[0]
         metrics_path = trades_dir / "metrics.json"
         equity_curve_path = trades_dir / "equity_curve.csv"
         fee_path = trades_dir / "fee_sensitivity.json"
         metrics = _read_json(metrics_path)
+        logging.info("Using backtest artifacts from %s", trades_dir)
         fee_sensitivity = _read_json(fee_path) if fee_path.exists() else {}
         trades = _load_trades(trades_dir)
         engine_dir = DATA_ROOT / "runs" / run_id / "engine"
@@ -492,6 +501,12 @@ def main() -> int:
         allocation_json_path.write_text(json.dumps(allocation_payload, indent=2, sort_keys=True), encoding="utf-8")
         outputs.append({"path": str(allocation_csv_path), "rows": int(len(allocation_df)), "start_ts": None, "end_ts": None})
         outputs.append({"path": str(allocation_json_path), "rows": int(len(allocation_df)), "start_ts": None, "end_ts": None})
+
+        logging.info("Wrote report markdown: %s", report_path)
+        logging.info("Wrote report summary json: %s", summary_path)
+        if not allocation_df.empty:
+            logging.info("Wrote allocation weights: %s", allocation_csv_path)
+            logging.info("Wrote allocation weights metadata: %s", allocation_json_path)
 
         finalize_manifest(manifest, "success", stats=stats)
         return 0

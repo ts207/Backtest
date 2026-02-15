@@ -102,7 +102,14 @@ def _read_ohlcv_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "symbol", "source"])
 
-    df["timestamp"] = pd.to_datetime(df["open_time"].astype("int64"), unit="ms", utc=True)
+    open_time_int = df["open_time"].astype("int64")
+    # Some spot archives encode epoch in microseconds instead of milliseconds.
+    open_time_ms = open_time_int.where(open_time_int <= 9_999_999_999_999, open_time_int // 1000)
+    df["timestamp"] = pd.to_datetime(open_time_ms, unit="ms", utc=True, errors="coerce")
+    df = df[df["timestamp"].notna()].copy()
+    if df.empty:
+        return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "symbol", "source"])
+
     df = df[["timestamp", "open", "high", "low", "close", "volume"]].copy()
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
