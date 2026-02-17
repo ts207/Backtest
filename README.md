@@ -11,7 +11,7 @@
 3. Use `--skip_ingest_spot_ohlcv 1` if cross-venue spot data already exists; `cross_venue_desync` automatically pulls spot data otherwise.
 
 ## Outputs
-- Canonical numeric artifacts land under `data/reports/…` (phase1, phase2, edge candidates, strategy builder, run tracking).
+- Canonical numeric artifacts are generated under `data/reports/…` at runtime, but these outputs are not committed to git.
 - Promoted edge list: `data/reports/edge_candidates/<run_id>/edge_candidates_normalized.csv`.
 - Strategy outputs: `data/reports/strategy_builder/<run_id>/strategy_candidates.json` plus markdown summaries.
 - Manual backtests use template IDs from the strategy candidates list and run with `project/pipelines/backtest/backtest_strategies.py --run_id … --symbols … --strategies <template> --force 1`.
@@ -24,6 +24,8 @@
 - Run `./.venv/bin/pytest -q` to execute the current unit test suite.
 
 ## Docs
-- Use the `docs/` files for stage-level explanations: `docs/discovery_pipeline.md` describes how phase1 → phase2 → strategy outputs are produced, and `docs/operator_runbook.md` walks through the standard orchestration commands plus manual backtest handoff. Treat those docs as the current source of truth and keep them synchronized with the pipeline code when changes land.
+- Use `docs/README.md` as the documentation index.
+- Active operational docs stay in `docs/`; historical writeups are kept in `docs/archive/`.
+- Repo cleanliness and artifact tracking rules are defined in `docs/repo_hygiene.md`.
 ## Notes
 - Ignore any markdown that references retired workflows; prefer the overview above combined with the docs and pipeline scripts in `project/pipelines/`.

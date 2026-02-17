@@ -12,7 +12,7 @@ END ?= 2025-07-10
 STRATEGIES ?=
 ENABLE_CROSS_VENUE_SPOT_PIPELINE ?= 0
 
-.PHONY: help run baseline discover-edges discover-edges-from-raw discover-hybrid discover-hybrid-backtest test compile clean-runtime clean-all-data clean-repo
+.PHONY: help run baseline discover-edges discover-edges-from-raw discover-hybrid discover-hybrid-backtest test compile clean-runtime clean-all-data clean-repo check-hygiene clean-hygiene
 
 help:
 	@echo "Targets:"
@@ -28,6 +28,8 @@ help:
 	@echo "  clean-runtime     - clean run/report artifacts"
 	@echo "  clean-all-data    - clean all local data artifacts"
 	@echo "  clean-repo        - clean local runtime/cache artifacts in repo tree"
+	@echo "  check-hygiene     - enforce repo hygiene constraints"
+	@echo "  clean-hygiene     - remove local sidecar metadata files"
 
 run:
 	$(PYTHON) $(RUN_ALL) \
@@ -121,3 +123,11 @@ clean-all-data:
 
 clean-repo:
 	$(CLEAN_SCRIPT) repo
+
+check-hygiene:
+	$(ROOT_DIR)/project/scripts/check_repo_hygiene.sh
+
+clean-hygiene:
+	find $(ROOT_DIR) -type f \
+		\( -name '*:Zone.Identifier' -o -name '*#Uf03aZone.Identifier' -o -name '*#Uf03aZone.Identifier:Zone.Identifier' \) \
+		-print -delete

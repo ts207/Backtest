@@ -2,6 +2,15 @@
 .pytest_cache/
 __pycache__/
 *.pyc
+*.pyo
+*.swp
+*.tmp
+.DS_Store
+
+# Windows ADS sidecars from copied files
+*:Zone.Identifier
+*#Uf03aZone.Identifier
+*#Uf03aZone.Identifier:Zone.Identifier
 
 # Generated runtime artifacts
 data/*
@@ -18,6 +27,7 @@ data/reports/*
 
 # Alternate local data roots
 .data/
+data-local/
 
 # Local run outputs
 project/runs/
