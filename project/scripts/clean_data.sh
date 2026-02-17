@@ -13,6 +13,14 @@ delete_contents() {
   fi
 }
 
+delete_dir() {
+  local dir="$1"
+  if [[ -d "$dir" ]]; then
+    find "$dir" -mindepth 1 -delete
+    rmdir "$dir" 2>/dev/null || true
+  fi
+}
+
 ensure_gitkeep() {
   local dir="$1"
   mkdir -p "$dir"
@@ -47,10 +55,18 @@ case "$MODE" in
   repo)
     # Repo-local runtime and cache cleanup.
     delete_contents "project/runs"
-    find . -type f -name "*.pyc" -delete
-    find . -type d -name "__pycache__" -empty -delete
-    find project -type d -empty -delete
-    delete_contents ".pytest_cache"
+    delete_dir ".pytest_cache"
+    delete_dir ".mypy_cache"
+    delete_dir ".ruff_cache"
+    delete_dir "htmlcov"
+    find . -type f \
+      \( -name "*.pyc" -o -name "*.pyo" -o -name "*.tmp" -o -name "*.swp" \
+         -o -name ".coverage" -o -name ".coverage.*" -o -name ".DS_Store" \) \
+      -delete
+    while IFS= read -r cache_dir; do
+      find "$cache_dir" -mindepth 1 -delete
+      rmdir "$cache_dir" 2>/dev/null || true
+    done < <(find . -type d \( -name "__pycache__" -o -name ".ipynb_checkpoints" \))
     ;;
   *)
     echo "Usage: $0 [runtime|all|repo]" >&2

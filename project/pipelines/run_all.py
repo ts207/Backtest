@@ -79,6 +79,7 @@ def _print_artifact_summary(run_id: str) -> None:
         ("runs", DATA_ROOT / "runs" / run_id),
         ("phase2", DATA_ROOT / "reports" / "phase2" / run_id),
         ("edge_candidates", DATA_ROOT / "reports" / "edge_candidates" / run_id / "edge_candidates_normalized.csv"),
+        ("promotions", DATA_ROOT / "reports" / "promotions" / run_id / "promotion_report.json"),
         ("strategy_builder", DATA_ROOT / "reports" / "strategy_builder" / run_id),
         ("report", DATA_ROOT / "reports" / "vol_compression_expansion_v1" / run_id / "summary.md"),
     ]
@@ -148,6 +149,8 @@ def main() -> int:
     parser.add_argument("--phase2_require_phase1_pass", type=int, default=1)
 
     parser.add_argument("--run_edge_candidate_universe", type=int, default=0)
+    parser.add_argument("--run_strategy_blueprint_compiler", type=int, default=1)
+    parser.add_argument("--strategy_blueprint_max_per_event", type=int, default=2)
     parser.add_argument("--run_strategy_builder", type=int, default=1)
     parser.add_argument("--strategy_builder_top_k_per_event", type=int, default=2)
     parser.add_argument("--strategy_builder_max_candidates", type=int, default=20)
@@ -158,20 +161,34 @@ def main() -> int:
     parser.add_argument("--strict_recommendations_checklist", type=int, default=0)
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--run_backtest", type=int, default=0)
+    parser.add_argument("--run_blueprint_promotion", type=int, default=1)
+    parser.add_argument("--run_walkforward_eval", type=int, default=0)
+    parser.add_argument("--walkforward_embargo_days", type=int, default=0)
+    parser.add_argument("--walkforward_train_frac", type=float, default=0.6)
+    parser.add_argument("--walkforward_validation_frac", type=float, default=0.2)
     parser.add_argument("--run_make_report", type=int, default=0)
     parser.add_argument("--fees_bps", type=float, default=None)
     parser.add_argument("--slippage_bps", type=float, default=None)
     parser.add_argument("--cost_bps", type=float, default=None)
     parser.add_argument("--strategies", default=None)
     parser.add_argument("--overlays", default="")
+    parser.add_argument("--blueprints_path", default=None)
+    parser.add_argument("--blueprints_top_k", type=int, default=10)
+    parser.add_argument("--blueprints_filter_event_type", default="all")
 
     args = parser.parse_args()
     global _STRICT_RECOMMENDATIONS_CHECKLIST
     _STRICT_RECOMMENDATIONS_CHECKLIST = bool(int(args.strict_recommendations_checklist))
 
-    if int(args.run_backtest) and not (args.strategies and str(args.strategies).strip()):
-        print("run_backtest requires --strategies (comma-separated strategy ids).", file=sys.stderr)
-        return 1
+    if int(args.run_backtest):
+        has_strategies = bool(args.strategies and str(args.strategies).strip())
+        has_blueprints = bool(args.blueprints_path and str(args.blueprints_path).strip())
+        if not (has_strategies or has_blueprints):
+            print("run_backtest requires --strategies or --blueprints_path.", file=sys.stderr)
+            return 1
+        if has_strategies and has_blueprints:
+            print("run_backtest requires only one of --strategies or --blueprints_path.", file=sys.stderr)
+            return 1
 
     run_id = args.run_id or _run_id_default()
     parsed_symbols = _parse_symbols_csv(args.symbols)
@@ -555,6 +572,22 @@ def main() -> int:
             )
         )
 
+    if int(args.run_strategy_blueprint_compiler):
+        stages.append(
+            (
+                "compile_strategy_blueprints",
+                PROJECT_ROOT / "pipelines" / "research" / "compile_strategy_blueprints.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--max_per_event",
+                    str(int(args.strategy_blueprint_max_per_event)),
+                ],
+            )
+        )
+
     if int(args.run_strategy_builder):
         stages.append(
             (
@@ -585,6 +618,44 @@ def main() -> int:
                     run_id,
                     "--symbols",
                     symbols,
+                    "--force",
+                    force_flag,
+                ],
+            )
+        )
+
+    if int(args.run_backtest) and int(args.run_blueprint_promotion):
+        stages.append(
+            (
+                "promote_blueprints",
+                PROJECT_ROOT / "pipelines" / "research" / "promote_blueprints.py",
+                [
+                    "--run_id",
+                    run_id,
+                ],
+            )
+        )
+
+    if int(args.run_walkforward_eval):
+        stages.append(
+            (
+                "run_walkforward",
+                PROJECT_ROOT / "pipelines" / "eval" / "run_walkforward.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--start",
+                    start,
+                    "--end",
+                    end,
+                    "--embargo_days",
+                    str(int(args.walkforward_embargo_days)),
+                    "--train_frac",
+                    str(float(args.walkforward_train_frac)),
+                    "--validation_frac",
+                    str(float(args.walkforward_validation_frac)),
                     "--force",
                     force_flag,
                 ],
@@ -623,6 +694,25 @@ def main() -> int:
                 base_args.extend(["--strategies", str(args.strategies)])
             if args.overlays:
                 base_args.extend(["--overlays", str(args.overlays)])
+            if args.blueprints_path is not None and str(args.blueprints_path).strip():
+                base_args.extend(["--blueprints_path", str(args.blueprints_path)])
+                base_args.extend(["--blueprints_top_k", str(int(args.blueprints_top_k))])
+                base_args.extend(["--blueprints_filter_event_type", str(args.blueprints_filter_event_type)])
+        if stage_name == "run_walkforward":
+            if args.fees_bps is not None:
+                base_args.extend(["--fees_bps", str(args.fees_bps)])
+            if args.slippage_bps is not None:
+                base_args.extend(["--slippage_bps", str(args.slippage_bps)])
+            if args.cost_bps is not None:
+                base_args.extend(["--cost_bps", str(args.cost_bps)])
+            if args.strategies is not None:
+                base_args.extend(["--strategies", str(args.strategies)])
+            if args.overlays:
+                base_args.extend(["--overlays", str(args.overlays)])
+            if args.blueprints_path is not None and str(args.blueprints_path).strip():
+                base_args.extend(["--blueprints_path", str(args.blueprints_path)])
+                base_args.extend(["--blueprints_top_k", str(int(args.blueprints_top_k))])
+                base_args.extend(["--blueprints_filter_event_type", str(args.blueprints_filter_event_type)])
 
     stage_timings: List[Tuple[str, float]] = []
     print(f"Planned stages: {len(stages)}")

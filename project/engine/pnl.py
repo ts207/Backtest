@@ -15,7 +15,7 @@ def compute_returns(close: pd.Series) -> pd.Series:
 def compute_pnl_components(
     pos: pd.Series,
     ret: pd.Series,
-    cost_bps: float,
+    cost_bps: float | pd.Series,
     funding_rate: pd.Series | None = None,
     borrow_rate: pd.Series | None = None,
 ) -> pd.DataFrame:
@@ -35,7 +35,11 @@ def compute_pnl_components(
     prior_pos = aligned_pos.shift(1).fillna(0.0)
 
     gross_pnl = prior_pos * ret
-    trading_cost = (aligned_pos - prior_pos).abs() * (float(cost_bps) / 10000.0)
+    if isinstance(cost_bps, pd.Series):
+        cost_bps_aligned = pd.to_numeric(cost_bps.reindex(ret.index), errors="coerce").fillna(0.0).astype(float)
+    else:
+        cost_bps_aligned = pd.Series(float(cost_bps), index=ret.index, dtype=float)
+    trading_cost = (aligned_pos - prior_pos).abs() * (cost_bps_aligned / 10000.0)
 
     if funding_rate is None:
         funding_rate_aligned = pd.Series(0.0, index=ret.index, dtype=float)
@@ -82,7 +86,7 @@ def compute_pnl_components(
 def compute_pnl(
     pos: pd.Series,
     ret: pd.Series,
-    cost_bps: float,
+    cost_bps: float | pd.Series,
     funding_rate: pd.Series | None = None,
     borrow_rate: pd.Series | None = None,
 ) -> pd.Series:

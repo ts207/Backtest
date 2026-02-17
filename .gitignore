@@ -1,10 +1,18 @@
 .venv/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
 __pycache__/
 *.pyc
 *.pyo
 *.swp
 *.tmp
+.ipynb_checkpoints/
+.idea/
+.vscode/
 .DS_Store
 
 # Windows ADS sidecars from copied files

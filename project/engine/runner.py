@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 
 from engine.pnl import compute_pnl_components, compute_returns
+from engine.execution_model import estimate_transaction_cost_bps
+from engine.risk_allocator import RiskLimits, allocate_position_scales
 from pipelines._lib.io_utils import (
     choose_partition_dir,
     ensure_dir,
@@ -34,6 +36,7 @@ class StrategyResult:
     data: pd.DataFrame
     diagnostics: Dict[str, object]
     strategy_metadata: Dict[str, object]
+    trace: pd.DataFrame
 
 
 _CONTEXT_COLUMNS = [
@@ -159,7 +162,13 @@ def _is_carry_strategy(strategy_name: str, strategy_metadata: Dict[str, object])
 
 
 
-def _load_symbol_data(data_root: Path, symbol: str, run_id: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def _load_symbol_data(
+    data_root: Path,
+    symbol: str,
+    run_id: str,
+    start_ts: pd.Timestamp | None = None,
+    end_ts: pd.Timestamp | None = None,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     feature_candidates = [
         run_scoped_lake_path(data_root, run_id, "features", "perp", symbol, "15m", "features_v1"),
         data_root / "lake" / "features" / "perp" / symbol / "15m" / "features_v1",
@@ -184,8 +193,20 @@ def _load_symbol_data(data_root: Path, symbol: str, run_id: str) -> Tuple[pd.Dat
 
     features = features.sort_values("timestamp").reset_index(drop=True)
     bars = bars.sort_values("timestamp").reset_index(drop=True)
+    if start_ts is not None:
+        features = features[features["timestamp"] >= start_ts].copy()
+        bars = bars[bars["timestamp"] >= start_ts].copy()
+    if end_ts is not None:
+        features = features[features["timestamp"] <= end_ts].copy()
+        bars = bars[bars["timestamp"] <= end_ts].copy()
+    if features.empty or bars.empty:
+        raise ValueError(f"No data in selected window for {symbol}")
 
     context = _load_context_data(data_root, symbol, run_id=run_id, timeframe="15m")
+    if start_ts is not None:
+        context = context[context["timestamp"] >= start_ts].copy()
+    if end_ts is not None:
+        context = context[context["timestamp"] <= end_ts].copy()
     features = _join_context_features(features, context)
     return bars, features
 
@@ -217,6 +238,9 @@ def _strategy_returns(
     timestamp_index = pd.DatetimeIndex(bars["timestamp"])
     positions = positions.reindex(timestamp_index).fillna(0).astype(int)
     _validate_positions(positions)
+    requested_position_scale = float(params.get("position_scale", 1.0)) if isinstance(params, dict) else 1.0
+    if not np.isfinite(requested_position_scale) or requested_position_scale < 0.0:
+        raise ValueError(f"Invalid position_scale for {strategy_name}: {requested_position_scale}")
 
     entry_reason_map: Dict[pd.Timestamp, str] = {}
     exit_reason_map: Dict[pd.Timestamp, str] = {}
@@ -273,10 +297,27 @@ def _strategy_returns(
     )
 
     use_carry_components = _is_carry_strategy(strategy_name, strategy_metadata)
+    scaled_positions = positions.astype(float) * requested_position_scale
+    turnover = (scaled_positions - scaled_positions.shift(1).fillna(0.0)).abs()
+    execution_cfg = dict(params.get("execution_model", {})) if isinstance(params, dict) and isinstance(params.get("execution_model", {}), dict) else {}
+    execution_cfg.setdefault("base_fee_bps", float(cost_bps) / 2.0)
+    execution_cfg.setdefault("base_slippage_bps", float(cost_bps) / 2.0)
+    frame_for_cost = pd.DataFrame(
+        {
+            "spread_bps": pd.to_numeric(features_aligned.get("spread_bps", pd.Series(0.0, index=ret.index)), errors="coerce").fillna(0.0),
+            "atr_14": pd.to_numeric(features_aligned.get("atr_14", pd.Series(np.nan, index=ret.index)), errors="coerce"),
+            "quote_volume": pd.to_numeric(features_aligned.get("quote_volume", pd.Series(np.nan, index=ret.index)), errors="coerce"),
+            "close": close.reindex(ret.index).astype(float),
+            "high": high.reindex(ret.index).astype(float),
+            "low": low.reindex(ret.index).astype(float),
+        },
+        index=ret.index,
+    )
+    dynamic_cost_bps = estimate_transaction_cost_bps(frame=frame_for_cost, turnover=turnover, config=execution_cfg)
     pnl_components = compute_pnl_components(
-        positions,
+        scaled_positions,
         ret,
-        cost_bps,
+        dynamic_cost_bps,
         funding_rate=funding_series if use_carry_components else None,
         borrow_rate=borrow_series if use_carry_components else None,
     )
@@ -303,7 +344,10 @@ def _strategy_returns(
             "timestamp": ret.index,
             "symbol": symbol,
             "pos": positions.values,
-            "ret": ret.values,
+            "requested_position_scale": float(requested_position_scale),
+            "allocated_position_scale": float(requested_position_scale),
+            "dynamic_cost_bps": dynamic_cost_bps.values,
+            "ret": (ret * requested_position_scale).values,
             "pnl": pnl.values,
             "gross_pnl": pnl_components["gross_pnl"].values,
             "trading_cost": pnl_components["trading_cost"].values,
@@ -320,6 +364,7 @@ def _strategy_returns(
             "fp_norm_due": features_aligned["fp_norm_due"].fillna(0).astype(int).values if "fp_norm_due" in features_aligned.columns else np.zeros(len(ret), dtype=int),
             "entry_reason": [entry_reason_map.get(t, "") for t in ret.index],
             "exit_signal_reason": [exit_reason_map.get(t, "") for t in ret.index],
+            "position_scale": float(requested_position_scale),
         }
     )
     total_bars = int(len(ret))
@@ -330,17 +375,113 @@ def _strategy_returns(
         "missing_feature_bars": int(missing_feature_mask.sum()),
         "ineligible_universe_bars": int(ineligible_bars),
         "overlay_stats": overlay_stats,
+        "effective_avg_cost_bps": float(dynamic_cost_bps.mean()) if len(dynamic_cost_bps) else 0.0,
         "nan_return_pct": float(nan_ret_mask.mean()) if total_bars else 0.0,
         "forced_flat_pct": float(forced_flat_bars / total_bars) if total_bars else 0.0,
         "missing_feature_pct": float(missing_feature_mask.mean()) if total_bars else 0.0,
         "missing_feature_columns": missing_feature_columns,
     }
+    prior_pos = df["pos"].shift(1).fillna(0).astype(int)
+    trace = pd.DataFrame(
+        {
+            "timestamp": df["timestamp"],
+            "symbol": symbol,
+            "strategy_id": strategy_name,
+            "state": np.where(df["pos"] == 0, "flat", "in_position"),
+            "entry_candidate": ((prior_pos == 0) & (df["pos"] != 0)).astype(int),
+            "entry_allowed": ((prior_pos == 0) & (df["pos"] != 0)).astype(int),
+            "entry_block_reason": "",
+            "condition_hits": "{}",
+            "overlay_actions": "{}",
+            "exit_candidate": ((prior_pos != 0) & (df["pos"] == 0)).astype(int),
+            "exit_reason": df["exit_signal_reason"].fillna("").astype(str),
+            "stop_price": np.nan,
+            "target_price": np.nan,
+            "requested_scale": df["requested_position_scale"].astype(float),
+            "allocated_scale": df["allocated_position_scale"].astype(float),
+        }
+    )
     return StrategyResult(
         name=strategy_name,
         data=df,
         diagnostics=diagnostics,
         strategy_metadata=strategy_metadata if isinstance(strategy_metadata, dict) else {},
+        trace=trace,
     )
+
+
+def _apply_allocator_to_strategy_frames(
+    strategy_frames: Dict[str, pd.DataFrame],
+    *,
+    params: Dict[str, object],
+    params_by_strategy: Optional[Dict[str, Dict[str, object]]] = None,
+) -> Tuple[Dict[str, pd.DataFrame], Dict[str, float]]:
+    if not strategy_frames:
+        return strategy_frames, {"requested_gross": 0.0, "allocated_gross": 0.0, "clipped_fraction": 0.0}
+
+    alloc_cfg = dict(params.get("risk_allocator", {})) if isinstance(params.get("risk_allocator", {}), dict) else {}
+    limits = RiskLimits(
+        max_portfolio_gross=float(alloc_cfg.get("max_portfolio_gross", 1.0)),
+        max_symbol_gross=float(alloc_cfg.get("max_symbol_gross", 1.0)),
+        max_strategy_gross=float(alloc_cfg.get("max_strategy_gross", 1.0)),
+        max_new_exposure_per_bar=float(alloc_cfg.get("max_new_exposure_per_bar", 1.0)),
+    )
+    if any(v <= 0.0 for v in [limits.max_portfolio_gross, limits.max_symbol_gross, limits.max_strategy_gross, limits.max_new_exposure_per_bar]):
+        return strategy_frames, {"requested_gross": 0.0, "allocated_gross": 0.0, "clipped_fraction": 0.0}
+
+    out = {k: v.copy() for k, v in strategy_frames.items()}
+    symbols = sorted(
+        {
+            str(sym)
+            for frame in out.values()
+            if not frame.empty and "symbol" in frame.columns
+            for sym in frame["symbol"].dropna().astype(str).unique().tolist()
+        }
+    )
+    agg_diag = {"requested_gross": 0.0, "allocated_gross": 0.0, "clipped_fraction": 0.0}
+    for symbol in symbols:
+        pos_by_strategy: Dict[str, pd.Series] = {}
+        req_scale_by_strategy: Dict[str, pd.Series] = {}
+        for strategy_name in sorted(out.keys()):
+            frame = out[strategy_name]
+            sub = frame[frame["symbol"].astype(str) == symbol].copy() if (not frame.empty and "symbol" in frame.columns) else pd.DataFrame()
+            if sub.empty:
+                continue
+            sub = sub.sort_values("timestamp")
+            idx = pd.DatetimeIndex(pd.to_datetime(sub["timestamp"], utc=True))
+            pos_by_strategy[strategy_name] = pd.Series(pd.to_numeric(sub["pos"], errors="coerce").fillna(0.0).values, index=idx, dtype=float)
+            requested = pd.to_numeric(sub.get("requested_position_scale", sub.get("position_scale", 1.0)), errors="coerce").fillna(1.0)
+            req_scale_by_strategy[strategy_name] = pd.Series(requested.values, index=idx, dtype=float)
+        if not pos_by_strategy:
+            continue
+        alloc_scales, diag = allocate_position_scales(
+            raw_positions_by_strategy=pos_by_strategy,
+            requested_scale_by_strategy=req_scale_by_strategy,
+            limits=limits,
+        )
+        agg_diag["requested_gross"] += float(diag.get("requested_gross", 0.0))
+        agg_diag["allocated_gross"] += float(diag.get("allocated_gross", 0.0))
+        for strategy_name, scale_series in alloc_scales.items():
+            frame = out[strategy_name]
+            mask = frame["symbol"].astype(str) == symbol
+            if not mask.any():
+                continue
+            sub = frame.loc[mask].copy().sort_values("timestamp")
+            idx = pd.DatetimeIndex(pd.to_datetime(sub["timestamp"], utc=True))
+            new_scale = scale_series.reindex(idx).fillna(0.0).values.astype(float)
+            old_scale = pd.to_numeric(sub.get("position_scale", 1.0), errors="coerce").fillna(1.0).values.astype(float)
+            ratio = np.divide(new_scale, np.where(old_scale == 0.0, np.nan, old_scale))
+            ratio = np.nan_to_num(ratio, nan=0.0, posinf=0.0, neginf=0.0)
+            for col in ["ret", "pnl", "gross_pnl", "trading_cost", "funding_pnl", "borrow_cost"]:
+                if col in sub.columns:
+                    sub[col] = pd.to_numeric(sub[col], errors="coerce").fillna(0.0).values * ratio
+            sub["allocated_position_scale"] = new_scale
+            sub["position_scale"] = new_scale
+            out[strategy_name].loc[sub.index, :] = sub
+    req = float(agg_diag["requested_gross"])
+    alloc = float(agg_diag["allocated_gross"])
+    agg_diag["clipped_fraction"] = 0.0 if req <= 0 else float(max(0.0, (req - alloc) / req))
+    return out, agg_diag
 
 
 def _aggregate_strategy(results: Iterable[pd.DataFrame]) -> pd.DataFrame:
@@ -477,11 +618,14 @@ def run_engine(
     cost_bps: float,
     data_root: Path = DATA_ROOT,
     params_by_strategy: Optional[Dict[str, Dict[str, object]]] = None,
+    start_ts: pd.Timestamp | None = None,
+    end_ts: pd.Timestamp | None = None,
 ) -> Dict[str, object]:
     engine_dir = data_root / "runs" / run_id / "engine"
     ensure_dir(engine_dir)
 
     strategy_frames: Dict[str, pd.DataFrame] = {}
+    strategy_traces: Dict[str, pd.DataFrame] = {}
     metrics: Dict[str, object] = {"strategies": {}}
 
     overlays = [str(o).strip() for o in params.get("overlays", []) if str(o).strip()]
@@ -490,7 +634,13 @@ def run_engine(
     for strategy_name in strategies:
         symbol_results: List[StrategyResult] = []
         for symbol in symbols:
-            bars, features = _load_symbol_data(data_root, symbol, run_id=run_id)
+            bars, features = _load_symbol_data(
+                data_root,
+                symbol,
+                run_id=run_id,
+                start_ts=start_ts,
+                end_ts=end_ts,
+            )
             strategy_params = params_by_strategy.get(strategy_name, params) if params_by_strategy else params
             eligibility_mask = _symbol_eligibility_mask(bars["timestamp"], symbol, universe_snapshots)
             result = _strategy_returns(
@@ -508,6 +658,29 @@ def run_engine(
         strategy_frames[strategy_name] = combined
         out_path = engine_dir / f"strategy_returns_{strategy_name}.csv"
         combined.to_csv(out_path, index=False)
+        traces = [res.trace for res in symbol_results if isinstance(res.trace, pd.DataFrame) and not res.trace.empty]
+        if traces:
+            strategy_traces[strategy_name] = pd.concat(traces, ignore_index=True).sort_values(["timestamp", "symbol"]).reset_index(drop=True)
+        else:
+            strategy_traces[strategy_name] = pd.DataFrame(
+                columns=[
+                    "timestamp",
+                    "symbol",
+                    "strategy_id",
+                    "state",
+                    "entry_candidate",
+                    "entry_allowed",
+                    "entry_block_reason",
+                    "condition_hits",
+                    "overlay_actions",
+                    "exit_candidate",
+                    "exit_reason",
+                    "stop_price",
+                    "target_price",
+                    "requested_scale",
+                    "allocated_scale",
+                ]
+            )
 
         pnl_series = combined.groupby("timestamp")["pnl"].sum()
         summary = _summarize_pnl(pnl_series)
@@ -558,12 +731,43 @@ def run_engine(
             "symbols": symbol_bindings,
         }
 
+    strategy_frames, allocator_diag = _apply_allocator_to_strategy_frames(
+        strategy_frames=strategy_frames,
+        params=params,
+        params_by_strategy=params_by_strategy,
+    )
+    for strategy_name, frame in strategy_frames.items():
+        out_path = engine_dir / f"strategy_returns_{strategy_name}.csv"
+        frame.to_csv(out_path, index=False)
+        trace = strategy_traces.get(strategy_name, pd.DataFrame())
+        if not trace.empty and "allocated_scale" in trace.columns and "allocated_position_scale" in frame.columns:
+            scale_lookup = frame[["timestamp", "symbol", "allocated_position_scale"]].copy()
+            scale_lookup["timestamp"] = pd.to_datetime(scale_lookup["timestamp"], utc=True)
+            trace = trace.copy()
+            trace["timestamp"] = pd.to_datetime(trace["timestamp"], utc=True)
+            trace = trace.merge(scale_lookup, on=["timestamp", "symbol"], how="left")
+            trace["allocated_scale"] = pd.to_numeric(trace["allocated_position_scale"], errors="coerce").fillna(trace["allocated_scale"])
+            trace = trace.drop(columns=["allocated_position_scale"])
+            strategy_traces[strategy_name] = trace
+
+    for strategy_name, trace in strategy_traces.items():
+        trace_path = engine_dir / f"strategy_trace_{strategy_name}.csv"
+        trace.to_csv(trace_path, index=False)
+
+    for strategy_name, frame in strategy_frames.items():
+        pnl_series = frame.groupby("timestamp")["pnl"].sum() if (not frame.empty and "pnl" in frame.columns) else pd.Series(dtype=float)
+        metrics["strategies"][strategy_name] = {
+            **_summarize_pnl(pnl_series),
+            "entries": _entry_count(frame) if not frame.empty else 0,
+        }
+
     portfolio = _aggregate_portfolio(strategy_frames)
     portfolio_path = engine_dir / "portfolio_returns.csv"
     portfolio.to_csv(portfolio_path, index=False)
 
     portfolio_summary = _summarize_pnl(portfolio["portfolio_pnl"]) if not portfolio.empty else _summarize_pnl(pd.Series(dtype=float))
     metrics["portfolio"] = portfolio_summary
+    metrics.setdefault("diagnostics", {})["allocator"] = allocator_diag
 
     metrics_path = engine_dir / "metrics.json"
     metrics_path.write_text(json.dumps(metrics, indent=2, sort_keys=True), encoding="utf-8")
@@ -571,6 +775,7 @@ def run_engine(
     return {
         "engine_dir": engine_dir,
         "strategy_frames": strategy_frames,
+        "strategy_traces": strategy_traces,
         "portfolio": portfolio,
         "metrics": metrics,
         "diagnostics": metrics.get("diagnostics", {}),

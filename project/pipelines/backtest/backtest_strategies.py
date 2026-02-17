@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -24,6 +25,17 @@ from pipelines._lib.validation import strategy_family_allowed_keys, validate_str
 from engine.pnl import compute_pnl
 from engine.runner import run_engine
 from strategies.overlay_registry import apply_overlay
+from strategy_dsl.schema import (
+    Blueprint,
+    ConditionNodeSpec,
+    EntrySpec,
+    EvaluationSpec,
+    ExitSpec,
+    LineageSpec,
+    OverlaySpec,
+    SizingSpec,
+    SymbolScopeSpec,
+)
 
 INITIAL_EQUITY = 1_000_000.0
 BARS_PER_YEAR_15M = 365 * 24 * 4
@@ -37,6 +49,7 @@ STRATEGY_EXECUTION_FAMILY = {
     "cross_venue_desync_v1": "spread",
     "liquidity_vacuum_v1": "mean_reversion",
     "onchain_flow_v1": "onchain",
+    "dsl_interpreter_v1": "dsl",
 }
 
 
@@ -125,6 +138,189 @@ def _build_strategy_params_by_name(
             strategy_params = apply_overlay(overlay_name, strategy_params)
         strategy_params_by_name[strategy_name] = strategy_params
     return base_strategy_params, strategy_params_by_name
+
+
+def _sanitize_id(value: str) -> str:
+    return re.sub(r"[^a-z0-9_]+", "_", str(value).strip().lower()).strip("_")
+
+
+def _blueprint_from_dict(raw: Dict[str, object]) -> Blueprint:
+    scope = raw.get("symbol_scope", {})
+    entry = raw.get("entry", {})
+    exit_spec = raw.get("exit", {})
+    sizing = raw.get("sizing", {})
+    eval_spec = raw.get("evaluation", {})
+    lineage = raw.get("lineage", {})
+    overlays = raw.get("overlays", [])
+    if not isinstance(scope, dict) or not isinstance(entry, dict) or not isinstance(exit_spec, dict):
+        raise ValueError("Blueprint is missing required nested objects")
+    overlay_rows: List[OverlaySpec] = []
+    condition_nodes: List[ConditionNodeSpec] = []
+    if isinstance(overlays, list):
+        for row in overlays:
+            if not isinstance(row, dict):
+                raise ValueError("Blueprint overlay entry must be an object")
+            overlay_rows.append(OverlaySpec(name=str(row.get("name", "")), params=dict(row.get("params", {}))))
+    raw_nodes = entry.get("condition_nodes", [])
+    if isinstance(raw_nodes, list):
+        for row in raw_nodes:
+            if not isinstance(row, dict):
+                raise ValueError("Blueprint entry.condition_nodes[] entry must be an object")
+            condition_nodes.append(
+                ConditionNodeSpec(
+                    feature=str(row.get("feature", "")),
+                    operator=str(row.get("operator", "")),  # type: ignore[arg-type]
+                    value=float(row.get("value", 0.0)),
+                    value_high=(None if row.get("value_high") is None else float(row.get("value_high"))),
+                    lookback_bars=int(row.get("lookback_bars", 0)),
+                    window_bars=int(row.get("window_bars", 0)),
+                )
+            )
+    bp = Blueprint(
+        id=str(raw.get("id", "")),
+        run_id=str(raw.get("run_id", "")),
+        event_type=str(raw.get("event_type", "")),
+        candidate_id=str(raw.get("candidate_id", "")),
+        symbol_scope=SymbolScopeSpec(
+            mode=str(scope.get("mode", "")),  # type: ignore[arg-type]
+            symbols=[str(x) for x in scope.get("symbols", [])] if isinstance(scope.get("symbols", []), list) else [],
+            candidate_symbol=str(scope.get("candidate_symbol", "")),
+        ),
+        direction=str(raw.get("direction", "")),  # type: ignore[arg-type]
+        entry=EntrySpec(
+            triggers=[str(x) for x in entry.get("triggers", [])] if isinstance(entry.get("triggers", []), list) else [],
+            conditions=[str(x) for x in entry.get("conditions", [])] if isinstance(entry.get("conditions", []), list) else [],
+            confirmations=[str(x) for x in entry.get("confirmations", [])] if isinstance(entry.get("confirmations", []), list) else [],
+            delay_bars=int(entry.get("delay_bars", 0)),
+            cooldown_bars=int(entry.get("cooldown_bars", 0)),
+            condition_logic=str(entry.get("condition_logic", "all")),  # type: ignore[arg-type]
+            condition_nodes=condition_nodes,
+            arm_bars=int(entry.get("arm_bars", 0)),
+            reentry_lockout_bars=int(entry.get("reentry_lockout_bars", 0)),
+        ),
+        exit=ExitSpec(
+            time_stop_bars=int(exit_spec.get("time_stop_bars", 0)),
+            invalidation=dict(exit_spec.get("invalidation", {})),
+            stop_type=str(exit_spec.get("stop_type", "")),  # type: ignore[arg-type]
+            stop_value=float(exit_spec.get("stop_value", 0.0)),
+            target_type=str(exit_spec.get("target_type", "")),  # type: ignore[arg-type]
+            target_value=float(exit_spec.get("target_value", 0.0)),
+            trailing_stop_type=str(exit_spec.get("trailing_stop_type", "none")),  # type: ignore[arg-type]
+            trailing_stop_value=float(exit_spec.get("trailing_stop_value", 0.0)),
+            break_even_r=float(exit_spec.get("break_even_r", 0.0)),
+        ),
+        sizing=SizingSpec(
+            mode=str(sizing.get("mode", "")),  # type: ignore[arg-type]
+            risk_per_trade=(None if sizing.get("risk_per_trade") is None else float(sizing.get("risk_per_trade"))),
+            target_vol=(None if sizing.get("target_vol") is None else float(sizing.get("target_vol"))),
+            max_gross_leverage=float(sizing.get("max_gross_leverage", 0.0)),
+            max_position_scale=float(sizing.get("max_position_scale", 1.0)),
+            portfolio_risk_budget=float(sizing.get("portfolio_risk_budget", 1.0)),
+            symbol_risk_budget=float(sizing.get("symbol_risk_budget", 1.0)),
+        ),
+        overlays=overlay_rows,
+        evaluation=EvaluationSpec(
+            min_trades=int(eval_spec.get("min_trades", 0)),
+            cost_model=dict(eval_spec.get("cost_model", {})),
+            robustness_flags=dict(eval_spec.get("robustness_flags", {})),
+        ),
+        lineage=LineageSpec(
+            source_path=str(lineage.get("source_path", "")),
+            compiler_version=str(lineage.get("compiler_version", "")),
+            generated_at_utc=str(lineage.get("generated_at_utc", "")),
+        ),
+    )
+    bp.validate()
+    return bp
+
+
+def _blueprint_position_scale(base_weight: float, bp: Blueprint) -> float:
+    caps = [
+        float(base_weight),
+        float(bp.sizing.max_position_scale),
+        float(bp.sizing.portfolio_risk_budget),
+        float(bp.sizing.symbol_risk_budget),
+    ]
+    scale = min(caps)
+    return float(max(0.0, scale))
+
+
+def _load_blueprints(path: Path) -> List[Blueprint]:
+    if not path.exists():
+        raise ValueError(f"Blueprint file not found: {path}")
+    text = path.read_text(encoding="utf-8")
+    blueprints: List[Blueprint] = []
+    if path.suffix.lower() == ".json":
+        payload = json.loads(text)
+        if not isinstance(payload, list):
+            raise ValueError("Blueprint JSON must be an array")
+        for idx, row in enumerate(payload, start=1):
+            if not isinstance(row, dict):
+                raise ValueError(f"Invalid blueprint at index {idx}: expected object")
+            try:
+                blueprints.append(_blueprint_from_dict(row))
+            except Exception as exc:
+                bp_id = row.get("id", "<unknown>")
+                raise ValueError(f"Invalid blueprint at index {idx} (id={bp_id}): {exc}") from exc
+    else:
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except Exception as exc:
+                raise ValueError(f"Invalid blueprint at line {line_no}: invalid JSON ({exc})") from exc
+            if not isinstance(row, dict):
+                raise ValueError(f"Invalid blueprint at line {line_no}: expected object")
+            try:
+                blueprints.append(_blueprint_from_dict(row))
+            except Exception as exc:
+                bp_id = row.get("id", "<unknown>")
+                raise ValueError(f"Invalid blueprint at line {line_no} (id={bp_id}): {exc}") from exc
+    if not blueprints:
+        raise ValueError(f"No blueprint rows found in {path}")
+    return blueprints
+
+
+def _filter_blueprints(
+    blueprints: List[Blueprint],
+    event_type: str,
+    top_k: int,
+    cli_symbols: List[str],
+) -> List[Blueprint]:
+    filtered = blueprints
+    if event_type != "all":
+        filtered = [bp for bp in filtered if bp.event_type == event_type]
+    selected: List[Blueprint] = []
+    cli_set = {s.upper() for s in cli_symbols}
+    for bp in filtered:
+        scope_symbols = [str(s).strip().upper() for s in bp.symbol_scope.symbols if str(s).strip()]
+        if cli_set:
+            scope_symbols = [s for s in scope_symbols if s in cli_set]
+        if not scope_symbols:
+            continue
+        new_bp = Blueprint(
+            id=bp.id,
+            run_id=bp.run_id,
+            event_type=bp.event_type,
+            candidate_id=bp.candidate_id,
+            symbol_scope=SymbolScopeSpec(
+                mode=bp.symbol_scope.mode,
+                symbols=scope_symbols,
+                candidate_symbol=bp.symbol_scope.candidate_symbol,
+            ),
+            direction=bp.direction,
+            entry=bp.entry,
+            exit=bp.exit,
+            sizing=bp.sizing,
+            overlays=bp.overlays,
+            evaluation=bp.evaluation,
+            lineage=bp.lineage,
+        )
+        selected.append(new_bp)
+        if len(selected) >= max(1, int(top_k)):
+            break
+    return selected
 
 
 
@@ -389,12 +585,19 @@ def _cost_components_from_frame(
             "fees": 0.0,
             "slippage": 0.0,
             "impact": 0.0,
+            "dynamic_slippage": 0.0,
+            "dynamic_impact": 0.0,
+            "effective_avg_cost_bps": 0.0,
             "funding_pnl": 0.0,
             "borrow_cost": 0.0,
             "net_alpha": 0.0,
             "turnover_units": 0.0,
         }
-    pos = pd.to_numeric(frame["pos"], errors="coerce").fillna(0.0)
+    if "position_scale" in frame.columns:
+        position_scale = pd.to_numeric(frame["position_scale"], errors="coerce").fillna(1.0)
+    else:
+        position_scale = pd.Series(1.0, index=frame.index, dtype=float)
+    pos = pd.to_numeric(frame["pos"], errors="coerce").fillna(0.0) * position_scale
     ret = pd.to_numeric(frame["ret"], errors="coerce").fillna(0.0)
     prior_pos = pos.shift(1).fillna(0.0)
     turnover = (pos - prior_pos).abs()
@@ -402,6 +605,13 @@ def _cost_components_from_frame(
     fee_cost = float(turnover.sum() * (float(fee_bps) / 10_000.0))
     slippage_cost = float(turnover.sum() * (float(slippage_bps) / 10_000.0))
     impact_cost = float(turnover.sum() * (float(impact_bps) / 10_000.0))
+    if "dynamic_cost_bps" in frame.columns:
+        dynamic_cost_bps = pd.to_numeric(frame["dynamic_cost_bps"], errors="coerce").fillna(0.0)
+        dynamic_cost = float((turnover * (dynamic_cost_bps / 10_000.0)).sum())
+        effective_avg_cost_bps = float(dynamic_cost_bps.mean()) if len(dynamic_cost_bps) else 0.0
+    else:
+        dynamic_cost = float(slippage_cost + impact_cost)
+        effective_avg_cost_bps = float(fee_bps + slippage_bps + impact_bps)
     funding_series = frame["funding_pnl"] if "funding_pnl" in frame.columns else pd.Series(0.0, index=frame.index)
     borrow_series = frame["borrow_cost"] if "borrow_cost" in frame.columns else pd.Series(0.0, index=frame.index)
     funding_component = float(pd.to_numeric(funding_series, errors="coerce").fillna(0.0).sum())
@@ -412,6 +622,9 @@ def _cost_components_from_frame(
         "fees": fee_cost,
         "slippage": slippage_cost,
         "impact": impact_cost,
+        "dynamic_slippage": dynamic_cost,
+        "dynamic_impact": max(0.0, dynamic_cost - slippage_cost),
+        "effective_avg_cost_bps": effective_avg_cost_bps,
         "funding_pnl": funding_component,
         "borrow_cost": borrow_component,
         "net_alpha": net,
@@ -430,6 +643,9 @@ def _aggregate_cost_components(
         "fees": 0.0,
         "slippage": 0.0,
         "impact": 0.0,
+        "dynamic_slippage": 0.0,
+        "dynamic_impact": 0.0,
+        "effective_avg_cost_bps": 0.0,
         "funding_pnl": 0.0,
         "borrow_cost": 0.0,
         "net_alpha": 0.0,
@@ -439,6 +655,8 @@ def _aggregate_cost_components(
         comp = _cost_components_from_frame(frame, fee_bps=fee_bps, slippage_bps=slippage_bps, impact_bps=impact_bps)
         for key in totals:
             totals[key] += float(comp.get(key, 0.0))
+    n = max(1, len(strategy_frames))
+    totals["effective_avg_cost_bps"] = float(totals["effective_avg_cost_bps"] / n)
     return totals
 
 
@@ -446,10 +664,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Backtest registered strategies")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
+    parser.add_argument("--start", default=None, help="Optional inclusive UTC start timestamp/date for backtest window")
+    parser.add_argument("--end", default=None, help="Optional inclusive UTC end timestamp/date for backtest window")
     parser.add_argument("--fees_bps", type=float, default=None)
     parser.add_argument("--slippage_bps", type=float, default=None)
     parser.add_argument("--cost_bps", type=float, default=None)
-    parser.add_argument("--strategies", required=True)
+    parser.add_argument("--strategies", default=None)
+    parser.add_argument("--blueprints_path", default=None)
+    parser.add_argument("--blueprints_top_k", type=int, default=10)
+    parser.add_argument("--blueprints_filter_event_type", default="all")
     parser.add_argument("--overlays", default="")
     parser.add_argument("--force", type=int, default=0)
     parser.add_argument("--config", action="append", default=[])
@@ -475,20 +698,40 @@ def main() -> int:
     )
     trade_day_timezone = str(config.get("trade_day_timezone", "UTC"))
     cost_bps = float(args.cost_bps) if args.cost_bps is not None else float(fee_bps + slippage_bps)
-    strategies = [s.strip() for s in args.strategies.split(",") if s.strip()]
-    if not strategies:
-        raise ValueError("No strategies provided. Pass --strategies with at least one strategy id.")
+    strategy_mode = bool(args.strategies and str(args.strategies).strip())
+    blueprint_mode = bool(args.blueprints_path and str(args.blueprints_path).strip())
+    if strategy_mode and blueprint_mode:
+        print("Invalid arguments: --strategies and --blueprints_path are mutually exclusive.", file=sys.stderr)
+        return 1
+    if not strategy_mode and not blueprint_mode:
+        print("Provide either --strategies or --blueprints_path.", file=sys.stderr)
+        return 1
 
     overlays = [o.strip() for o in str(args.overlays).split(",") if o.strip()]
+    strategies: List[str] = []
+    blueprint_ids: List[str] = []
+    selected_blueprints: List[Blueprint] = []
+    blueprint_source_path = str(args.blueprints_path or "")
+    if strategy_mode:
+        strategies = [s.strip() for s in str(args.strategies).split(",") if s.strip()]
+        if not strategies:
+            print("No strategies provided. Pass --strategies with at least one strategy id.", file=sys.stderr)
+            return 1
     params = {
         "fee_bps_per_side": fee_bps,
         "slippage_bps_per_fill": slippage_bps,
         "trade_day_timezone": trade_day_timezone,
+        "start": str(args.start) if args.start is not None else "",
+        "end": str(args.end) if args.end is not None else "",
         "symbols": symbols,
         "force": int(args.force),
         "cost_bps": cost_bps,
         "strategies": strategies,
         "overlays": overlays,
+        "blueprints_path": blueprint_source_path if blueprint_mode else "",
+        "blueprints_top_k": int(args.blueprints_top_k),
+        "blueprints_filter_event_type": str(args.blueprints_filter_event_type),
+        "execution_mode": "blueprint" if blueprint_mode else "strategy",
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
@@ -496,6 +739,27 @@ def main() -> int:
     stats: Dict[str, object] = {"symbols": {}}
 
     try:
+        start_ts = pd.to_datetime(args.start, utc=True) if args.start else None
+        end_ts = pd.to_datetime(args.end, utc=True) if args.end else None
+        if start_ts is not None and end_ts is not None and start_ts > end_ts:
+            raise ValueError("--start must be <= --end")
+
+        if blueprint_mode:
+            raw_blueprints = _load_blueprints(Path(str(args.blueprints_path)))
+            selected_blueprints = _filter_blueprints(
+                blueprints=raw_blueprints,
+                event_type=str(args.blueprints_filter_event_type or "all"),
+                top_k=int(args.blueprints_top_k),
+                cli_symbols=symbols,
+            )
+            if not selected_blueprints:
+                raise ValueError("No blueprints selected after applying filters/top-k and symbol intersection.")
+            for bp in selected_blueprints:
+                strategy_id = f"dsl_interpreter_v1__{_sanitize_id(bp.id)}"
+                strategies.append(strategy_id)
+                blueprint_ids.append(bp.id)
+            params["strategies"] = list(strategies)
+
         trades_dir = DATA_ROOT / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id
         trades_dir.mkdir(parents=True, exist_ok=True)
 
@@ -503,12 +767,25 @@ def main() -> int:
             finalize_manifest(manifest, "success", stats={"skipped": True})
             return 0
 
-        base_strategy_params, strategy_params_by_name = _build_strategy_params_by_name(
-            strategies=strategies,
-            config=config,
-            trade_day_timezone=trade_day_timezone,
-            overlays=overlays,
-        )
+        if strategy_mode:
+            base_strategy_params, strategy_params_by_name = _build_strategy_params_by_name(
+                strategies=strategies,
+                config=config,
+                trade_day_timezone=trade_day_timezone,
+                overlays=overlays,
+            )
+        else:
+            base_strategy_params = _build_base_strategy_params(config, trade_day_timezone)
+            strategy_params_by_name = {}
+            bp_map = {f"dsl_interpreter_v1__{_sanitize_id(bp.id)}": bp for bp in selected_blueprints}
+            strategy_weight = 1.0 / float(len(selected_blueprints))
+            for strategy_name in strategies:
+                bp = bp_map[strategy_name]
+                strategy_params = dict(base_strategy_params)
+                strategy_params["position_scale"] = _blueprint_position_scale(base_weight=strategy_weight, bp=bp)
+                strategy_params["dsl_blueprint"] = bp.to_dict()
+                strategy_params["strategy_family"] = "DSL"
+                strategy_params_by_name[strategy_name] = strategy_params
 
         engine_results = run_engine(
             run_id=run_id,
@@ -518,12 +795,21 @@ def main() -> int:
             cost_bps=cost_bps,
             data_root=DATA_ROOT,
             params_by_strategy=strategy_params_by_name,
+            start_ts=start_ts,
+            end_ts=end_ts,
         )
 
         for strategy_name in strategies:
             strategy_path = engine_results["engine_dir"] / f"strategy_returns_{strategy_name}.csv"
             strategy_rows = len(engine_results["strategy_frames"].get(strategy_name, pd.DataFrame()))
             outputs.append({"path": str(strategy_path), "rows": strategy_rows, "start_ts": None, "end_ts": None})
+            trace_path = engine_results["engine_dir"] / f"strategy_trace_{strategy_name}.csv"
+            if trace_path.exists():
+                try:
+                    trace_rows = len(pd.read_csv(trace_path))
+                except Exception:
+                    trace_rows = 0
+                outputs.append({"path": str(trace_path), "rows": trace_rows, "start_ts": None, "end_ts": None})
 
         portfolio = engine_results["portfolio"]
         portfolio_path = engine_results["engine_dir"] / "portfolio_returns.csv"
@@ -584,6 +870,11 @@ def main() -> int:
             "metadata": {
                 "strategy_ids": strategies,
                 "execution_family": _execution_family_for_strategies(strategies),
+                "execution_mode": "blueprint" if blueprint_mode else "strategy",
+                "blueprint_ids": blueprint_ids,
+                "blueprint_source_path": blueprint_source_path if blueprint_mode else "",
+                "blueprint_filter_event_type": str(args.blueprints_filter_event_type) if blueprint_mode else "",
+                "blueprint_top_k": int(args.blueprints_top_k) if blueprint_mode else 0,
             },
             "cost_decomposition": _aggregate_cost_components(
                 engine_results["strategy_frames"],
@@ -627,7 +918,11 @@ def main() -> int:
             for _, frame in engine_results["strategy_frames"].items():
                 for _, symbol_frame in frame.groupby("symbol", sort=True):
                     indexed = symbol_frame.set_index("timestamp")
-                    pos = indexed["pos"]
+                    if "position_scale" in indexed.columns:
+                        scale_series = pd.to_numeric(indexed["position_scale"], errors="coerce").fillna(1.0)
+                    else:
+                        scale_series = 1.0
+                    pos = indexed["pos"] * scale_series
                     ret = indexed["ret"]
                     pnl = compute_pnl(pos, ret, scenario_cost)
                     scenario_pnl_frames.append(pnl)

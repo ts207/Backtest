@@ -12,7 +12,7 @@ END ?= 2025-07-10
 STRATEGIES ?=
 ENABLE_CROSS_VENUE_SPOT_PIPELINE ?= 0
 
-.PHONY: help run baseline discover-edges discover-edges-from-raw discover-hybrid discover-hybrid-backtest test compile clean-runtime clean-all-data clean-repo check-hygiene clean-hygiene
+.PHONY: help run baseline discover-edges discover-edges-from-raw discover-hybrid discover-hybrid-backtest test compile clean-runtime clean-all-data clean-repo debloat check-hygiene clean-hygiene
 
 help:
 	@echo "Targets:"
@@ -28,6 +28,7 @@ help:
 	@echo "  clean-runtime     - clean run/report artifacts"
 	@echo "  clean-all-data    - clean all local data artifacts"
 	@echo "  clean-repo        - clean local runtime/cache artifacts in repo tree"
+	@echo "  debloat           - alias for clean-repo"
 	@echo "  check-hygiene     - enforce repo hygiene constraints"
 	@echo "  clean-hygiene     - remove local sidecar metadata files"
 
@@ -123,6 +124,8 @@ clean-all-data:
 
 clean-repo:
 	$(CLEAN_SCRIPT) repo
+
+debloat: clean-repo
 
 check-hygiene:
 	$(ROOT_DIR)/project/scripts/check_repo_hygiene.sh

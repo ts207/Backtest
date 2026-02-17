@@ -136,3 +136,56 @@ def test_symbol_specific_strategy_name_is_resolvable() -> None:
     assert metadata.get("strategy_id") == "funding_extreme_reversal_v1_BTCUSDT"
     assert metadata.get("strategy_symbol") == "BTCUSDT"
     assert metadata.get("base_strategy_id") == "funding_extreme_reversal_v1"
+
+
+def test_blueprint_alias_strategy_name_is_resolvable() -> None:
+    bars, features = _sample_bars_and_features()
+    strategy = get_strategy("dsl_interpreter_v1__wf_demo_bp_1")
+    out = strategy.generate_positions(
+        bars,
+        features,
+        params={
+            "strategy_symbol": "BTCUSDT",
+            "dsl_blueprint": {
+                "id": "wf_demo_bp_1",
+                "run_id": "r",
+                "event_type": "vol_shock_relaxation",
+                "candidate_id": "c",
+                "symbol_scope": {"mode": "single_symbol", "symbols": ["BTCUSDT"], "candidate_symbol": "BTCUSDT"},
+                "direction": "conditional",
+                "entry": {
+                    "triggers": ["bar_close"],
+                    "conditions": ["all"],
+                    "confirmations": [],
+                    "delay_bars": 0,
+                    "cooldown_bars": 1,
+                },
+                "exit": {
+                    "time_stop_bars": 4,
+                    "invalidation": {"metric": "fp_severity", "operator": ">", "value": 9},
+                    "stop_type": "percent",
+                    "stop_value": 0.01,
+                    "target_type": "percent",
+                    "target_value": 0.02,
+                },
+                "sizing": {"mode": "fixed_risk", "risk_per_trade": 0.004, "target_vol": None, "max_gross_leverage": 1.0},
+                "overlays": [],
+                "evaluation": {
+                    "min_trades": 10,
+                    "cost_model": {"fees_bps": 3.0, "slippage_bps": 1.0, "funding_included": True},
+                    "robustness_flags": {
+                        "oos_required": True,
+                        "multiplicity_required": True,
+                        "regime_stability_required": True,
+                    },
+                },
+                "lineage": {"source_path": "x", "compiler_version": "v1", "generated_at_utc": "1970-01-01T00:00:00Z"},
+            },
+        },
+    )
+
+    assert len(out) == len(bars)
+    assert "strategy_metadata" in out.attrs
+    metadata = out.attrs["strategy_metadata"]
+    assert metadata.get("strategy_id") == "dsl_interpreter_v1__wf_demo_bp_1"
+    assert metadata.get("base_strategy_id") == "dsl_interpreter_v1"
