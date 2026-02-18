@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -300,6 +301,7 @@ def _build_promoted_strategy_candidate(
     )
     if selection_score <= 0.0:
         selection_score = _safe_float(promotion.get("symbol_pass_rate"), 0.0)
+    expectancy_after_multiplicity = _safe_float(split_pnl.get("validation"), selection_score)
     symbol_pass_rate = _safe_float(promotion.get("symbol_pass_rate"), 0.0)
     trades = _safe_int(promotion.get("trades"), 0)
 
@@ -380,11 +382,13 @@ def _build_promoted_strategy_candidate(
         "n_events": trades,
         "edge_score": _safe_float(split_pnl.get("validation"), selection_score),
         "expectancy_per_trade": _safe_float(split_pnl.get("validation"), selection_score),
+        "expectancy_after_multiplicity": expectancy_after_multiplicity,
         "stability_proxy": symbol_pass_rate,
         "robustness_score": symbol_pass_rate,
         "event_frequency": 0.0,
         "capacity_proxy": 0.0,
         "profit_density_score": max(0.0, selection_score),
+        "quality_score": max(0.0, selection_score),
         "selection_score": selection_score,
         "symbols": run_symbols,
         "candidate_symbol": candidate_symbol,
@@ -481,6 +485,7 @@ def _build_edge_strategy_candidate(
     edge_score = _safe_float(row.get("edge_score"), 0.0)
     stability_proxy = _safe_float(row.get("stability_proxy"), 0.0)
     expectancy_per_trade = _safe_float(row.get("expectancy_per_trade"), _safe_float(row.get("expected_return_proxy"), 0.0))
+    expectancy_after_multiplicity = _safe_float(row.get("expectancy_after_multiplicity"), expectancy_per_trade)
     robustness_score = _safe_float(row.get("robustness_score"), stability_proxy)
     event_frequency = _safe_float(row.get("event_frequency"), 0.0)
     capacity_proxy = _safe_float(row.get("capacity_proxy"), 0.0)
@@ -488,12 +493,26 @@ def _build_edge_strategy_candidate(
         row.get("profit_density_score"),
         max(0.0, expectancy_per_trade) * max(0.0, robustness_score) * max(0.0, event_frequency),
     )
+    delay_robustness_score = _safe_float(row.get("delay_robustness_score"), 0.0)
+    quality_score = _safe_float(
+        row.get("quality_score"),
+        (
+            profit_density_score
+            if profit_density_score > 0.0
+            else (
+                0.35 * max(0.0, expectancy_after_multiplicity)
+                + 0.25 * max(0.0, robustness_score)
+                + 0.20 * max(0.0, delay_robustness_score)
+                + 0.20 * max(0.0, profit_density_score)
+            )
+        ),
+    )
     n_events = _safe_int(row.get("n_events"), 0)
     status = str(row.get("status", "PROMOTED")).strip().upper()
 
     condition = str(detail.get("condition", "all"))
     action = str(detail.get("action", "no_action"))
-    selection_score = profit_density_score if profit_density_score > 0.0 else (0.65 * edge_score) + (0.35 * stability_proxy)
+    selection_score = quality_score if quality_score > 0.0 else (0.65 * edge_score) + (0.35 * stability_proxy)
     controls = _risk_controls_from_action(action)
     route = _route_event_family(event)
     execution_family = route["execution_family"] if route else "unmapped"
@@ -583,11 +602,13 @@ def _build_edge_strategy_candidate(
         "n_events": n_events,
         "edge_score": edge_score,
         "expectancy_per_trade": expectancy_per_trade,
+        "expectancy_after_multiplicity": expectancy_after_multiplicity,
         "stability_proxy": stability_proxy,
         "robustness_score": robustness_score,
         "event_frequency": event_frequency,
         "capacity_proxy": capacity_proxy,
         "profit_density_score": profit_density_score,
+        "quality_score": quality_score,
         "selection_score": selection_score,
         "symbols": symbols,
         "candidate_symbol": symbol_scope["candidate_symbol"],
@@ -675,11 +696,13 @@ def _load_alpha_bundle_candidate(run_id: str, symbols: List[str]) -> Dict[str, o
         "n_events": int(len(score)),
         "edge_score": float(score.abs().mean()),
         "expectancy_per_trade": float(score.abs().mean()),
+        "expectancy_after_multiplicity": float(score.abs().mean()),
         "stability_proxy": float((score.abs() > score.abs().quantile(0.5)).mean()),
         "robustness_score": 1.0,
         "event_frequency": 1.0,
         "capacity_proxy": 0.0,
         "profit_density_score": float(score.abs().mean()),
+        "quality_score": float(score.abs().mean()),
         "selection_score": float(score.abs().mean()),
         "symbols": symbols,
         "candidate_symbol": "ALL" if len(symbols) > 1 else symbols[0],
@@ -783,11 +806,29 @@ def _count_by_source(rows: List[Dict[str, object]]) -> Dict[str, int]:
     return counts
 
 
+def _candidate_rank_key(row: Dict[str, object]) -> Tuple[float, float, float, int, str]:
+    quality_score = _safe_float(row.get("quality_score"), _safe_float(row.get("selection_score"), 0.0))
+    expectancy = _safe_float(
+        row.get("expectancy_after_multiplicity"),
+        _safe_float(row.get("expectancy_per_trade"), 0.0),
+    )
+    robustness = _safe_float(row.get("robustness_score"), 0.0)
+    source_priority = SOURCE_PRIORITY.get(str(row.get("source_type", row.get("source", ""))), 99)
+    return (
+        -quality_score,
+        -expectancy,
+        -robustness,
+        source_priority,
+        str(row.get("strategy_candidate_id", "")),
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build manual-backtest strategy candidates from promoted edges (multi-symbol aware)")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True, help="Comma-separated discovery symbols sharing one run_id")
     parser.add_argument("--top_k_per_event", type=int, default=2)
+    parser.add_argument("--max_candidates_per_event", type=int, default=2)
     parser.add_argument("--max_candidates", type=int, default=20)
     parser.add_argument("--min_edge_score", type=float, default=0.0)
     parser.add_argument("--include_alpha_bundle", type=int, default=1)
@@ -822,6 +863,7 @@ def main() -> int:
         "run_id": args.run_id,
         "symbols": symbols,
         "top_k_per_event": int(args.top_k_per_event),
+        "max_candidates_per_event": int(args.max_candidates_per_event),
         "max_candidates": int(args.max_candidates),
         "min_edge_score": float(args.min_edge_score),
         "include_alpha_bundle": int(args.include_alpha_bundle),
@@ -899,6 +941,14 @@ def main() -> int:
             edge_df["expectancy_per_trade"] = pd.to_numeric(edge_df.get("expectancy_per_trade"), errors="coerce").fillna(
                 pd.to_numeric(edge_df.get("expected_return_proxy"), errors="coerce").fillna(0.0)
             )
+            expectancy_after_source = (
+                edge_df["expectancy_after_multiplicity"]
+                if "expectancy_after_multiplicity" in edge_df.columns
+                else edge_df["expectancy_per_trade"]
+            )
+            edge_df["expectancy_after_multiplicity"] = pd.to_numeric(expectancy_after_source, errors="coerce").fillna(
+                edge_df["expectancy_per_trade"]
+            )
             edge_df["robustness_score"] = pd.to_numeric(edge_df.get("robustness_score"), errors="coerce").fillna(edge_df["stability_proxy"])
             edge_df["event_frequency"] = pd.to_numeric(edge_df.get("event_frequency"), errors="coerce").fillna(0.0)
             edge_df["profit_density_score"] = pd.to_numeric(edge_df.get("profit_density_score"), errors="coerce")
@@ -908,14 +958,42 @@ def main() -> int:
                 * edge_df["event_frequency"].clip(lower=0.0)
             )
             edge_df["profit_density_score"] = edge_df["profit_density_score"].fillna(fallback_pds)
-            edge_df["selection_score"] = edge_df["profit_density_score"]
+            delay_source = (
+                edge_df["delay_robustness_score"]
+                if "delay_robustness_score" in edge_df.columns
+                else pd.Series(0.0, index=edge_df.index)
+            )
+            delay_robustness = pd.to_numeric(delay_source, errors="coerce").fillna(0.0)
+            fallback_quality = (
+                0.35 * edge_df["expectancy_after_multiplicity"].clip(lower=0.0)
+                + 0.25 * edge_df["robustness_score"].clip(lower=0.0)
+                + 0.20 * delay_robustness.clip(lower=0.0)
+                + 0.20 * edge_df["profit_density_score"].clip(lower=0.0)
+            )
+            if "quality_score" in edge_df.columns:
+                edge_df["quality_score"] = pd.to_numeric(edge_df["quality_score"], errors="coerce")
+            else:
+                edge_df["quality_score"] = np.nan
+            fallback_quality_series = pd.Series(
+                np.where(edge_df["profit_density_score"] > 0.0, edge_df["profit_density_score"], fallback_quality),
+                index=edge_df.index,
+            )
+            edge_df["quality_score"] = edge_df["quality_score"].where(
+                edge_df["quality_score"].notna(),
+                fallback_quality_series,
+            )
+            edge_df["selection_score"] = edge_df["quality_score"]
             edge_df.loc[edge_df["selection_score"] <= 0.0, "selection_score"] = (
                 0.65 * edge_df["edge_score"] + 0.35 * edge_df["stability_proxy"]
             )
-            edge_df = edge_df.sort_values(["event", "selection_score"], ascending=[True, False]).reset_index(drop=True)
+            edge_df = edge_df.sort_values(
+                ["event", "quality_score", "expectancy_after_multiplicity", "robustness_score", "selection_score"],
+                ascending=[True, False, False, False, False],
+            ).reset_index(drop=True)
 
             for event, group in edge_df.groupby("event", sort=True):
-                selected = group.head(int(args.top_k_per_event))
+                per_event_seed_cap = max(1, min(int(args.top_k_per_event), int(args.max_candidates_per_event)))
+                selected = group.head(per_event_seed_cap)
                 for _, row in selected.iterrows():
                     source_path = Path(str(row.get("source_path", "")))
                     detail = _load_candidate_detail(source_path=source_path, candidate_id=str(row.get("candidate_id", "")))
@@ -946,14 +1024,7 @@ def main() -> int:
                 strategy_rows.append(alpha_candidate)
 
         source_counts_seen = _count_by_source(strategy_rows)
-        strategy_rows = sorted(
-            strategy_rows,
-            key=lambda x: (
-                SOURCE_PRIORITY.get(str(x.get("source_type", "")), 99),
-                -float(x.get("selection_score", 0.0)),
-                str(x.get("strategy_candidate_id", "")),
-            ),
-        )
+        strategy_rows = sorted(strategy_rows, key=_candidate_rank_key)
         deduped_rows: List[Dict[str, object]] = []
         seen_candidate_ids = set()
         seen_behavior_keys = set()
@@ -968,7 +1039,18 @@ def main() -> int:
                 seen_candidate_ids.add(strategy_candidate_id)
             seen_behavior_keys.add(behavior_key)
             deduped_rows.append(row)
-        strategy_rows = deduped_rows[: int(args.max_candidates)]
+        max_candidates = max(1, int(args.max_candidates))
+        max_candidates_per_event = max(1, int(args.max_candidates_per_event))
+        event_counts: Dict[str, int] = {}
+        strategy_rows = []
+        for row in deduped_rows:
+            if len(strategy_rows) >= max_candidates:
+                break
+            event_key = str(row.get("event", "unknown")).strip().lower() or "unknown"
+            if event_key != "alpha_bundle" and event_counts.get(event_key, 0) >= max_candidates_per_event:
+                continue
+            strategy_rows.append(row)
+            event_counts[event_key] = event_counts.get(event_key, 0) + 1
         source_counts_selected = _count_by_source(strategy_rows)
         for rank, row in enumerate(strategy_rows, start=1):
             row["rank"] = rank

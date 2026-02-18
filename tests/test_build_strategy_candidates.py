@@ -219,6 +219,110 @@ def test_build_strategy_candidates_can_include_alpha_bundle(monkeypatch, tmp_pat
     assert payload[0]["backtest_ready"] is True
 
 
+def test_builder_prefers_high_quality_and_enforces_per_event_caps(monkeypatch, tmp_path: Path) -> None:
+    run_id = "strategy_builder_quality_rank"
+    edge_dir = tmp_path / "reports" / "edge_candidates" / run_id
+    phase2_dir = tmp_path / "reports" / "phase2" / run_id / "vol_shock_relaxation"
+    edge_dir.mkdir(parents=True, exist_ok=True)
+    phase2_dir.mkdir(parents=True, exist_ok=True)
+
+    source_csv = phase2_dir / "phase2_candidates.csv"
+    pd.DataFrame(
+        [
+            {"candidate_id": "c1", "condition": "all", "action": "delay_4"},
+            {"candidate_id": "c2", "condition": "all", "action": "delay_8"},
+            {"candidate_id": "c3", "condition": "all", "action": "delay_16"},
+        ]
+    ).to_csv(source_csv, index=False)
+
+    pd.DataFrame(
+        [
+            {
+                "run_id": run_id,
+                "event": "vol_shock_relaxation",
+                "candidate_id": "c1",
+                "status": "PROMOTED",
+                "edge_score": 10.0,
+                "expected_return_proxy": 0.01,
+                "expectancy_per_trade": 0.01,
+                "expectancy_after_multiplicity": 0.01,
+                "stability_proxy": 0.2,
+                "robustness_score": 0.2,
+                "event_frequency": 0.3,
+                "capacity_proxy": 1.0,
+                "profit_density_score": 0.0,
+                "quality_score": 0.10,
+                "n_events": 120,
+                "source_path": str(source_csv),
+            },
+            {
+                "run_id": run_id,
+                "event": "vol_shock_relaxation",
+                "candidate_id": "c2",
+                "status": "PROMOTED",
+                "edge_score": 1.0,
+                "expected_return_proxy": 0.02,
+                "expectancy_per_trade": 0.02,
+                "expectancy_after_multiplicity": 0.02,
+                "stability_proxy": 0.9,
+                "robustness_score": 0.9,
+                "event_frequency": 0.3,
+                "capacity_proxy": 1.0,
+                "profit_density_score": 0.0,
+                "quality_score": 0.95,
+                "n_events": 120,
+                "source_path": str(source_csv),
+            },
+            {
+                "run_id": run_id,
+                "event": "vol_shock_relaxation",
+                "candidate_id": "c3",
+                "status": "PROMOTED",
+                "edge_score": 2.0,
+                "expected_return_proxy": 0.015,
+                "expectancy_per_trade": 0.015,
+                "expectancy_after_multiplicity": 0.015,
+                "stability_proxy": 0.8,
+                "robustness_score": 0.8,
+                "event_frequency": 0.3,
+                "capacity_proxy": 1.0,
+                "profit_density_score": 0.0,
+                "quality_score": 0.80,
+                "n_events": 120,
+                "source_path": str(source_csv),
+            },
+        ]
+    ).to_csv(edge_dir / "edge_candidates_normalized.csv", index=False)
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(build_strategy_candidates, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_strategy_candidates.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--include_alpha_bundle",
+            "0",
+            "--ignore_checklist",
+            "1",
+            "--top_k_per_event",
+            "5",
+            "--max_candidates_per_event",
+            "2",
+        ],
+    )
+
+    assert build_strategy_candidates.main() == 0
+    out_json = tmp_path / "reports" / "strategy_builder" / run_id / "strategy_candidates.json"
+    payload = json.loads(out_json.read_text(encoding="utf-8"))
+    assert len(payload) == 2
+    assert [row["action"] for row in payload] == ["delay_8", "delay_16"]
+
+
 def test_build_strategy_candidates_event_specific_template(monkeypatch, tmp_path: Path) -> None:
     run_id = "strategy_builder_funding_template"
     _write_edge_inputs(
