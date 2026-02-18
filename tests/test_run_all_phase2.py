@@ -94,6 +94,8 @@ def test_run_all_includes_phase2_chain_when_enabled(monkeypatch) -> None:
     assert stage_names.index("analyze_vol_shock_relaxation") < stage_names.index("phase2_conditional_hypotheses")
     assert stage_names.index("analyze_vol_shock_relaxation") < stage_names.index("build_event_registry")
     assert stage_names.index("build_event_registry") < stage_names.index("phase2_conditional_hypotheses")
+    assert stage_names.index("phase2_conditional_hypotheses") < stage_names.index("summarize_discovery_quality")
+    assert stage_names.index("summarize_discovery_quality") < stage_names.index("generate_recommendations_checklist")
     assert stage_names.index("phase2_conditional_hypotheses") < stage_names.index("generate_recommendations_checklist")
     assert stage_names.index("generate_recommendations_checklist") < stage_names.index("compile_strategy_blueprints")
     assert stage_names.index("compile_strategy_blueprints") < stage_names.index("build_strategy_candidates")

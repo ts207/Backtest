@@ -110,6 +110,7 @@ def _print_artifact_summary(run_id: str) -> None:
     artifact_paths = [
         ("runs", DATA_ROOT / "runs" / run_id),
         ("phase2", DATA_ROOT / "reports" / "phase2" / run_id),
+        ("phase2_quality_summary", DATA_ROOT / "reports" / "phase2" / run_id / "discovery_quality_summary.json"),
         ("edge_candidates", DATA_ROOT / "reports" / "edge_candidates" / run_id / "edge_candidates_normalized.csv"),
         ("promotions", DATA_ROOT / "reports" / "promotions" / run_id / "promotion_report.json"),
         ("strategy_builder", DATA_ROOT / "reports" / "strategy_builder" / run_id),
@@ -271,6 +272,7 @@ def main() -> int:
     parser.add_argument("--phase2_delay_grid_bars", default="0,4,8,16,30")
     parser.add_argument("--phase2_min_delay_positive_ratio", type=float, default=0.60)
     parser.add_argument("--phase2_min_delay_robustness_score", type=float, default=0.60)
+    parser.add_argument("--run_discovery_quality_summary", type=int, default=1)
 
     parser.add_argument("--run_edge_candidate_universe", type=int, default=0)
     parser.add_argument("--run_naive_entry_eval", type=int, default=1)
@@ -705,6 +707,18 @@ def main() -> int:
                     ],
                 )
             )
+
+    if int(args.run_phase2_conditional) and int(args.run_discovery_quality_summary):
+        stages.append(
+            (
+                "summarize_discovery_quality",
+                PROJECT_ROOT / "pipelines" / "research" / "summarize_discovery_quality.py",
+                [
+                    "--run_id",
+                    run_id,
+                ],
+            )
+        )
 
     if int(args.run_edge_candidate_universe):
         stages.append(
