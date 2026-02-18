@@ -89,6 +89,24 @@ def _safe_int(value: object, default: int = 0) -> int:
         return default
 
 
+def _as_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
+
+
+def _as_bool_series(values: pd.Series) -> pd.Series:
+    if values.dtype == bool:
+        return values.astype(bool)
+    if pd.api.types.is_numeric_dtype(values):
+        return pd.to_numeric(values, errors="coerce").fillna(0.0).astype(float) > 0.0
+    return values.astype(str).str.strip().str.lower().isin({"1", "true", "t", "yes", "y"})
+
+
 def _checklist_decision(run_id: str) -> str:
     path = DATA_ROOT / "runs" / run_id / "research_checklist" / "checklist.json"
     if not path.exists():
@@ -368,6 +386,7 @@ def _build_promoted_strategy_candidate(
 
     return {
         "strategy_candidate_id": _sanitize_id(f"{event}_{condition}_{action}_{candidate_id}"),
+        "candidate_id": candidate_id,
         "source_type": "promoted_blueprint",
         "execution_family": execution_family,
         "base_strategy": base_strategy,
@@ -400,6 +419,7 @@ def _build_promoted_strategy_candidate(
         "strategy_instances": strategy_instances,
         "risk_controls": controls,
         "manual_backtest_command": _manual_backtest_command_for_strategy(base_strategy, symbols_csv),
+        "gate_oos_consistency_strict": True,
         "notes": notes,
     }
 
@@ -509,6 +529,9 @@ def _build_edge_strategy_candidate(
     )
     n_events = _safe_int(row.get("n_events"), 0)
     status = str(row.get("status", "PROMOTED")).strip().upper()
+    gate_oos_consistency_strict = _as_bool(
+        detail.get("gate_oos_consistency_strict", row.get("gate_oos_consistency_strict", True))
+    )
 
     condition = str(detail.get("condition", "all"))
     action = str(detail.get("action", "no_action"))
@@ -588,6 +611,7 @@ def _build_edge_strategy_candidate(
 
     return {
         "strategy_candidate_id": strategy_candidate_id,
+        "candidate_id": candidate_id,
         "source_type": "edge_candidate",
         "execution_family": execution_family,
         "base_strategy": base_strategy,
@@ -620,6 +644,7 @@ def _build_edge_strategy_candidate(
         "strategy_instances": strategy_instances,
         "risk_controls": controls,
         "manual_backtest_command": manual_backtest_command,
+        "gate_oos_consistency_strict": bool(gate_oos_consistency_strict),
         "notes": notes,
     }
 
@@ -684,6 +709,7 @@ def _load_alpha_bundle_candidate(run_id: str, symbols: List[str]) -> Dict[str, o
     ]
     return {
         "strategy_candidate_id": _sanitize_id(f"alpha_bundle_{run_id}"),
+        "candidate_id": _sanitize_id(f"alpha_bundle_{run_id}"),
         "source_type": "alpha_bundle",
         "execution_family": "onchain_flow",
         "base_strategy": alpha_strategy,
@@ -719,6 +745,7 @@ def _load_alpha_bundle_candidate(run_id: str, symbols: List[str]) -> Dict[str, o
             "reentry_mode": "immediate",
         },
         "manual_backtest_command": _manual_backtest_command_for_strategy(alpha_strategy, symbols_csv),
+        "gate_oos_consistency_strict": True,
         "notes": [
             "AlphaBundle candidate is routed to an on-chain execution template for manual validation.",
             "Keep AlphaBundle and mainline candidates under identical robustness and promotion standards.",
@@ -927,6 +954,8 @@ def main() -> int:
                 else:
                     status_series = pd.Series("", index=edge_df.index, dtype=str)
                 edge_df = edge_df[status_series == "PROMOTED"].copy()
+            if "gate_oos_consistency_strict" in edge_df.columns:
+                edge_df = edge_df[_as_bool_series(edge_df["gate_oos_consistency_strict"])].copy()
 
         strategy_rows: List[Dict[str, object]] = [
             _build_promoted_strategy_candidate(
@@ -937,6 +966,7 @@ def main() -> int:
             for payload in promoted_payloads
         ]
         missing_detail_records: List[Dict[str, str]] = []
+        skipped_strict_gate_count = 0
         if not edge_df.empty:
             edge_df["expectancy_per_trade"] = pd.to_numeric(edge_df.get("expectancy_per_trade"), errors="coerce").fillna(
                 pd.to_numeric(edge_df.get("expected_return_proxy"), errors="coerce").fillna(0.0)
@@ -1006,6 +1036,12 @@ def main() -> int:
                             }
                         )
                         continue
+                    gate_oos_consistency_strict = _as_bool(
+                        detail.get("gate_oos_consistency_strict", row.get("gate_oos_consistency_strict", True))
+                    )
+                    if not gate_oos_consistency_strict:
+                        skipped_strict_gate_count += 1
+                        continue
                     strategy_rows.append(_build_edge_strategy_candidate(row=row.to_dict(), detail=detail, symbols=symbols))
 
         skipped_missing_detail_count = int(len(missing_detail_records))
@@ -1068,6 +1104,7 @@ def main() -> int:
                 "skipped_missing_candidate_detail_count": skipped_missing_detail_count if int(args.allow_missing_candidate_detail) else 0,
                 "source_counts_seen": source_counts_seen,
                 "source_counts_selected": source_counts_selected,
+                "skipped_strict_gate_count": int(skipped_strict_gate_count),
             },
             "strategies": [
                 {
@@ -1106,6 +1143,7 @@ def main() -> int:
                 ),
                 "source_counts_seen": source_counts_seen,
                 "source_counts_selected": source_counts_selected,
+                "skipped_strict_gate_count": int(skipped_strict_gate_count),
             },
         )
         return 0
