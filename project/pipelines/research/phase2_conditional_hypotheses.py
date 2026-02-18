@@ -29,6 +29,7 @@ from pipelines._lib.io_utils import (
     run_scoped_lake_path,
 )
 from pipelines._lib.selection_log import append_selection_log
+from strategy_dsl.contract_v1 import is_executable_action, is_executable_condition
 from pipelines.research.analyze_conditional_expectancy import (
     _bh_adjust,
     _two_sided_p_from_t,
@@ -73,6 +74,8 @@ PRIMARY_OUTPUT_COLUMNS = [
     "gate_d_friction_floor",
     "gate_f_exposure_guard",
     "gate_g_net_benefit",
+    "gate_h_executable_condition",
+    "gate_h_executable_action",
     "gate_e_simplicity",
     "validation_delta_adverse_mean",
     "test_delta_adverse_mean",
@@ -1538,6 +1541,7 @@ def _evaluate_candidate(
     action: ActionSpec,
     bootstrap_iters: int,
     seed: int,
+    run_symbols: List[str],
     cost_floor: float,
     tail_material_threshold: float,
     opportunity_tight_eps: float,
@@ -1692,6 +1696,14 @@ def _evaluate_candidate(
         fail_reasons.append("gate_oos_validation")
     if not gate_ess:
         fail_reasons.append("gate_ess")
+
+    # Gate H: executable contract (avoid promoting conditions/actions that cannot compile into DSL runtime)
+    gate_h_condition = bool(is_executable_condition(condition.name, run_symbols=run_symbols))
+    gate_h_action = bool(is_executable_action(action.name))
+    if not gate_h_condition:
+        fail_reasons.append("gate_h_executable_condition")
+    if not gate_h_action:
+        fail_reasons.append("gate_h_executable_action")
     if not bool(cost_fields["gate_after_cost_positive"]):
         fail_reasons.append("gate_after_cost_positive")
     if not bool(cost_fields["gate_after_cost_stressed_positive"]):
@@ -1739,6 +1751,8 @@ def _evaluate_candidate(
         "gate_f_exposure_guard": gate_f,
         "gate_g_net_benefit": gate_g,
         "gate_e_simplicity": gate_e,
+        "gate_h_executable_condition": gate_h_condition,
+        "gate_h_executable_action": gate_h_action,
         "validation_delta_adverse_mean": validation_delta_adverse_mean,
         "test_delta_adverse_mean": test_delta_adverse_mean,
         "val_delta_adverse_mean": validation_delta_adverse_mean,
@@ -2281,6 +2295,7 @@ def main() -> int:
                     action=action,
                     bootstrap_iters=args.bootstrap_iters,
                     seed=args.seed + i * 1000 + j * 50,
+                    run_symbols=symbols,
                     cost_floor=args.cost_floor,
                     tail_material_threshold=args.material_tail_threshold,
                     opportunity_tight_eps=args.opportunity_tight_eps,

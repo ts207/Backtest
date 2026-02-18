@@ -15,7 +15,7 @@ def _write_edge_inputs(
     tmp_path: Path,
     run_id: str,
     event: str = "vol_shock_relaxation",
-    condition: str = "age_bucket_0_8",
+    condition: str = "all",
     action: str = "delay_30",
 ) -> None:
     edge_dir = tmp_path / "reports" / "edge_candidates" / run_id

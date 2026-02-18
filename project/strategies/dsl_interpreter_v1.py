@@ -19,6 +19,9 @@ from strategy_dsl.schema import (
     SymbolScopeSpec,
 )
 
+
+from strategy_dsl.contract_v1 import BULL_BEAR_CONDITION_MAP, SESSION_CONDITION_MAP, VOL_REGIME_CONDITION_MAP
+
 KNOWN_ENTRY_SIGNALS = {
     "event_detected",
     "vol_shock_relaxation_event",
@@ -161,6 +164,28 @@ def _build_blueprint(raw: Dict[str, object]) -> Blueprint:
 def _condition_mask_legacy(merged: pd.DataFrame, expr: str) -> pd.Series:
     expression = str(expr).strip()
     if not expression or expression == "all":
+        return pd.Series(True, index=merged.index, dtype=bool)
+
+    lowered = expression.lower()
+    # Support symbolic conditions emitted by the research compiler for transparency/promotion diagnostics.
+    # Numeric expressions continue to be supported below.
+    if lowered in SESSION_CONDITION_MAP:
+        low, high = SESSION_CONDITION_MAP[lowered]
+        hours = pd.to_numeric(merged.get("session_hour_utc"), errors="coerce")
+        return ((hours >= float(low)) & (hours <= float(high))).fillna(False)
+
+    if lowered in BULL_BEAR_CONDITION_MAP:
+        target = float(BULL_BEAR_CONDITION_MAP[lowered])
+        series = pd.to_numeric(merged.get("bull_bear_flag"), errors="coerce")
+        return (series == target).fillna(False)
+
+    if lowered in VOL_REGIME_CONDITION_MAP:
+        target = float(VOL_REGIME_CONDITION_MAP[lowered])
+        series = pd.to_numeric(merged.get("vol_regime_code"), errors="coerce")
+        return (series == target).fillna(False)
+
+    if lowered.startswith("symbol_"):
+        # Symbol scoping is applied elsewhere (Blueprint.symbol_scope).
         return pd.Series(True, index=merged.index, dtype=bool)
 
     for operator in [">=", "<=", "==", ">", "<"]:

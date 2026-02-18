@@ -58,8 +58,7 @@ VOL_REGIME_CONDITION_MAP: Dict[str, float] = {
 }
 
 
-class NonExecutableConditionError(ValueError):
-    """Raised when a symbolic Phase-2 condition cannot be executed in DSL runtime."""
+from strategy_dsl.contract_v1 import NonExecutableConditionError, normalize_entry_condition as normalize_entry_condition_v1
 
 PHASE1_EVENT_FILES: Dict[str, Tuple[str, str]] = {
     "vol_shock_relaxation": ("vol_shock_relaxation", "vol_shock_relaxation_events.csv"),
@@ -303,88 +302,13 @@ def _normalize_entry_condition(
     candidate_id: str,
     run_symbols: List[str],
 ) -> Tuple[str, List[ConditionNodeSpec], str | None]:
-    condition = str(raw_condition if raw_condition is not None else "all").strip()
-    if not condition:
-        return "all", [], None
-    lowered = condition.lower()
-    if lowered == "all":
-        return "all", [], None
-
-    for operator in [">=", "<=", "==", ">", "<"]:
-        if operator in condition:
-            col, raw_val = condition.split(operator, 1)
-            threshold = _safe_float(raw_val.strip(), np.nan)
-            if col.strip() and not np.isnan(threshold):
-                return (
-                    "all",
-                    [
-                        ConditionNodeSpec(
-                            feature=col.strip(),
-                            operator=operator,  # type: ignore[arg-type]
-                            value=float(threshold),
-                        )
-                    ],
-                    None,
-                )
-            break
-
-    if lowered in SESSION_CONDITION_MAP:
-        low, high = SESSION_CONDITION_MAP[lowered]
-        return (
-            "all",
-            [
-                ConditionNodeSpec(
-                    feature="session_hour_utc",
-                    operator="in_range",
-                    value=float(low),
-                    value_high=float(high),
-                )
-            ],
-            None,
-        )
-
-    if lowered in BULL_BEAR_CONDITION_MAP:
-        return (
-            "all",
-            [
-                ConditionNodeSpec(
-                    feature="bull_bear_flag",
-                    operator="==",
-                    value=float(BULL_BEAR_CONDITION_MAP[lowered]),
-                )
-            ],
-            None,
-        )
-
-    if lowered in VOL_REGIME_CONDITION_MAP:
-        return (
-            "all",
-            [
-                ConditionNodeSpec(
-                    feature="vol_regime_code",
-                    operator="==",
-                    value=float(VOL_REGIME_CONDITION_MAP[lowered]),
-                )
-            ],
-            None,
-        )
-
-    if lowered.startswith("symbol_"):
-        symbol = condition[len("symbol_") :].strip().upper()
-        if not symbol:
-            raise NonExecutableConditionError(
-                f"Non-executable condition for event={event_type}, candidate_id={candidate_id}: `{condition}` (empty symbol)"
-            )
-        if run_symbols and symbol not in set(run_symbols):
-            raise NonExecutableConditionError(
-                f"Non-executable condition for event={event_type}, candidate_id={candidate_id}: "
-                f"`{condition}` (symbol not in run symbols: {run_symbols})"
-            )
-        return "all", [], symbol
-
-    raise NonExecutableConditionError(
-        f"Non-executable condition for event={event_type}, candidate_id={candidate_id}: `{condition}`"
+    return normalize_entry_condition_v1(
+        raw_condition,
+        event_type=event_type,
+        candidate_id=candidate_id,
+        run_symbols=run_symbols,
     )
+
 
 
 def _entry_from_row(

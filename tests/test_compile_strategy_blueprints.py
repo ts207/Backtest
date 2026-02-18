@@ -145,8 +145,9 @@ def test_compiler_emits_per_event_blueprints_with_required_fields(monkeypatch, t
         assert "condition_logic" in row["entry"]
         assert "condition_nodes" in row["entry"]
         assert "min_trades" in row["evaluation"]
-        assert all(cond == "all" for cond in row["entry"]["conditions"])
+        assert row["entry"]["conditions"] and all(isinstance(cond, str) for cond in row["entry"]["conditions"])
     liquidity_absence_row = next(row for row in rows if row["event_type"] == "liquidity_absence_window")
+    assert liquidity_absence_row["entry"]["conditions"] == ["session_eu"]
     assert liquidity_absence_row["entry"]["condition_nodes"]
     assert liquidity_absence_row["entry"]["condition_nodes"][0]["feature"] == "session_hour_utc"
     assert liquidity_absence_row["entry"]["condition_nodes"][0]["operator"] == "in_range"

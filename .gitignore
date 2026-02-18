@@ -29,9 +29,7 @@ data/lake/*
 !data/runs/
 data/runs/*
 !data/runs/.gitkeep
-!data/reports/
-data/reports/*
-!data/reports/.gitkeep
+
 
 # Alternate local data roots
 .data/

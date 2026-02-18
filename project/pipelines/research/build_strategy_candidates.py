@@ -17,6 +17,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from strategy_dsl.contract_v1 import is_executable_action, is_executable_condition
 from strategies.registry import list_strategies
 
 EVENT_FAMILY_STRATEGY_ROUTING: Dict[str, Dict[str, str]] = {
@@ -286,6 +287,16 @@ def _build_edge_strategy_candidate(
     symbols_csv = ",".join(symbols)
     manual_backtest_command = _manual_backtest_command_for_strategy(base_strategy, symbols_csv)
     symbol_scope = _symbol_scope_from_row(row=row, symbols=symbols)
+    executable_condition = bool(is_executable_condition(condition, run_symbols=symbol_scope["run_symbols"]))
+    executable_action = bool(is_executable_action(action))
+    if not executable_condition or not executable_action:
+        backtest_ready = False
+        reasons: List[str] = []
+        if not executable_condition:
+            reasons.append(f"Non-executable condition per DSL contract: `{condition}`")
+        if not executable_action:
+            reasons.append(f"Non-executable action per DSL contract: `{action}`")
+        routing_reason = (routing_reason + ("; " if routing_reason else "") + "; ".join(reasons)).strip()
     symbol_scores = _parse_symbol_scores(row.get("symbol_scores", {}))
     rollout_eligible = bool(row.get("rollout_eligible", False))
     deployment_scope = _resolve_deployment_scope(
@@ -326,6 +337,8 @@ def _build_edge_strategy_candidate(
     ]
     if controls.get("block_entries"):
         notes.append("Action implies full entry block; use as rejection/guard condition, not a standalone trading strategy.")
+    if not executable_condition or not executable_action:
+        notes.append("Non-executable condition/action per DSL contract; excluded from automated backtests.")
     if not backtest_ready:
         if route is None:
             notes.append(routing_reason)
@@ -342,10 +355,12 @@ def _build_edge_strategy_candidate(
         "execution_family": execution_family,
         "base_strategy": base_strategy,
         "backtest_ready": backtest_ready,
-        "backtest_ready_reason": routing_reason if route is None else "",
+        "backtest_ready_reason": routing_reason if not backtest_ready else "",
         "event": event,
         "condition": condition,
         "action": action,
+        "executable_condition": executable_condition,
+        "executable_action": executable_action,
         "status": status,
         "n_events": n_events,
         "edge_score": edge_score,
