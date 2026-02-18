@@ -1,15 +1,28 @@
 # Documentation Index
 
-This directory contains active operational docs for the backtest pipeline.
+This folder contains the active operational docs for the repository.
 
-## Active Docs
-- `docs/discovery_pipeline.md`: Discovery flow and stage orchestration.
-- `docs/operator_runbook.md`: Runbook for common operational workflows.
-- `docs/strategy_builder.md`: Strategy candidate generation and handoff.
-- `docs/hypothesis_generator.md`: Hypothesis queue generation details.
-- `docs/data_strategy.md`: Data root and artifact expectations.
-- `docs/repo_hygiene.md`: What is allowed in git and cleanliness checks.
+## Core Guides
 
-## Archived Docs
-Historical writeups, audits, and one-off reports are in `docs/archive/`.
-They are retained for context, not as current operational source-of-truth.
+- `docs/discovery_pipeline.md`
+  Discovery flow, stage semantics, outputs, and common failure interpretation.
+
+- `docs/operator_runbook.md`
+  Copy/paste commands for discovery-only, full end-to-end, and targeted stage reruns.
+
+- `docs/strategy_builder.md`
+  Strategy-builder behavior, routing, and outputs.
+
+- `docs/hypothesis_generator.md`
+  Dataset-to-mechanism hypothesis generation model and outputs.
+
+- `docs/data_strategy.md`
+  Data root policy, reproducibility and retention guidance.
+
+- `docs/repo_hygiene.md`
+  Git hygiene boundaries for generated artifacts and sidecar files.
+
+## Scope Rule
+
+These docs describe the current runtime behavior of code in `project/pipelines/`.
+If a doc and code disagree, treat code as source-of-truth and update docs immediately.

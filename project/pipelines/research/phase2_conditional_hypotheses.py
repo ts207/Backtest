@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import logging
 import os
@@ -73,10 +74,13 @@ PRIMARY_OUTPUT_COLUMNS = [
     "test_t_stat",
     "test_p_value",
     "test_p_value_adj_bh",
+    "gate_oos_min_samples",
     "gate_oos_validation_test",
     "gate_multiplicity",
     "gate_pass",
     "gate_all",
+    "supporting_hypothesis_count",
+    "supporting_hypothesis_ids",
     "fail_reasons",
 ]
 
@@ -106,6 +110,7 @@ REJECTION_LOW_SAMPLE = "LOW_SAMPLE"
 
 DEPLOYMENT_MODE_CONCENTRATE = "concentrate"
 DEPLOYMENT_MODE_DIVERSIFY = "diversify"
+HYPOTHESIS_QUEUE_DIR = "hypothesis_generator"
 
 
 @dataclass(frozen=True)
@@ -281,6 +286,22 @@ def _phase1_pass_status(summary_path: Path, require_phase1_pass: bool) -> Tuple[
     return phase1_pass, phase1_structure_pass, phase1_decision
 
 
+def _controls_coverage(events: pd.DataFrame, controls: pd.DataFrame) -> Tuple[float, int, int]:
+    if events.empty or "event_id" not in events.columns:
+        return 1.0, 0, 0
+    event_ids = events["event_id"].dropna().astype(str).unique().tolist()
+    total_events = int(len(event_ids))
+    if total_events == 0:
+        return 0.0, 0, 0
+    if controls.empty or "event_id" not in controls.columns:
+        return 0.0, total_events, 0
+
+    control_ids = set(controls["event_id"].dropna().astype(str).tolist())
+    matched_events = int(sum(1 for event_id in event_ids if event_id in control_ids))
+    ratio = float(matched_events / total_events)
+    return ratio, total_events, matched_events
+
+
 def _table_text(df: pd.DataFrame) -> str:
     try:
         return df.to_markdown(index=False)
@@ -288,11 +309,203 @@ def _table_text(df: pd.DataFrame) -> str:
         return df.to_string(index=False)
 
 
+def _write_freeze_outputs(
+    *,
+    out_dir: Path,
+    run_id: str,
+    event_type: str,
+    phase1_pass: bool,
+    phase1_structure_pass: bool,
+    phase1_decision: str,
+    phase1_events_file_exists: bool,
+    queue_exists: bool,
+    matched_hypothesis_ids: List[str],
+    reason: str,
+    reason_message: str,
+    max_conditions: int,
+    max_actions: int,
+    opportunity_horizon_bars: int,
+    opportunity_tight_eps: float,
+    min_regime_stable_splits: int,
+    extra_promoted_fields: Dict[str, object] | None = None,
+    extra_manifest_fields: Dict[str, object] | None = None,
+) -> None:
+    ensure_dir(out_dir)
+    cand_path = out_dir / "phase2_candidates.csv"
+    prom_path = out_dir / "promoted_candidates.json"
+    symbol_eval_path = out_dir / "phase2_symbol_evaluation.csv"
+    manifest_path = out_dir / "phase2_manifests.json"
+    summary_path = out_dir / "phase2_summary.md"
+
+    pd.DataFrame(columns=PRIMARY_OUTPUT_COLUMNS).to_csv(cand_path, index=False)
+    pd.DataFrame(columns=SYMBOL_OUTPUT_COLUMNS).to_csv(symbol_eval_path, index=False)
+
+    prom_payload: Dict[str, object] = {
+        "run_id": run_id,
+        "event_type": event_type,
+        "decision": "freeze",
+        "phase1_pass": bool(phase1_pass),
+        "phase1_structure_pass": bool(phase1_structure_pass),
+        "phase1_decision": phase1_decision,
+        "promoted_count": 0,
+        "deployment_mode": DEPLOYMENT_MODE_DIVERSIFY,
+        "deployment_mode_rationale": reason_message,
+        "deployment_dispersion_test": {
+            "deployment_mode": DEPLOYMENT_MODE_DIVERSIFY,
+            "rationale": reason_message,
+            "dominance_detected": False,
+            "top_symbols_considered": [],
+            "dispersion_metrics": {
+                "score_gap": 0.0,
+                "relative_gap": 0.0,
+                "confidence_overlap": True,
+                "stability_adjusted_spread": 0.0,
+            },
+        },
+        "candidates": [],
+        "reason": str(reason),
+        "phase1_events_file_exists": bool(phase1_events_file_exists),
+        "phase1_hypothesis_queue_exists": bool(queue_exists),
+        "matched_hypothesis_count": int(len(matched_hypothesis_ids)),
+        "matched_hypothesis_ids": matched_hypothesis_ids,
+    }
+    if isinstance(extra_promoted_fields, dict):
+        prom_payload.update(extra_promoted_fields)
+    prom_path.write_text(json.dumps(prom_payload, indent=2), encoding="utf-8")
+
+    manifest_payload: Dict[str, object] = {
+        "run_id": run_id,
+        "event_type": event_type,
+        "phase1_pass": bool(phase1_pass),
+        "phase1_structure_pass": bool(phase1_structure_pass),
+        "phase1_decision": phase1_decision,
+        "conditions_generated": 0,
+        "actions_generated": 0,
+        "conditions_evaluated": 0,
+        "actions_evaluated": 0,
+        "candidates_evaluated": 0,
+        "caps": {
+            "max_conditions": int(max_conditions),
+            "max_actions": int(max_actions),
+            "condition_cap_pass": True,
+            "action_cap_pass": True,
+            "simplicity_gate_pass": True,
+        },
+        "opportunity": {
+            "horizon_bars": int(opportunity_horizon_bars),
+            "tight_ci_eps": float(opportunity_tight_eps),
+        },
+        "gates": {
+            "min_regime_stable_splits": int(min_regime_stable_splits),
+        },
+        "no_phase1_events": bool(reason == "no_phase1_events"),
+        "phase1_events_file_exists": bool(phase1_events_file_exists),
+        "phase1_hypothesis_queue_exists": bool(queue_exists),
+        "matched_hypothesis_count": int(len(matched_hypothesis_ids)),
+        "deployment_mode": DEPLOYMENT_MODE_DIVERSIFY,
+        "deployment_mode_rationale": reason_message,
+        "freeze_reason": str(reason),
+    }
+    if isinstance(extra_manifest_fields, dict):
+        manifest_payload.update(extra_manifest_fields)
+    manifest_path.write_text(json.dumps(manifest_payload, indent=2), encoding="utf-8")
+
+    summary_path.write_text(
+        "\n".join(
+            [
+                "# Phase 2 Conditional Edge Hypothesis",
+                "",
+                f"Run ID: `{run_id}`",
+                f"Event type: `{event_type}`",
+                "Decision: **FREEZE**",
+                f"Phase 1 status: `{phase1_decision}`",
+                "",
+                reason_message,
+                f"Hypothesis queue present: {bool(queue_exists)}",
+                f"Matched hypotheses for this event family: {int(len(matched_hypothesis_ids))}",
+                f"Deployment mode: {DEPLOYMENT_MODE_DIVERSIFY}",
+                f"Freeze reason: `{reason}`",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
 def _read_csv_allow_empty(path: Path) -> pd.DataFrame:
     try:
         return pd.read_csv(path)
     except pd.errors.EmptyDataError:
         return pd.DataFrame()
+
+
+def _parse_string_list(value: object) -> List[str]:
+    if isinstance(value, list):
+        return [str(x).strip() for x in value if str(x).strip()]
+    text = str(value or "").strip()
+    if not text:
+        return []
+    if text.startswith("[") and text.endswith("]"):
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                parsed = parser(text)
+            except Exception:
+                continue
+            if isinstance(parsed, list):
+                return [str(x).strip() for x in parsed if str(x).strip()]
+    if "|" in text:
+        return [x.strip() for x in text.split("|") if x.strip()]
+    return [text]
+
+
+def _load_phase1_hypothesis_queue(run_id: str) -> Tuple[bool, pd.DataFrame]:
+    queue_root = DATA_ROOT / "reports" / HYPOTHESIS_QUEUE_DIR / run_id
+    csv_path = queue_root / "phase1_hypothesis_queue.csv"
+    jsonl_path = queue_root / "phase1_hypothesis_queue.jsonl"
+    queue_exists = csv_path.exists() or jsonl_path.exists()
+    if not queue_exists:
+        return False, pd.DataFrame(columns=["hypothesis_id", "priority_score", "target_phase2_event_types"])
+
+    if csv_path.exists():
+        queue = _read_csv_allow_empty(csv_path)
+    else:
+        rows: List[Dict[str, object]] = []
+        with jsonl_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                raw = line.strip()
+                if not raw:
+                    continue
+                payload = json.loads(raw)
+                if isinstance(payload, dict):
+                    rows.append(payload)
+        queue = pd.DataFrame(rows)
+
+    if queue.empty:
+        return True, pd.DataFrame(columns=["hypothesis_id", "priority_score", "target_phase2_event_types"])
+
+    if "hypothesis_id" not in queue.columns:
+        queue["hypothesis_id"] = [f"H{i:04d}" for i in range(len(queue))]
+    queue["hypothesis_id"] = queue["hypothesis_id"].astype(str).str.strip()
+    queue = queue[queue["hypothesis_id"] != ""].copy()
+    queue["priority_score"] = pd.to_numeric(queue.get("priority_score"), errors="coerce").fillna(0.0)
+    if "target_phase2_event_types" not in queue.columns:
+        queue["target_phase2_event_types"] = [[] for _ in range(len(queue))]
+    queue["target_phase2_event_types"] = queue["target_phase2_event_types"].apply(_parse_string_list)
+    queue = queue.sort_values(["priority_score", "hypothesis_id"], ascending=[False, True]).reset_index(drop=True)
+    return True, queue
+
+
+def _supporting_hypothesis_ids(queue: pd.DataFrame, event_type: str, max_ids: int = 10) -> List[str]:
+    if queue.empty:
+        return []
+    event_key = str(event_type).strip()
+    matched = queue[
+        queue["target_phase2_event_types"].apply(
+            lambda values: event_key in [str(x).strip() for x in values]
+        )
+    ]
+    if matched.empty:
+        return []
+    return matched["hypothesis_id"].astype(str).dropna().tolist()[:max_ids]
 
 
 @dataclass(frozen=True)
@@ -465,7 +678,16 @@ def _attach_forward_opportunity(
         if bars.empty:
             continue
         bars["timestamp"] = pd.to_datetime(bars["timestamp"], utc=True, errors="coerce")
-        bars = bars.sort_values("timestamp").reset_index(drop=True)
+        bars = bars.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+        dupes = int(bars["timestamp"].duplicated(keep="last").sum())
+        if dupes > 0:
+            logging.warning(
+                "Dropping %s duplicate bars for %s (%s) before forward opportunity join.",
+                dupes,
+                symbol,
+                timeframe,
+            )
+            bars = bars.drop_duplicates(subset=["timestamp"], keep="last").reset_index(drop=True)
         close = bars["close"].astype(float)
         fwd_abs_return = (close.shift(-horizon_bars) / close - 1.0).abs()
         rows.append(
@@ -492,12 +714,14 @@ def _attach_forward_opportunity(
         fwd_ts[["symbol", "enter_ts", "forward_abs_return_h"]],
         on=["symbol", "enter_ts"],
         how="left",
+        validate="many_to_one",
     )
     if "enter_idx" in out_events.columns:
         out_events = out_events.merge(
             fwd[["symbol", "bar_idx", "forward_abs_return_h"]].rename(columns={"bar_idx": "enter_idx", "forward_abs_return_h": "forward_abs_return_h_idx"}),
             on=["symbol", "enter_idx"],
             how="left",
+            validate="many_to_one",
         )
         out_events["forward_abs_return_h"] = out_events["forward_abs_return_h"].where(
             out_events["forward_abs_return_h"].notna(),
@@ -508,12 +732,13 @@ def _attach_forward_opportunity(
     if not out_controls.empty and "event_id" in out_controls.columns and "control_idx" in out_controls.columns:
         event_to_symbol = out_events[["event_id", "symbol"]].drop_duplicates()
         if "symbol" not in out_controls.columns:
-            out_controls = out_controls.merge(event_to_symbol, on="event_id", how="left")
+            out_controls = out_controls.merge(event_to_symbol, on="event_id", how="left", validate="many_to_one")
         else:
             out_controls = out_controls.merge(
                 event_to_symbol.rename(columns={"symbol": "event_symbol"}),
                 on="event_id",
                 how="left",
+                validate="many_to_one",
             )
             out_controls["symbol"] = out_controls["symbol"].where(
                 out_controls["symbol"].notna(),
@@ -528,6 +753,7 @@ def _attach_forward_opportunity(
                 ),
                 on=["symbol", "control_idx"],
                 how="left",
+                validate="many_to_one",
             )
             ctrl_mean = out_controls.groupby("event_id", as_index=False)["forward_abs_return_h_ctrl_row"].mean()
             out_events = out_events.merge(
@@ -809,6 +1035,7 @@ def _evaluate_candidate(
     net_benefit_floor: float,
     simplicity_gate: bool,
     min_regime_stable_splits: int = 2,
+    min_oos_split_samples: int = 1,
     total_event_count: int = 0,
 ) -> Dict[str, object]:
     adverse_delta_vec, opp_delta_vec, exposure_delta_vec = _apply_action_proxy(sub, action)
@@ -877,9 +1104,12 @@ def _evaluate_candidate(
     validation_delta_adverse_mean = _split_mean(tmp, "validation", "adverse_effect")
     test_delta_adverse_mean = _split_mean(tmp, "test", "adverse_effect")
     test_t_stat, test_p_value = _split_t_stat_and_p_value(tmp, "test", "adverse_effect")
+    gate_oos_min_samples = bool(
+        validation_samples >= int(min_oos_split_samples)
+        and test_samples >= int(min_oos_split_samples)
+    )
     gate_oos = bool(
-        validation_samples > 0
-        and test_samples > 0
+        gate_oos_min_samples
         and np.isfinite(validation_delta_adverse_mean)
         and np.isfinite(test_delta_adverse_mean)
         and validation_delta_adverse_mean < 0.0
@@ -908,6 +1138,8 @@ def _evaluate_candidate(
         fail_reasons.append("gate_g_net_benefit")
     if not gate_e:
         fail_reasons.append("gate_e_simplicity")
+    if not gate_oos_min_samples:
+        fail_reasons.append("gate_oos_min_samples")
     if not gate_oos:
         fail_reasons.append("gate_oos_validation_test")
 
@@ -954,6 +1186,7 @@ def _evaluate_candidate(
         "test_t_stat": test_t_stat,
         "test_p_value": test_p_value,
         "test_p_value_adj_bh": np.nan,
+        "gate_oos_min_samples": gate_oos_min_samples,
         "gate_oos_validation_test": gate_oos,
         "gate_multiplicity": False,
         "gate_pass": bool(gate_a and gate_b and gate_c and gate_d and gate_f and gate_g and gate_e and gate_oos),
@@ -1198,6 +1431,9 @@ def main() -> int:
     parser.add_argument("--opportunity_near_zero_eps", type=float, default=0.001)
     parser.add_argument("--net_benefit_floor", type=float, default=0.0)
     parser.add_argument("--min_regime_stable_splits", type=int, default=2)
+    parser.add_argument("--min_oos_split_samples", type=int, default=10)
+    parser.add_argument("--require_controls", type=int, default=1)
+    parser.add_argument("--min_control_coverage", type=float, default=0.8)
     parser.add_argument("--min_sample_size", type=int, default=20)
     parser.add_argument("--promotion_min_ev", type=float, default=0.0)
     parser.add_argument("--promotion_min_stability_score", type=float, default=0.55)
@@ -1212,6 +1448,11 @@ def main() -> int:
         ensure_dir(Path(args.log_path).parent)
         log_handlers.append(logging.FileHandler(args.log_path))
     logging.basicConfig(level=logging.INFO, handlers=log_handlers, format="%(asctime)s %(levelname)s %(message)s")
+
+    if int(args.min_oos_split_samples) < 1:
+        raise ValueError("--min_oos_split_samples must be >= 1")
+    if not (0.0 <= float(args.min_control_coverage) <= 1.0):
+        raise ValueError("--min_control_coverage must be within [0, 1]")
 
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
     event_source = PHASE1_EVENT_SOURCES[args.event_type]
@@ -1229,6 +1470,19 @@ def main() -> int:
         phase1_summary_path,
         require_phase1_pass=bool(args.require_phase1_pass),
     )
+    queue_exists, queue_df = _load_phase1_hypothesis_queue(args.run_id)
+    matched_hypothesis_ids = _supporting_hypothesis_ids(queue_df, args.event_type, max_ids=10)
+
+    if bool(args.require_phase1_pass):
+        if not phase1_events_file_exists:
+            raise ValueError(f"Phase 1 events file missing for {args.event_type}: {events_path}")
+        if phase1_decision in {"missing_summary", "invalid_summary"}:
+            raise ValueError(f"Phase 1 summary invalid for {args.event_type}: {phase1_summary_path}")
+        if queue_exists and not matched_hypothesis_ids:
+            raise ValueError(
+                f"Hypothesis queue exists but has no entries mapped to event_type={args.event_type} "
+                f"for run_id={args.run_id}"
+            )
 
     if not events.empty:
         if "symbol" not in events.columns:
@@ -1241,91 +1495,74 @@ def main() -> int:
 
     if events.empty:
         out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "phase2" / args.run_id / args.event_type
-        ensure_dir(out_dir)
-        cand_path = out_dir / "phase2_candidates.csv"
-        prom_path = out_dir / "promoted_candidates.json"
-        symbol_eval_path = out_dir / "phase2_symbol_evaluation.csv"
-        manifest_path = out_dir / "phase2_manifests.json"
-        summary_path = out_dir / "phase2_summary.md"
-
-        pd.DataFrame(columns=PRIMARY_OUTPUT_COLUMNS).to_csv(cand_path, index=False)
-        pd.DataFrame(columns=SYMBOL_OUTPUT_COLUMNS).to_csv(symbol_eval_path, index=False)
-        prom_payload = {
-            "run_id": args.run_id,
-            "event_type": args.event_type,
-            "decision": "freeze",
-            "phase1_pass": bool(phase1_pass),
-            "phase1_structure_pass": bool(phase1_structure_pass),
-            "phase1_decision": phase1_decision,
-            "promoted_count": 0,
-            "deployment_mode": DEPLOYMENT_MODE_DIVERSIFY,
-            "deployment_mode_rationale": "No phase-1 events are available, so deployment defaults to diversify mode.",
-            "deployment_dispersion_test": {
-                "deployment_mode": DEPLOYMENT_MODE_DIVERSIFY,
-                "rationale": "No phase-1 events are available, so deployment defaults to diversify mode.",
-                "dominance_detected": False,
-                "top_symbols_considered": [],
-                "dispersion_metrics": {
-                    "score_gap": 0.0,
-                    "relative_gap": 0.0,
-                    "confidence_overlap": True,
-                    "stability_adjusted_spread": 0.0,
-                },
-            },
-            "candidates": [],
-            "reason": "no_phase1_events",
-            "phase1_events_file_exists": bool(phase1_events_file_exists),
-        }
-        prom_path.write_text(json.dumps(prom_payload, indent=2), encoding="utf-8")
-        manifest_payload = {
-            "run_id": args.run_id,
-            "event_type": args.event_type,
-            "phase1_pass": bool(phase1_pass),
-            "phase1_structure_pass": bool(phase1_structure_pass),
-            "phase1_decision": phase1_decision,
-            "conditions_generated": 0,
-            "actions_generated": 0,
-            "conditions_evaluated": 0,
-            "actions_evaluated": 0,
-            "candidates_evaluated": 0,
-            "caps": {
-                "max_conditions": int(args.max_conditions),
-                "max_actions": int(args.max_actions),
-                "condition_cap_pass": True,
-                "action_cap_pass": True,
-                "simplicity_gate_pass": True,
-            },
-            "opportunity": {
-                "horizon_bars": int(args.opportunity_horizon_bars),
-                "tight_ci_eps": float(args.opportunity_tight_eps),
-            },
-            "gates": {
-                "min_regime_stable_splits": int(args.min_regime_stable_splits),
-            },
-            "no_phase1_events": True,
-            "phase1_events_file_exists": bool(phase1_events_file_exists),
-            "deployment_mode": DEPLOYMENT_MODE_DIVERSIFY,
-            "deployment_mode_rationale": "No phase-1 events are available, so deployment defaults to diversify mode.",
-        }
-        manifest_path.write_text(json.dumps(manifest_payload, indent=2), encoding="utf-8")
-        summary_path.write_text(
-            "\n".join(
-                [
-                    "# Phase 2 Conditional Edge Hypothesis",
-                    "",
-                    f"Run ID: `{args.run_id}`",
-                    f"Event type: `{args.event_type}`",
-                    "Decision: **FREEZE**",
-                    f"Phase 1 status: `{phase1_decision}`",
-                    "",
-                    "No Phase 1 events were available for the requested symbols.",
-                    f"Deployment mode: {DEPLOYMENT_MODE_DIVERSIFY}",
-                    "Deployment rationale: No phase-1 events are available, so deployment defaults to diversify mode.",
-                ]
-            ),
-            encoding="utf-8",
+        _write_freeze_outputs(
+            out_dir=out_dir,
+            run_id=args.run_id,
+            event_type=args.event_type,
+            phase1_pass=bool(phase1_pass),
+            phase1_structure_pass=bool(phase1_structure_pass),
+            phase1_decision=phase1_decision,
+            phase1_events_file_exists=bool(phase1_events_file_exists),
+            queue_exists=bool(queue_exists),
+            matched_hypothesis_ids=matched_hypothesis_ids,
+            reason="no_phase1_events",
+            reason_message="No phase-1 events are available, so deployment defaults to diversify mode.",
+            max_conditions=int(args.max_conditions),
+            max_actions=int(args.max_actions),
+            opportunity_horizon_bars=int(args.opportunity_horizon_bars),
+            opportunity_tight_eps=float(args.opportunity_tight_eps),
+            min_regime_stable_splits=int(args.min_regime_stable_splits),
         )
         logging.info("No Phase 1 events available; wrote frozen Phase 2 artifacts to %s", out_dir)
+        return 0
+
+    control_coverage_ratio, control_event_total, control_event_matched = _controls_coverage(events, controls)
+    if bool(int(args.require_controls)) and control_coverage_ratio < float(args.min_control_coverage):
+        out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "phase2" / args.run_id / args.event_type
+        reason_message = (
+            "Phase-1 controls coverage is below threshold; refusing to infer conditional edge economics "
+            "from event-only baselines."
+        )
+        _write_freeze_outputs(
+            out_dir=out_dir,
+            run_id=args.run_id,
+            event_type=args.event_type,
+            phase1_pass=bool(phase1_pass),
+            phase1_structure_pass=bool(phase1_structure_pass),
+            phase1_decision=phase1_decision,
+            phase1_events_file_exists=bool(phase1_events_file_exists),
+            queue_exists=bool(queue_exists),
+            matched_hypothesis_ids=matched_hypothesis_ids,
+            reason="insufficient_controls_coverage",
+            reason_message=reason_message,
+            max_conditions=int(args.max_conditions),
+            max_actions=int(args.max_actions),
+            opportunity_horizon_bars=int(args.opportunity_horizon_bars),
+            opportunity_tight_eps=float(args.opportunity_tight_eps),
+            min_regime_stable_splits=int(args.min_regime_stable_splits),
+            extra_promoted_fields={
+                "controls_required": True,
+                "min_control_coverage": float(args.min_control_coverage),
+                "controls_coverage_ratio": float(control_coverage_ratio),
+                "controls_events_total": int(control_event_total),
+                "controls_events_matched": int(control_event_matched),
+            },
+            extra_manifest_fields={
+                "controls_required": True,
+                "min_control_coverage": float(args.min_control_coverage),
+                "controls_coverage_ratio": float(control_coverage_ratio),
+                "controls_events_total": int(control_event_total),
+                "controls_events_matched": int(control_event_matched),
+            },
+        )
+        logging.warning(
+            "Phase 2 froze %s due to controls coverage %.4f < %.4f (%s/%s events).",
+            args.event_type,
+            float(control_coverage_ratio),
+            float(args.min_control_coverage),
+            int(control_event_matched),
+            int(control_event_total),
+        )
         return 0
 
     events, controls = _attach_forward_opportunity(
@@ -1377,6 +1614,7 @@ def main() -> int:
                     net_benefit_floor=args.net_benefit_floor,
                     simplicity_gate=simplicity_pass,
                     min_regime_stable_splits=args.min_regime_stable_splits,
+                    min_oos_split_samples=args.min_oos_split_samples,
                     total_event_count=len(events),
                 )
                 rows.append(res)
@@ -1408,6 +1646,9 @@ def main() -> int:
             if not bool(row.get("gate_multiplicity", False)):
                 reasons.append("gate_multiplicity")
             candidates.at[idx, "fail_reasons"] = ",".join(dict.fromkeys(reasons))
+    if not candidates.empty:
+        candidates["supporting_hypothesis_count"] = int(len(matched_hypothesis_ids))
+        candidates["supporting_hypothesis_ids"] = "|".join(matched_hypothesis_ids)
 
     symbol_eval = _build_symbol_evaluation_table(
         events=events,
@@ -1465,6 +1706,14 @@ def main() -> int:
         "deployment_mode": str(deployment_policy.get("deployment_mode", DEPLOYMENT_MODE_DIVERSIFY)),
         "deployment_mode_rationale": str(deployment_policy.get("rationale", "")),
         "deployment_dispersion_test": deployment_policy,
+        "phase1_hypothesis_queue_exists": bool(queue_exists),
+        "matched_hypothesis_count": int(len(matched_hypothesis_ids)),
+        "matched_hypothesis_ids": matched_hypothesis_ids,
+        "controls_required": bool(int(args.require_controls)),
+        "min_control_coverage": float(args.min_control_coverage),
+        "controls_coverage_ratio": float(control_coverage_ratio),
+        "controls_events_total": int(control_event_total),
+        "controls_events_matched": int(control_event_matched),
         "candidates": promoted.to_dict(orient="records") if isinstance(promoted, pd.DataFrame) and not promoted.empty else [],
     }
     prom_path.write_text(json.dumps(prom_payload, indent=2), encoding="utf-8")
@@ -1495,12 +1744,15 @@ def main() -> int:
         },
         "gates": {
             "min_regime_stable_splits": int(args.min_regime_stable_splits),
+            "min_oos_split_samples": int(args.min_oos_split_samples),
             "promotion_min_ev": float(args.promotion_min_ev),
             "promotion_min_stability_score": float(args.promotion_min_stability_score),
             "promotion_min_sample_size": int(args.promotion_min_sample_size),
             "oos_gate": "validation_and_test_adverse_improvement_required",
             "multiplicity_method": "benjamini_hochberg",
             "multiplicity_alpha": 0.05,
+            "controls_required": bool(int(args.require_controls)),
+            "min_control_coverage": float(args.min_control_coverage),
         },
         "hypotheses_tested": int(len(candidates)),
         "adjusted_pass_count": int(candidates["gate_multiplicity"].sum()) if not candidates.empty and "gate_multiplicity" in candidates.columns else 0,
@@ -1511,6 +1763,11 @@ def main() -> int:
         "rejected_symbol_rows_by_reason": dict(sorted(rejection_reason_counts.items())),
         "deployment_mode": str(deployment_policy.get("deployment_mode", DEPLOYMENT_MODE_DIVERSIFY)),
         "deployment_mode_rationale": str(deployment_policy.get("rationale", "")),
+        "phase1_hypothesis_queue_exists": bool(queue_exists),
+        "matched_hypothesis_count": int(len(matched_hypothesis_ids)),
+        "controls_coverage_ratio": float(control_coverage_ratio),
+        "controls_events_total": int(control_event_total),
+        "controls_events_matched": int(control_event_matched),
     }
     manifest_path.write_text(json.dumps(manifest_payload, indent=2), encoding="utf-8")
 
@@ -1525,6 +1782,8 @@ def main() -> int:
         f"Phase 1 pass required: `{bool(args.require_phase1_pass)}`",
         f"Phase 1 status: `{phase1_decision}`",
         f"Phase 1 structure pass: `{bool(phase1_structure_pass)}`",
+        f"Hypothesis queue present: `{bool(queue_exists)}`",
+        f"Matched hypotheses for this event family: `{int(len(matched_hypothesis_ids))}`",
         "",
         "## Counts",
         f"- Conditions generated: {len(all_conditions)} (cap={args.max_conditions})",
@@ -1534,9 +1793,13 @@ def main() -> int:
         f"- Candidate rows evaluated: {len(candidates)}",
         f"- Simplicity gate pass: {simplicity_pass}",
         f"- Regime stability required splits: {int(args.min_regime_stable_splits)}",
+        f"- OOS minimum split samples: {int(args.min_oos_split_samples)}",
         f"- Promotion min EV: {float(args.promotion_min_ev):.6f}",
         f"- Promotion min stability score: {float(args.promotion_min_stability_score):.3f}",
         f"- Promotion min sample size: {int(args.promotion_min_sample_size)}",
+        f"- Controls required: {bool(int(args.require_controls))}",
+        f"- Minimum controls coverage: {float(args.min_control_coverage):.3f}",
+        f"- Controls coverage ratio: {float(control_coverage_ratio):.3f} ({int(control_event_matched)}/{int(control_event_total)})",
         f"- Symbol rows promoted: {int(symbol_eval['deployable'].astype(bool).sum()) if not symbol_eval.empty else 0}",
         f"- Symbol rows rejected: {int((~symbol_eval['deployable'].astype(bool)).sum()) if not symbol_eval.empty else 0}",
         f"- Rejected by reason: {dict(sorted(rejection_reason_counts.items())) if rejection_reason_counts else {}}",

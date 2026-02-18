@@ -60,3 +60,31 @@ def test_build_universe_snapshots_and_eligibility_mask(tmp_path: Path) -> None:
     timestamps = pd.Series(pd.to_datetime(["2023-12-01T00:00:00Z", "2024-01-01T00:00:00Z", "2024-02-01T00:00:00Z"]))
     mask = runner._symbol_eligibility_mask(timestamps, symbol, snapshots)
     assert mask.tolist() == [False, True, False]
+    # Regression check: mask must align to timestamp labels for downstream reindexing.
+    assert isinstance(mask.index, pd.DatetimeIndex)
+    assert mask.reindex(pd.DatetimeIndex(timestamps)).fillna(False).tolist() == [False, True, False]
+
+
+def test_universe_snapshot_status_is_deterministic_from_data_window(tmp_path: Path) -> None:
+    run_id = "u_snap_status"
+    _write_cleaned_bars(tmp_path, run_id, "BTCUSDT", "2024-01-20", 20)
+    _write_cleaned_bars(tmp_path, run_id, "ETHUSDT", "2024-01-01", 20)
+
+    env = os.environ.copy()
+    env["BACKTEST_DATA_ROOT"] = str(tmp_path)
+    cmd = [
+        sys.executable,
+        str(ROOT / "project" / "pipelines" / "ingest" / "build_universe_snapshots.py"),
+        "--run_id",
+        run_id,
+        "--symbols",
+        "BTCUSDT,ETHUSDT",
+        "--market",
+        "perp",
+    ]
+    subprocess.run(cmd, check=True, env=env)
+
+    payload = json.loads((tmp_path / "reports" / "universe" / run_id / "universe_membership.json").read_text(encoding="utf-8"))
+    by_symbol = {row["symbol"]: row for row in payload.get("snapshots", [])}
+    assert by_symbol["BTCUSDT"]["status"] == "active"
+    assert by_symbol["ETHUSDT"]["status"] == "inactive"

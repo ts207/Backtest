@@ -84,6 +84,9 @@ def test_generator_emits_template_and_fusion_candidates_with_anti_leak_pass(tmp_
         assert "passed" in checks
         assert checks["fixed_horizon_bucket"] is True
         assert checks["negative_controls_predefined"] is True
+        assert checks["mapped_to_phase2_event_family"] is True
+        assert isinstance(row.get("target_phase2_event_types"), list)
+        assert row.get("target_phase2_event_types")
 
 
 def test_anti_leak_check_fails_on_outcome_reference() -> None:
@@ -97,3 +100,53 @@ def test_anti_leak_check_fails_on_outcome_reference() -> None:
     checks = generate_hypothesis_queue._anti_leak_checks(candidate)
     assert checks["event_defined_without_outcome_reference"] is True
     assert checks["passed"] is False
+
+
+def test_generator_respects_min_symbol_coverage_threshold(tmp_path: Path, monkeypatch) -> None:
+    run_id = "hgen_symbol_coverage"
+    _touch(tmp_path / "lake" / "raw" / "binance" / "perp" / "BTCUSDT" / "funding" / "year=2024" / "month=01" / "part.parquet")
+
+    monkeypatch.setattr(generate_hypothesis_queue, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "generate_hypothesis_queue.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--datasets",
+            "um_funding_rates",
+        ],
+    )
+    assert generate_hypothesis_queue.main() == 0
+
+    out_dir = tmp_path / "reports" / "hypothesis_generator" / run_id
+    rows = json.loads((out_dir / "dataset_introspection.json").read_text(encoding="utf-8"))
+    assert rows[0]["dataset_id"] == "um_funding_rates"
+    assert rows[0]["available"] is False
+    assert rows[0]["available_symbol_count"] == 1
+    assert rows[0]["required_symbol_count"] == 2
+    assert rows[0]["symbol_coverage_ratio"] == 0.5
+
+    run_id_relaxed = "hgen_symbol_coverage_relaxed"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "generate_hypothesis_queue.py",
+            "--run_id",
+            run_id_relaxed,
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--datasets",
+            "um_funding_rates",
+            "--min_symbol_coverage",
+            "0.5",
+        ],
+    )
+    assert generate_hypothesis_queue.main() == 0
+    out_dir_relaxed = tmp_path / "reports" / "hypothesis_generator" / run_id_relaxed
+    rows_relaxed = json.loads((out_dir_relaxed / "dataset_introspection.json").read_text(encoding="utf-8"))
+    assert rows_relaxed[0]["available"] is True

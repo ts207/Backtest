@@ -16,7 +16,7 @@ DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.config import load_configs
-from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet, write_parquet
+from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet, run_scoped_lake_path, write_parquet
 from pipelines._lib.run_manifest import (
     finalize_manifest,
     schema_hash_from_columns,
@@ -92,7 +92,7 @@ def _align_funding(bars: pd.DataFrame, funding: pd.DataFrame) -> Tuple[pd.DataFr
     return merged[["timestamp", "funding_event_ts", "funding_rate_scaled", "funding_missing"]], missing_pct
 
 
-def _partition_complete(path: Path, expected_rows: int) -> bool:
+def _partition_complete(path: Path, expected_rows: int, range_start: datetime, range_end_exclusive: datetime) -> bool:
     if not path.exists():
         csv_path = path.with_suffix(".csv")
         if csv_path.exists():
@@ -103,7 +103,26 @@ def _partition_complete(path: Path, expected_rows: int) -> bool:
         if expected_rows == 0:
             return True
         data = read_parquet([path])
-        return len(data) >= expected_rows
+        if len(data) != expected_rows:
+            return False
+        if "timestamp" not in data.columns:
+            return False
+        ts = pd.to_datetime(data["timestamp"], utc=True, errors="coerce")
+        if ts.isna().any():
+            return False
+        if ts.duplicated().any():
+            return False
+        if not ts.is_monotonic_increasing:
+            return False
+        expected_index = pd.date_range(
+            start=range_start,
+            end=range_end_exclusive - timedelta(minutes=15),
+            freq="15min",
+            tz=timezone.utc,
+        )
+        if len(expected_index) != expected_rows:
+            return False
+        return ts.reset_index(drop=True).equals(pd.Series(expected_index))
     except Exception:
         return False
 
@@ -181,6 +200,8 @@ def main() -> int:
 
             raw_start = raw["timestamp"].min()
             raw_end = raw["timestamp"].max()
+            if args.start and args.end and _parse_date(args.start) > _parse_date(args.end):
+                raise ValueError(f"Invalid date range for {symbol}: start must be <= end.")
             start_ts = max(raw_start, _parse_date(args.start)) if args.start else raw_start
             if args.end:
                 end_ts = min(raw_end, _parse_date(args.end))
@@ -188,6 +209,11 @@ def main() -> int:
             else:
                 end_ts = raw_end
                 end_exclusive = raw_end + timedelta(minutes=15)
+            if end_exclusive <= start_ts:
+                raise ValueError(
+                    f"No overlapping OHLCV window for {symbol}: raw=[{raw_start.isoformat()}..{raw_end.isoformat()}], "
+                    f"requested=[{args.start}..{args.end}]"
+                )
 
             full_index = pd.date_range(
                 start=start_ts,
@@ -277,6 +303,8 @@ def main() -> int:
 
             cleaned_dir = DATA_ROOT / "lake" / "cleaned" / market / symbol / "bars_15m"
             funding_out_dir = DATA_ROOT / "lake" / "cleaned" / market / symbol / "funding_15m"
+            run_cleaned_dir = run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", market, symbol, "bars_15m")
+            run_funding_out_dir = run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", market, symbol, "funding_15m")
 
             missing_stats: Dict[str, Dict[str, float]] = {}
             funding_stats: Dict[str, Dict[str, float]] = {}
@@ -323,19 +351,31 @@ def main() -> int:
                         )
 
                 bars_out_path = (
+                    run_cleaned_dir
+                    / f"year={month_start.year}"
+                    / f"month={month_start.month:02d}"
+                    / f"bars_{symbol}_15m_{month_start.year}-{month_start.month:02d}.parquet"
+                )
+                bars_out_path_compat = (
                     cleaned_dir
                     / f"year={month_start.year}"
                     / f"month={month_start.month:02d}"
                     / f"bars_{symbol}_15m_{month_start.year}-{month_start.month:02d}.parquet"
                 )
                 funding_out_path = (
+                    run_funding_out_dir
+                    / f"year={month_start.year}"
+                    / f"month={month_start.month:02d}"
+                    / f"funding15m_{symbol}_{month_start.year}-{month_start.month:02d}.parquet"
+                )
+                funding_out_path_compat = (
                     funding_out_dir
                     / f"year={month_start.year}"
                     / f"month={month_start.month:02d}"
                     / f"funding15m_{symbol}_{month_start.year}-{month_start.month:02d}.parquet"
                 )
 
-                if not args.force and _partition_complete(bars_out_path, expected_rows):
+                if not args.force and _partition_complete(bars_out_path, expected_rows, range_start, range_end_exclusive):
                     partitions_skipped.append(str(bars_out_path))
                 else:
                     ensure_dir(bars_out_path.parent)
@@ -350,9 +390,11 @@ def main() -> int:
                         }
                     )
                     partitions_written.append(str(bars_written))
+                    ensure_dir(bars_out_path_compat.parent)
+                    write_parquet(bars_month.reset_index(drop=True), bars_out_path_compat)
 
                 if market == "perp":
-                    if not args.force and _partition_complete(funding_out_path, expected_rows):
+                    if not args.force and _partition_complete(funding_out_path, expected_rows, range_start, range_end_exclusive):
                         partitions_skipped.append(str(funding_out_path))
                     else:
                         ensure_dir(funding_out_path.parent)
@@ -367,6 +409,8 @@ def main() -> int:
                             }
                         )
                         partitions_written.append(str(funding_written))
+                        ensure_dir(funding_out_path_compat.parent)
+                        write_parquet(funding_month.reset_index(drop=True), funding_out_path_compat)
 
             stats["symbols"][symbol] = {
                 "effective_start": start_ts.isoformat(),

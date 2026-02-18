@@ -247,6 +247,23 @@ def _missing_expected_timestamps(df: pd.DataFrame, expected_ts: List[pd.Timestam
     return [t for t in expected_ts if t not in got]
 
 
+def _missing_timestamp_ranges(missing_ts: List[pd.Timestamp]) -> List[Tuple[datetime, datetime]]:
+    if not missing_ts:
+        return []
+    ordered = sorted(pd.to_datetime(missing_ts, utc=True))
+    step = pd.Timedelta(hours=8)
+    ranges: List[Tuple[datetime, datetime]] = []
+    range_start = ordered[0]
+    prev = ordered[0]
+    for ts in ordered[1:]:
+        if ts - prev > step:
+            ranges.append((range_start.to_pydatetime(), (prev + step).to_pydatetime()))
+            range_start = ts
+        prev = ts
+    ranges.append((range_start.to_pydatetime(), (prev + step).to_pydatetime()))
+    return ranges
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Ingest Binance USD-M funding rates")
     parser.add_argument("--run_id", required=True)
@@ -437,15 +454,23 @@ def main() -> int:
             api_coverage_end = None
 
             if int(args.use_api_fallback) and len(missing_from_archive) > 0:
-                api_data, api_calls = _fetch_funding_api(
-                    session,
-                    args.api_base_url,
-                    symbol,
-                    effective_start,
-                    end_exclusive_all,
-                    args.api_limit,
-                    args.api_sleep_sec,
-                )
+                api_frames: List[pd.DataFrame] = []
+                for api_start, api_end_exclusive in _missing_timestamp_ranges(missing_from_archive):
+                    frame, calls = _fetch_funding_api(
+                        session,
+                        args.api_base_url,
+                        symbol,
+                        api_start,
+                        api_end_exclusive,
+                        args.api_limit,
+                        args.api_sleep_sec,
+                    )
+                    api_calls += int(calls)
+                    if not frame.empty:
+                        api_frames.append(frame)
+                if api_frames:
+                    api_data = pd.concat(api_frames, ignore_index=True)
+                    api_data = api_data.sort_values("timestamp").drop_duplicates(subset=["timestamp"], keep="first")
                 if not api_data.empty:
                     api_coverage_start = api_data["timestamp"].min().isoformat()
                     api_coverage_end = api_data["timestamp"].max().isoformat()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import logging
 import os
@@ -29,6 +30,18 @@ NO_OUTCOME_TOKENS = {
     "alpha",
     "drawdown",
 }
+
+PHASE2_EVENT_TYPES: Tuple[str, ...] = (
+    "vol_shock_relaxation",
+    "liquidity_refill_lag_window",
+    "liquidity_absence_window",
+    "vol_aftershock_window",
+    "directional_exhaustion_after_forced_flow",
+    "cross_venue_desync",
+    "liquidity_vacuum",
+    "funding_extreme_reversal_window",
+    "range_compression_breakout_window",
+)
 
 
 @dataclass(frozen=True)
@@ -175,20 +188,51 @@ def _parse_datasets(datasets: str) -> Set[str]:
     return requested
 
 
-def _dataset_available(spec: DatasetSpec, run_id: str, symbols: Sequence[str], data_root: Path) -> bool:
+def _dataset_coverage(
+    spec: DatasetSpec,
+    run_id: str,
+    symbols: Sequence[str],
+    data_root: Path,
+) -> Tuple[List[str], List[str]]:
+    available_symbols: List[str] = []
     for symbol in symbols:
+        symbol_available = False
         for rel in spec.required_paths:
             candidate = data_root / Path(rel.format(run_id=run_id, symbol=symbol))
             if candidate.exists():
-                return True
-    return False
+                symbol_available = True
+                break
+        if symbol_available:
+            available_symbols.append(str(symbol))
+    missing_symbols = [str(symbol) for symbol in symbols if str(symbol) not in set(available_symbols)]
+    return available_symbols, missing_symbols
 
 
-def _introspect_datasets(run_id: str, symbols: Sequence[str], dataset_ids: Iterable[str], data_root: Path) -> List[Dict[str, object]]:
+def _introspect_datasets(
+    run_id: str,
+    symbols: Sequence[str],
+    dataset_ids: Iterable[str],
+    data_root: Path,
+    min_symbol_coverage: float,
+) -> List[Dict[str, object]]:
     rows: List[Dict[str, object]] = []
+    required_symbol_count = int(len(symbols))
     for dataset_id in sorted(dataset_ids):
         spec = DATASET_REGISTRY[dataset_id]
-        available = _dataset_available(spec, run_id=run_id, symbols=symbols, data_root=data_root)
+        available_symbols, missing_symbols = _dataset_coverage(
+            spec,
+            run_id=run_id,
+            symbols=symbols,
+            data_root=data_root,
+        )
+        available_symbol_count = int(len(available_symbols))
+        symbol_coverage_ratio = (
+            float(available_symbol_count / required_symbol_count) if required_symbol_count > 0 else 0.0
+        )
+        available = bool(
+            available_symbol_count > 0
+            and symbol_coverage_ratio >= float(min_symbol_coverage)
+        )
         rows.append(
             {
                 "dataset_id": spec.dataset_id,
@@ -197,6 +241,11 @@ def _introspect_datasets(run_id: str, symbols: Sequence[str], dataset_ids: Itera
                 "resolution": spec.resolution,
                 "source": spec.source,
                 "available": bool(available),
+                "available_symbol_count": available_symbol_count,
+                "required_symbol_count": required_symbol_count,
+                "symbol_coverage_ratio": round(symbol_coverage_ratio, 4),
+                "available_symbols": available_symbols,
+                "missing_symbols": missing_symbols,
             }
         )
     return rows
@@ -633,6 +682,9 @@ def _anti_leak_checks(candidate: Dict[str, object]) -> Dict[str, object]:
     horizon = str(candidate.get("fixed_horizon_bucket", "")).lower()
     controls = candidate.get("negative_controls", [])
     required = [str(x).lower() for x in candidate.get("required_datasets", [])]
+    target_phase2 = candidate.get("target_phase2_event_types", [])
+    if not isinstance(target_phase2, list):
+        target_phase2 = []
 
     checks = {
         "mechanism_without_outcome_reference": not any(token in sentence for token in NO_OUTCOME_TOKENS),
@@ -641,9 +693,104 @@ def _anti_leak_checks(candidate: Dict[str, object]) -> Dict[str, object]:
         "fixed_horizon_bucket": horizon in {"short", "medium"},
         "negative_controls_predefined": isinstance(controls, list) and len(controls) >= 2,
         "pre_event_conditioning_only": bool(event_spec.get("pre_event_conditioning_only")),
+        "mapped_to_phase2_event_family": bool(target_phase2) and all(x in PHASE2_EVENT_TYPES for x in target_phase2),
     }
     checks["passed"] = bool(all(checks.values()))
     return checks
+
+
+def _normalize_string_list(value: object) -> List[str]:
+    if isinstance(value, list):
+        out = [str(x).strip() for x in value if str(x).strip()]
+        return out
+    text = str(value or "").strip()
+    if not text:
+        return []
+    if text.startswith("[") and text.endswith("]"):
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                parsed = parser(text)
+            except Exception:
+                continue
+            if isinstance(parsed, list):
+                return [str(x).strip() for x in parsed if str(x).strip()]
+    if "|" in text:
+        return [x.strip() for x in text.split("|") if x.strip()]
+    return [text]
+
+
+def _map_target_phase2_event_types(candidate: Dict[str, object]) -> List[str]:
+    event_spec = candidate.get("event_family_spec", {}) if isinstance(candidate.get("event_family_spec"), dict) else {}
+    tokens = " ".join(
+        [
+            str(candidate.get("template_id", "")).lower(),
+            str(candidate.get("fusion_operator", "")).lower(),
+            str(candidate.get("mechanism_sentence", "")).lower(),
+            str(event_spec.get("event_type", "")).lower(),
+            str(event_spec.get("trigger", "")).lower(),
+            str(event_spec.get("consequence_class", "")).lower(),
+            str(event_spec.get("context", "")).lower(),
+            " ".join(str(x).lower() for x in candidate.get("required_datasets", [])),
+        ]
+    )
+    mapped: List[str] = []
+
+    def _has(*parts: str) -> bool:
+        return any(part in tokens for part in parts)
+
+    if _has("desync", "synchronization", "lead_lag", "basis_jump", "overshoot_then_convergence"):
+        mapped.append("cross_venue_desync")
+    if _has("refill", "delayed_refill", "refill_lag"):
+        mapped.append("liquidity_refill_lag_window")
+    if _has("liquidity_vacuum", "vacuum", "book_thinning", "depth_depletion"):
+        mapped.append("liquidity_vacuum")
+    if _has("liquidity_discontinuity", "finite_supply_of_immediacy", "aggressive_trade_burst", "book_thinning", "depth_depletion"):
+        mapped.append("liquidity_absence_window")
+    if _has("aftershock", "volatility_aftershock", "volatility_spike", "volatility_expansion"):
+        mapped.extend(["vol_aftershock_window", "vol_shock_relaxation"])
+    if _has("forced_flow", "forced participation", "non-economic", "asymmetric_unwind"):
+        mapped.append("directional_exhaustion_after_forced_flow")
+    if _has("crowding", "crowded_long", "crowded_short", "funding", "open_interest", "constraint_unwind"):
+        mapped.append("funding_extreme_reversal_window")
+    if _has("compression", "breakout", "repricing", "scheduled_release", "post_event_repricing"):
+        mapped.append("range_compression_breakout_window")
+
+    template_id = str(candidate.get("template_id", "")).strip()
+    template_defaults: Dict[str, List[str]] = {
+        "T1_forced_participation_constraint": [
+            "directional_exhaustion_after_forced_flow",
+            "liquidity_vacuum",
+            "vol_aftershock_window",
+        ],
+        "T2_latency_synchronization_failure": ["cross_venue_desync"],
+        "T3_capacity_saturation_liquidity_discontinuity": [
+            "liquidity_absence_window",
+            "liquidity_refill_lag_window",
+            "liquidity_vacuum",
+        ],
+        "T4_crowding_constraint_unwind": [
+            "funding_extreme_reversal_window",
+            "vol_shock_relaxation",
+        ],
+        "T5_information_release_asymmetry": ["range_compression_breakout_window"],
+    }
+    if template_id in template_defaults:
+        mapped.extend(template_defaults[template_id])
+
+    operator = str(candidate.get("fusion_operator", "")).strip()
+    fusion_defaults: Dict[str, List[str]] = {
+        "F1_trigger_plus_context": ["liquidity_absence_window"],
+        "F2_confirmation": ["liquidity_refill_lag_window"],
+        "F3_causal_chain": ["vol_shock_relaxation", "vol_aftershock_window"],
+        "F4_cross_domain_sync": ["cross_venue_desync", "directional_exhaustion_after_forced_flow"],
+        "F5_triangulated_gating": ["liquidity_vacuum", "liquidity_absence_window"],
+    }
+    if operator in fusion_defaults:
+        mapped.extend(fusion_defaults[operator])
+
+    normalized = _normalize_string_list(mapped)
+    deduped = sorted({x for x in normalized if x in PHASE2_EVENT_TYPES})
+    return deduped
 
 
 def _format_summary_md(
@@ -682,6 +829,7 @@ def main() -> int:
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--datasets", default="auto")
     parser.add_argument("--max_fused", type=int, default=24)
+    parser.add_argument("--min_symbol_coverage", type=float, default=1.0)
     parser.add_argument("--out_dir", default=None)
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
@@ -694,6 +842,9 @@ def main() -> int:
 
     symbols = _parse_symbols(args.symbols)
     dataset_ids = _parse_datasets(args.datasets)
+    min_symbol_coverage = float(args.min_symbol_coverage)
+    if not (0.0 < min_symbol_coverage <= 1.0):
+        raise ValueError("--min_symbol_coverage must be in (0, 1].")
     out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "hypothesis_generator" / args.run_id
     ensure_dir(out_dir)
 
@@ -703,22 +854,24 @@ def main() -> int:
         "generate_hypothesis_queue",
         args.run_id,
         params={
-            "run_id": args.run_id,
-            "symbols": symbols,
-            "datasets": sorted(dataset_ids),
-            "max_fused": int(args.max_fused),
-        },
-        inputs=inputs,
-        outputs=outputs,
-    )
+                "run_id": args.run_id,
+                "symbols": symbols,
+                "datasets": sorted(dataset_ids),
+                "max_fused": int(args.max_fused),
+                "min_symbol_coverage": min_symbol_coverage,
+            },
+            inputs=inputs,
+            outputs=outputs,
+        )
 
     try:
         dataset_rows = _introspect_datasets(
             run_id=args.run_id,
-            symbols=symbols,
-            dataset_ids=dataset_ids,
-            data_root=DATA_ROOT,
-        )
+                symbols=symbols,
+                dataset_ids=dataset_ids,
+                data_root=DATA_ROOT,
+                min_symbol_coverage=min_symbol_coverage,
+            )
         dataset_rows_by_id = {str(row["dataset_id"]): row for row in dataset_rows}
         templates = _allowed_templates(dataset_rows)
         template_hypotheses = _build_template_hypotheses(
@@ -737,6 +890,7 @@ def main() -> int:
         for row in candidates:
             scored = dict(row)
             scored.update(_score_hypothesis(scored, dataset_rows_by_id=dataset_rows_by_id))
+            scored["target_phase2_event_types"] = _map_target_phase2_event_types(scored)
             scored["anti_leak_checks"] = _anti_leak_checks(scored)
             enriched.append(scored)
 
@@ -777,6 +931,7 @@ def main() -> int:
                     "observability_score",
                     "testability_score",
                     "priority_score",
+                    "target_phase2_event_types",
                 ]
             )
         queue_df.to_csv(queue_csv_path, index=False)
@@ -808,6 +963,7 @@ def main() -> int:
             status="success",
             stats={
                 "dataset_count": int(len(dataset_rows)),
+                "available_dataset_count": int(sum(1 for row in dataset_rows if bool(row.get("available")))),
                 "template_count": int(len(template_hypotheses)),
                 "fusion_count": int(len(fusion_hypotheses)),
                 "candidate_count": int(len(enriched)),

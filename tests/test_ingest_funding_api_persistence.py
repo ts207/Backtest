@@ -92,3 +92,19 @@ def test_funding_api_fallback_is_persisted(monkeypatch, tmp_path: Path) -> None:
     assert stats["missing_count"] == 0
     assert stats["api_calls"] == 1
     assert stats["partitions_written"]
+
+
+def test_missing_timestamp_ranges_are_chunked_8h_windows() -> None:
+    ts = pd.to_datetime(
+        [
+            "2024-01-01 00:00:00+00:00",
+            "2024-01-01 08:00:00+00:00",
+            "2024-01-02 00:00:00+00:00",
+        ]
+    )
+    ranges = ingest_binance_um_funding._missing_timestamp_ranges(list(ts))
+    assert len(ranges) == 2
+    assert ranges[0][0].isoformat() == "2024-01-01T00:00:00+00:00"
+    assert ranges[0][1].isoformat() == "2024-01-01T16:00:00+00:00"
+    assert ranges[1][0].isoformat() == "2024-01-02T00:00:00+00:00"
+    assert ranges[1][1].isoformat() == "2024-01-02T08:00:00+00:00"

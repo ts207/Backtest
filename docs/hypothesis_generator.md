@@ -1,47 +1,33 @@
-# Dataset-To-Mechanism Hypothesis Generator
+# Hypothesis Generator
 
-This module implements a strict hybrid workflow:
+`project/pipelines/research/generate_hypothesis_queue.py` builds auditable, pre-event hypotheses from dataset structure.
 
-1. Datasets may propose mechanisms.
-2. Phase-1/Phase-2 remain the sole validation gate.
-3. No outcome-based optimization is allowed in generation.
+## Design Constraints
 
-## Entry Point
+- No PnL/return/sharpe optimization in generation.
+- Uses pre-event conditioning only.
+- Emits finite candidate sets with explicit controls.
+- Intended as proposal layer, not validation layer.
+
+Validation remains in phase-1 and phase-2 stages.
+When the queue exists for a run, phase-2 uses queue metadata (`target_phase2_event_types`) to attach proposal lineage to evaluated candidates.
+
+## Command
 
 ```bash
-python3 project/pipelines/research/generate_hypothesis_queue.py \
-  --run_id 20260210_000001 \
+./.venv/bin/python project/pipelines/research/generate_hypothesis_queue.py \
+  --run_id RUN \
   --symbols BTCUSDT,ETHUSDT \
   --datasets auto \
   --max_fused 24
 ```
 
-## Design Guarantees
-
-- No return/PnL/sharpe inputs are used.
-- Horizon is fixed to coarse buckets: `short` or `medium`.
-- Every candidate includes predefined negative controls.
-- Only pre-event conditioning is allowed.
-- Output is finite and auditable.
-
-## Templates Implemented
-
-- `T1_forced_participation_constraint`
-- `T2_latency_synchronization_failure`
-- `T3_capacity_saturation_liquidity_discontinuity`
-- `T4_crowding_constraint_unwind`
-- `T5_information_release_asymmetry`
-
-## Fusion Operators Implemented
-
-- `F1_trigger_plus_context`
-- `F2_confirmation`
-- `F3_causal_chain`
-- `F4_cross_domain_sync`
-- `F5_triangulated_gating`
-
 ## Output Contract
 
+Writes to:
+- `data/reports/hypothesis_generator/<run_id>/`
+
+Typical files:
 - `dataset_introspection.json`
 - `template_hypotheses.json`
 - `fusion_hypotheses.json`
@@ -50,6 +36,10 @@ python3 project/pipelines/research/generate_hypothesis_queue.py \
 - `phase1_hypothesis_queue.csv`
 - `summary.md`
 
-All outputs are written under:
+Queue rows include `target_phase2_event_types` so each proposal maps to one or more phase-2 event families.
 
-`data/reports/hypothesis_generator/<run_id>/`
+## Operational Use
+
+1. Generate queue.
+2. Run phase-1/phase-2 discovery with same `run_id` and symbols.
+3. Compare generated hypotheses against promoted candidates.

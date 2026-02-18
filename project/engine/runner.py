@@ -51,6 +51,17 @@ _CONTEXT_COLUMNS = [
 ]
 
 
+def _dedupe_timestamp_rows(frame: pd.DataFrame, *, label: str) -> Tuple[pd.DataFrame, int]:
+    if frame.empty or "timestamp" not in frame.columns:
+        return frame, 0
+    out = frame.sort_values("timestamp").copy()
+    dupes = int(out["timestamp"].duplicated(keep="last").sum())
+    if dupes > 0:
+        LOGGER.warning("Dropping %s duplicate timestamp rows for %s (keeping last).", dupes, label)
+        out = out.drop_duplicates(subset=["timestamp"], keep="last")
+    return out.reset_index(drop=True), dupes
+
+
 def _load_context_data(data_root: Path, symbol: str, run_id: str, timeframe: str = "15m") -> pd.DataFrame:
     context_candidates = [
         run_scoped_lake_path(data_root, run_id, "context", "funding_persistence", symbol),
@@ -72,7 +83,7 @@ def _load_context_data(data_root: Path, symbol: str, run_id: str, timeframe: str
 
     context["timestamp"] = pd.to_datetime(context["timestamp"], utc=True)
     ensure_utc_timestamp(context["timestamp"], "timestamp")
-    context = context.sort_values("timestamp").drop_duplicates(subset=["timestamp"], keep="last").reset_index(drop=True)
+    context, _ = _dedupe_timestamp_rows(context, label=f"context:{symbol}:{timeframe}")
     if "fp_def_version" not in context.columns:
         context["fp_def_version"] = FP_DEF_VERSION
 
@@ -142,15 +153,22 @@ def _load_universe_snapshots(data_root: Path, run_id: str) -> pd.DataFrame:
 
 
 def _symbol_eligibility_mask(timestamps: pd.Series, symbol: str, snapshots: pd.DataFrame) -> pd.Series:
+    ts_index = pd.DatetimeIndex(pd.to_datetime(timestamps, utc=True, errors="coerce"))
+    if ts_index.hasnans:
+        raise ValueError("Eligibility timestamps must be valid UTC datetimes.")
+
     if snapshots.empty:
-        return pd.Series(True, index=timestamps.index)
-    rows = snapshots[snapshots["symbol"] == str(symbol)]
+        return pd.Series(True, index=ts_index, dtype=bool)
+
+    symbol_key = str(symbol).strip().upper()
+    rows = snapshots[snapshots["symbol"].astype(str).str.upper() == symbol_key]
     if rows.empty:
-        return pd.Series(False, index=timestamps.index)
-    mask = pd.Series(False, index=timestamps.index)
-    for _, row in rows.iterrows():
-        mask = mask | ((timestamps >= row["listing_start"]) & (timestamps <= row["listing_end"]))
-    return mask
+        return pd.Series(False, index=ts_index, dtype=bool)
+
+    mask_values = np.zeros(len(ts_index), dtype=bool)
+    for row in rows.itertuples(index=False):
+        mask_values |= (ts_index >= row.listing_start) & (ts_index <= row.listing_end)
+    return pd.Series(mask_values, index=ts_index, dtype=bool)
 
 
 def _is_carry_strategy(strategy_name: str, strategy_metadata: Dict[str, object]) -> bool:
@@ -191,8 +209,8 @@ def _load_symbol_data(
     ensure_utc_timestamp(features["timestamp"], "timestamp")
     ensure_utc_timestamp(bars["timestamp"], "timestamp")
 
-    features = features.sort_values("timestamp").reset_index(drop=True)
-    bars = bars.sort_values("timestamp").reset_index(drop=True)
+    features, _ = _dedupe_timestamp_rows(features, label=f"features:{symbol}:15m")
+    bars, _ = _dedupe_timestamp_rows(bars, label=f"bars:{symbol}:15m")
     if start_ts is not None:
         features = features[features["timestamp"] >= start_ts].copy()
         bars = bars[bars["timestamp"] >= start_ts].copy()

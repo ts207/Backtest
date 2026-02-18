@@ -154,9 +154,9 @@ def test_blueprint_alias_strategy_name_is_resolvable() -> None:
                 "symbol_scope": {"mode": "single_symbol", "symbols": ["BTCUSDT"], "candidate_symbol": "BTCUSDT"},
                 "direction": "conditional",
                 "entry": {
-                    "triggers": ["bar_close"],
+                    "triggers": ["event_detected"],
                     "conditions": ["all"],
-                    "confirmations": [],
+                    "confirmations": ["oos_validation_pass"],
                     "delay_bars": 0,
                     "cooldown_bars": 1,
                 },

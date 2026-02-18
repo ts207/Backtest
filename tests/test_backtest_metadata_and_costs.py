@@ -225,3 +225,17 @@ def test_cost_components_include_funding_and_borrow_in_net_alpha() -> None:
     assert round(out["funding_pnl"], 10) == 0.002
     assert round(out["borrow_cost"], 10) == 0.0004
     assert round(out["net_alpha"], 10) == round(out["gross_alpha"] + out["funding_pnl"] - out["borrow_cost"], 10)
+
+
+def test_cost_components_with_scaled_returns_avoids_double_scaling() -> None:
+    frame = pd.DataFrame(
+        {
+            "pos": [0, 1, 1, 0],
+            "position_scale": [0.5, 0.5, 0.5, 0.5],
+            "ret": [0.0, 0.005, -0.01, 0.0],  # scaled returns
+        }
+    )
+    out = bts._cost_components_from_frame(frame, fee_bps=4.0, slippage_bps=2.0)
+    assert round(out["gross_alpha"], 10) == round(-0.01, 10)
+    assert round(out["fees"], 10) == round(1.0 * 4.0 / 10000.0, 10)
+    assert round(out["slippage"], 10) == round(1.0 * 2.0 / 10000.0, 10)

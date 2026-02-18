@@ -22,7 +22,7 @@ from pipelines._lib.io_utils import (
     run_scoped_lake_path,
     write_parquet,
 )
-from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from pipelines._lib.run_manifest import finalize_manifest, schema_hash_from_columns, start_manifest, validate_input_provenance
 
 
 def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
@@ -41,6 +41,32 @@ def _rolling_percentile(series: pd.Series, window: int) -> pd.Series:
         return float(np.sum(values <= last) / len(values) * 100.0)
 
     return series.rolling(window=window, min_periods=max(128, window // 6)).apply(pct_rank, raw=True)
+
+
+def _dedupe_timestamp_rows(df: pd.DataFrame, label: str) -> tuple[pd.DataFrame, int]:
+    if "timestamp" not in df.columns or df.empty:
+        return df, 0
+    out = df.sort_values("timestamp").copy()
+    dupes = int(out["timestamp"].duplicated(keep="last").sum())
+    if dupes > 0:
+        logging.warning("Dropping %s duplicate timestamp rows for %s (keeping last).", dupes, label)
+        out = out.drop_duplicates(subset=["timestamp"], keep="last")
+    return out.reset_index(drop=True), dupes
+
+
+def _context_partition_complete(existing: pd.DataFrame, expected: pd.DataFrame) -> bool:
+    if existing.empty or len(existing) != len(expected):
+        return False
+    if "timestamp" not in existing.columns or "context_def_version" not in existing.columns:
+        return False
+    existing_ts = pd.to_datetime(existing["timestamp"], utc=True, errors="coerce")
+    expected_ts = pd.to_datetime(expected["timestamp"], utc=True, errors="coerce")
+    if existing_ts.isna().any() or expected_ts.isna().any():
+        return False
+    if list(existing_ts) != list(expected_ts):
+        return False
+    versions = set(existing["context_def_version"].astype(str).dropna().unique().tolist())
+    return versions == {"market_context_v1"}
 
 
 def _build_market_context(symbol: str, features: pd.DataFrame) -> pd.DataFrame:
@@ -136,21 +162,36 @@ def main() -> int:
 
             features["timestamp"] = pd.to_datetime(features["timestamp"], utc=True, errors="coerce")
             features = features.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+            features, dropped_dupes = _dedupe_timestamp_rows(features, label=f"features:{symbol}:{args.timeframe}")
             features = features[(features["timestamp"] >= start) & (features["timestamp"] < end_exclusive)].copy()
             if features.empty:
                 raise ValueError(f"No feature rows in requested range for {symbol}")
 
-            inputs.append({"path": str(feature_dir), **_collect_stats(features)})
+            inputs.append(
+                {
+                    "path": str(feature_dir),
+                    **_collect_stats(features),
+                    "provenance": {
+                        "vendor": "binance",
+                        "exchange": "binance",
+                        "schema_version": "features_v1_15m_v1",
+                        "schema_hash": schema_hash_from_columns(features.columns.tolist()),
+                        "extraction_start": features["timestamp"].min().isoformat(),
+                        "extraction_end": features["timestamp"].max().isoformat(),
+                    },
+                }
+            )
             context = _build_market_context(symbol=symbol, features=features)
 
             out_path = output_root / symbol / f"{args.timeframe}.parquet"
             if out_path.exists() and not int(args.force):
                 existing = read_parquet([out_path])
-                if len(existing) == len(context):
+                if _context_partition_complete(existing, context):
                     outputs.append({"path": str(out_path), "rows": int(len(existing)), "storage_format": out_path.suffix})
                     stats["symbols"][symbol] = {
                         "rows": int(len(existing)),
                         "skipped_existing": True,
+                        "features_duplicate_rows_dropped": int(dropped_dupes),
                     }
                     continue
 
@@ -160,8 +201,10 @@ def main() -> int:
                 "rows": int(len(context)),
                 "vol_regime_counts": context["vol_regime"].value_counts(dropna=False).to_dict(),
                 "funding_regime_counts": context["funding_regime"].value_counts(dropna=False).to_dict(),
+                "features_duplicate_rows_dropped": int(dropped_dupes),
             }
 
+        validate_input_provenance(inputs)
         finalize_manifest(manifest, "success", stats=stats)
         return 0
     except Exception as exc:

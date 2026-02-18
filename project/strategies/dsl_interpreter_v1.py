@@ -18,6 +18,41 @@ from strategy_dsl.schema import (
     SymbolScopeSpec,
 )
 
+KNOWN_ENTRY_SIGNALS = {
+    "event_detected",
+    "vol_shock_relaxation_event",
+    "liquidity_refill_lag_event",
+    "liquidity_absence_event",
+    "vol_aftershock_event",
+    "forced_flow_exhaustion_event",
+    "cross_venue_desync_event",
+    "liquidity_vacuum_event",
+    "funding_extreme_event",
+    "range_compression_breakout_event",
+    "regime_stability_pass",
+    "refill_persistence_pass",
+    "spread_guard_pass",
+    "oos_validation_pass",
+    "cross_venue_consensus_pass",
+    "vacuum_refill_confirmation",
+    "funding_normalization_pass",
+    "breakout_confirmation",
+}
+
+MOMENTUM_BIAS_EVENTS = {
+    "range_compression_breakout_window",
+    "vol_aftershock_window",
+    "cross_venue_desync",
+}
+CONTRARIAN_BIAS_EVENTS = {
+    "vol_shock_relaxation",
+    "liquidity_refill_lag_window",
+    "liquidity_absence_window",
+    "directional_exhaustion_after_forced_flow",
+    "liquidity_vacuum",
+    "funding_extreme_reversal_window",
+}
+
 
 def _to_float(value: object, default: float = 0.0) -> float:
     try:
@@ -202,6 +237,258 @@ def _combined_entry_mask(merged: pd.DataFrame, entry: EntrySpec) -> pd.Series:
     return out.fillna(False)
 
 
+def _rolling_quantile(series: pd.Series, window: int, q: float) -> pd.Series:
+    return series.rolling(window, min_periods=1).quantile(q)
+
+
+def _safe_divide(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
+    denom = denominator.replace(0.0, np.nan)
+    return (numerator / denom).replace([np.inf, -np.inf], np.nan)
+
+
+def _first_overlay_param(blueprint: Blueprint, overlay_name: str, key: str, default: float) -> float:
+    for overlay in blueprint.overlays:
+        if overlay.name == overlay_name:
+            return _to_float(overlay.params.get(key), default=default)
+    return default
+
+
+def _validate_signal_columns(merged: pd.DataFrame, signals: List[str], blueprint_id: str) -> None:
+    cols = set(merged.columns)
+    missing_by_signal: Dict[str, List[str]] = {}
+
+    def _has_numeric_values(column: str) -> bool:
+        if column not in cols:
+            return False
+        series = pd.to_numeric(merged[column], errors="coerce")
+        return bool(series.notna().any())
+
+    for signal in signals:
+        missing: List[str] = []
+        if signal in {"spread_guard_pass", "cross_venue_desync_event", "cross_venue_consensus_pass"} and not _has_numeric_values("spread_bps"):
+            missing.append("spread_bps")
+        if signal in {"funding_extreme_event", "funding_normalization_pass"} and not _has_numeric_values("funding_rate_scaled"):
+            missing.append("funding_rate_scaled")
+        if signal in {"liquidity_absence_event", "liquidity_refill_lag_event", "refill_persistence_pass", "liquidity_vacuum_event"} and not _has_numeric_values("quote_volume"):
+            missing.append("quote_volume")
+        if signal in {
+            "forced_flow_exhaustion_event",
+            "liquidity_vacuum_event",
+            "breakout_confirmation",
+            "range_compression_breakout_event",
+        } and not _has_numeric_values("close"):
+            missing.append("close")
+        if signal in {"vol_aftershock_event", "vol_shock_relaxation_event", "regime_stability_pass", "range_compression_breakout_event"}:
+            has_range = _has_numeric_values("range_96") or (_has_numeric_values("high_96") and _has_numeric_values("low_96")) or _has_numeric_values("range_ratio")
+            if not has_range:
+                missing.append("range_96 or (high_96+low_96)")
+            if not _has_numeric_values("close") and "close" not in missing:
+                missing.append("close")
+        if missing:
+            missing_by_signal[signal] = sorted(set(missing))
+
+    if missing_by_signal:
+        detail = "; ".join(f"{name}: {', '.join(cols)}" for name, cols in sorted(missing_by_signal.items()))
+        raise ValueError(f"Blueprint `{blueprint_id}` missing required columns for entry signals -> {detail}")
+
+
+def _build_signal_frame(merged: pd.DataFrame) -> pd.DataFrame:
+    frame = merged.copy()
+    timestamp = pd.to_datetime(frame.get("timestamp", pd.Series(pd.NaT, index=frame.index)), utc=True, errors="coerce")
+    frame["timestamp"] = timestamp
+    frame["session_hour_utc"] = timestamp.dt.hour.astype(float)
+
+    close = pd.to_numeric(frame.get("close", pd.Series(np.nan, index=frame.index)), errors="coerce")
+    frame["close"] = close
+
+    volume = pd.to_numeric(frame.get("volume", pd.Series(np.nan, index=frame.index)), errors="coerce")
+    volume_quote_fallback = (volume * close).replace([np.inf, -np.inf], np.nan)
+    if "quote_volume" in frame.columns:
+        quote_volume = pd.to_numeric(frame.get("quote_volume"), errors="coerce")
+        quote_volume = quote_volume.where(quote_volume.notna(), volume_quote_fallback)
+    else:
+        quote_volume = volume_quote_fallback
+    frame["quote_volume"] = quote_volume
+
+    if "spread_bps" in frame.columns:
+        spread_bps = pd.to_numeric(frame.get("spread_bps"), errors="coerce")
+        if "basis_bps" in frame.columns:
+            basis_spread = pd.to_numeric(frame.get("basis_bps"), errors="coerce")
+            spread_bps = spread_bps.where(spread_bps.notna(), basis_spread)
+    elif "basis_bps" in frame.columns:
+        spread_bps = pd.to_numeric(frame.get("basis_bps"), errors="coerce")
+    else:
+        spread_bps = pd.Series(np.nan, index=frame.index, dtype=float)
+    frame["spread_bps"] = spread_bps
+    frame["spread_abs"] = spread_bps.abs()
+
+    if "funding_rate_scaled" in frame.columns:
+        funding_rate = pd.to_numeric(frame.get("funding_rate_scaled"), errors="coerce")
+        if "funding_rate" in frame.columns:
+            funding_fallback = pd.to_numeric(frame.get("funding_rate"), errors="coerce")
+            funding_rate = funding_rate.where(funding_rate.notna(), funding_fallback)
+    elif "funding_rate" in frame.columns:
+        funding_rate = pd.to_numeric(frame.get("funding_rate"), errors="coerce")
+    else:
+        funding_rate = pd.Series(np.nan, index=frame.index, dtype=float)
+    frame["funding_rate_scaled"] = funding_rate
+    frame["funding_bps_abs"] = (funding_rate * 10_000.0).abs()
+
+    ret_1 = close.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    ret_4 = close.pct_change(4).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    frame["ret_1"] = ret_1
+    frame["ret_4"] = ret_4
+    frame["abs_ret_1"] = ret_1.abs()
+    frame["abs_ret_4"] = ret_4.abs()
+    trend_96 = _safe_divide(close, close.shift(96)) - 1.0
+    bull_bear_flag = np.sign(trend_96).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    frame["bull_bear_flag"] = bull_bear_flag.astype(float)
+
+    volume_median = quote_volume.rolling(96, min_periods=1).median()
+    frame["volume_ratio"] = _safe_divide(quote_volume, volume_median)
+
+    if "range_96" in frame.columns:
+        range_num = pd.to_numeric(frame.get("range_96"), errors="coerce").abs()
+    else:
+        high_96 = pd.to_numeric(frame.get("high_96", pd.Series(np.nan, index=frame.index)), errors="coerce")
+        low_96 = pd.to_numeric(frame.get("low_96", pd.Series(np.nan, index=frame.index)), errors="coerce")
+        range_num = (high_96 - low_96).abs()
+
+    if "range_med_480" in frame.columns:
+        range_den = pd.to_numeric(frame.get("range_med_480"), errors="coerce").abs()
+    else:
+        range_den = range_num.rolling(480, min_periods=1).median()
+
+    range_ratio = _safe_divide(range_num, range_den)
+    frame["range_ratio"] = range_ratio
+    vol_mean = range_ratio.rolling(96, min_periods=96).mean()
+    vol_std = range_ratio.rolling(96, min_periods=96).std().replace(0.0, np.nan)
+    frame["vol_z"] = ((range_ratio - vol_mean) / vol_std).replace([np.inf, -np.inf], np.nan)
+    realized_vol = ret_1.abs().rolling(96, min_periods=1).mean()
+    vol_q33 = realized_vol.rolling(480, min_periods=1).quantile(1.0 / 3.0)
+    vol_q66 = realized_vol.rolling(480, min_periods=1).quantile(2.0 / 3.0)
+    vol_regime_code = pd.Series(1.0, index=frame.index, dtype=float)
+    vol_regime_code = vol_regime_code.mask(realized_vol <= vol_q33, 0.0)
+    vol_regime_code = vol_regime_code.mask(realized_vol >= vol_q66, 2.0)
+    frame["vol_regime_code"] = vol_regime_code.fillna(1.0)
+
+    frame["spread_q75"] = _rolling_quantile(frame["spread_abs"], 96, 0.75)
+    frame["abs_ret_q75"] = _rolling_quantile(frame["abs_ret_1"], 96, 0.75)
+    frame["abs_ret4_q90"] = _rolling_quantile(frame["abs_ret_4"], 96, 0.90)
+    frame["range_ratio_q25"] = _rolling_quantile(frame["range_ratio"], 96, 0.25)
+
+    for col in ["direction_score", "signed_edge", "forward_return_h"]:
+        frame[col] = pd.to_numeric(frame.get(col, pd.Series(np.nan, index=frame.index)), errors="coerce")
+
+    return frame
+
+
+def _signal_mask(signal: str, frame: pd.DataFrame, blueprint: Blueprint) -> pd.Series:
+    if signal == "event_detected":
+        return pd.Series(True, index=frame.index, dtype=bool)
+    if signal == "oos_validation_pass":
+        return pd.Series(True, index=frame.index, dtype=bool)
+
+    if signal == "spread_guard_pass":
+        max_spread = _first_overlay_param(blueprint, "spread_guard", "max_spread_bps", default=12.0)
+        return (frame["spread_abs"] <= max_spread).fillna(False)
+    if signal == "cross_venue_desync_event":
+        return (frame["spread_abs"] >= frame["spread_q75"]).fillna(False)
+    if signal == "cross_venue_consensus_pass":
+        max_desync = _first_overlay_param(blueprint, "cross_venue_guard", "max_desync_bps", default=20.0)
+        return (frame["spread_abs"] <= max_desync).fillna(False)
+
+    if signal == "funding_extreme_event":
+        max_funding = _first_overlay_param(blueprint, "funding_guard", "max_abs_funding_bps", default=15.0)
+        return (frame["funding_bps_abs"] >= max_funding).fillna(False)
+    if signal == "funding_normalization_pass":
+        max_funding = _first_overlay_param(blueprint, "funding_guard", "max_abs_funding_bps", default=15.0)
+        return (frame["funding_bps_abs"] <= max_funding).fillna(False)
+
+    if signal == "liquidity_absence_event":
+        return (frame["volume_ratio"] <= 0.75).fillna(False)
+    if signal == "liquidity_refill_lag_event":
+        return ((frame["volume_ratio"].shift(1) <= 0.75) & (frame["volume_ratio"] >= 1.0)).fillna(False)
+    if signal == "refill_persistence_pass":
+        return (frame["volume_ratio"] >= 1.0).fillna(False)
+    if signal == "liquidity_vacuum_event":
+        return ((frame["volume_ratio"] <= 0.75) & (frame["abs_ret_1"] >= frame["abs_ret_q75"])).fillna(False)
+    if signal == "vacuum_refill_confirmation":
+        return (frame["volume_ratio"] >= 1.0).fillna(False)
+
+    if signal == "vol_aftershock_event":
+        return (frame["vol_z"] >= 1.0).fillna(False)
+    if signal == "vol_shock_relaxation_event":
+        return ((frame["vol_z"].shift(1) >= 1.0) & (frame["vol_z"] <= 0.5)).fillna(False)
+    if signal == "regime_stability_pass":
+        return (frame["vol_z"].abs() <= 1.0).fillna(False)
+
+    if signal == "range_compression_breakout_event":
+        return ((frame["range_ratio"].shift(1) <= frame["range_ratio_q25"]) & (frame["abs_ret_1"] >= frame["abs_ret_q75"])).fillna(False)
+    if signal == "breakout_confirmation":
+        return (frame["abs_ret_1"] >= frame["abs_ret_q75"]).fillna(False)
+
+    if signal == "forced_flow_exhaustion_event":
+        return (frame["abs_ret_4"] >= frame["abs_ret4_q90"]).fillna(False)
+
+    raise ValueError(f"Unknown entry signal `{signal}`")
+
+
+def _signal_list_mask(frame: pd.DataFrame, signal_names: List[str], blueprint: Blueprint, signal_kind: str) -> pd.Series:
+    if not signal_names:
+        return pd.Series(True, index=frame.index, dtype=bool)
+
+    unknown = sorted(set(signal_names) - KNOWN_ENTRY_SIGNALS)
+    if unknown:
+        joined = ", ".join(unknown)
+        raise ValueError(f"Blueprint `{blueprint.id}` has unknown {signal_kind} signals: {joined}")
+
+    _validate_signal_columns(frame, signal_names, blueprint.id)
+
+    out = pd.Series(True, index=frame.index, dtype=bool)
+    for signal in signal_names:
+        out = out & _signal_mask(signal=signal, frame=frame, blueprint=blueprint)
+    return out.fillna(False)
+
+
+def _entry_eligibility_mask(frame: pd.DataFrame, entry: EntrySpec, blueprint: Blueprint) -> pd.Series:
+    condition_mask = _combined_entry_mask(frame, entry)
+    trigger_mask = _signal_list_mask(frame, entry.triggers, blueprint, signal_kind="trigger")
+    confirmation_mask = _signal_list_mask(frame, entry.confirmations, blueprint, signal_kind="confirmation")
+    return (condition_mask & trigger_mask & confirmation_mask).fillna(False)
+
+
+def _event_direction_bias(event_type: str) -> int:
+    normalized = str(event_type).strip().lower()
+    if normalized in CONTRARIAN_BIAS_EVENTS:
+        return -1
+    if normalized in MOMENTUM_BIAS_EVENTS:
+        return 1
+    return 1
+
+
+def _direction_score(row: pd.Series) -> float:
+    for col in ["direction_score", "signed_edge", "forward_return_h", "ret_4", "ret_1"]:
+        value = _to_float(row.get(col), default=np.nan)
+        if not np.isnan(value):
+            return value
+    return np.nan
+
+
+def _entry_side(row: pd.Series, blueprint: Blueprint) -> int:
+    if blueprint.direction == "long":
+        return 1
+    if blueprint.direction == "short":
+        return -1
+
+    score = _direction_score(row)
+    if np.isnan(score) or abs(score) <= 1e-12:
+        return 0
+
+    base = 1 if score > 0.0 else -1
+    return int(base * _event_direction_bias(blueprint.event_type))
+
+
 def _range_proxy(row: pd.Series) -> float:
     high_96 = _to_float(row.get("high_96"), default=np.nan)
     low_96 = _to_float(row.get("low_96"), default=np.nan)
@@ -278,22 +565,33 @@ class DslInterpreterV1:
         features = features.copy()
         bars["timestamp"] = pd.to_datetime(bars["timestamp"], utc=True)
         features["timestamp"] = pd.to_datetime(features["timestamp"], utc=True)
-        merged = features.drop(columns=["open", "high", "low", "close"], errors="ignore").merge(
-            bars[["timestamp", "open", "high", "low", "close"]],
+        feature_base = features.drop(columns=["open", "high", "low", "close"], errors="ignore")
+        bar_cols = ["timestamp", "open", "high", "low", "close"]
+        for col in ("volume", "quote_volume"):
+            if col in bars.columns and col not in feature_base.columns:
+                bar_cols.append(col)
+        merged = feature_base.merge(
+            bars[bar_cols],
             on="timestamp",
             how="left",
         )
         merged = merged.sort_values("timestamp").reset_index(drop=True)
+        frame = _build_signal_frame(merged)
 
         symbol = str(params.get("strategy_symbol", "")).strip().upper()
         allowed_symbols = {str(s).strip().upper() for s in blueprint.symbol_scope.symbols}
         if allowed_symbols and symbol and symbol not in allowed_symbols:
-            out = pd.Series(0, index=merged["timestamp"], name="position", dtype=int)
+            out = pd.Series(0, index=frame["timestamp"], name="position", dtype=int)
             out.attrs["signal_events"] = []
-            out.attrs["strategy_metadata"] = {"family": "dsl", "strategy_id": blueprint.id, "blueprint_id": blueprint.id, "event_type": blueprint.event_type}
+            out.attrs["strategy_metadata"] = {
+                "family": "dsl",
+                "strategy_id": blueprint.id,
+                "blueprint_id": blueprint.id,
+                "event_type": blueprint.event_type,
+            }
             return out
 
-        eligible_mask = _combined_entry_mask(merged, blueprint.entry)
+        eligible_mask = _entry_eligibility_mask(frame, blueprint.entry, blueprint)
         positions: List[int] = []
         signal_events: List[Dict[str, object]] = []
 
@@ -308,7 +606,7 @@ class DslInterpreterV1:
         target_price = np.nan
         cooldown_until = -1
 
-        for idx, row in merged.iterrows():
+        for idx, row in frame.iterrows():
             ts = row["timestamp"]
             close = _to_float(row.get("close"), default=np.nan)
             high = _to_float(row.get("high"), default=np.nan)
@@ -321,7 +619,7 @@ class DslInterpreterV1:
                 inv_op = str(inv.get("operator", "")).strip()
                 inv_val = _to_float(inv.get("value"), default=np.nan)
                 invalidate = False
-                if inv_col in merged.columns and not np.isnan(inv_val):
+                if inv_col in frame.columns and not np.isnan(inv_val):
                     metric = _to_float(row.get(inv_col), default=np.nan)
                     if not np.isnan(metric):
                         invalidate = (
@@ -405,14 +703,7 @@ class DslInterpreterV1:
                         positions.append(0)
                         continue
 
-                    direction = blueprint.direction
-                    side = 1
-                    if direction == "short":
-                        side = -1
-                    elif direction in {"both", "conditional"}:
-                        hint = _to_float(row.get("forward_abs_return_h"), default=1.0)
-                        side = -1 if hint < 0 else 1
-
+                    side = _entry_side(row, blueprint)
                     for overlay in blueprint.overlays:
                         side = _apply_overlay_entry_gate(overlay=overlay, row=row, side=side)
                         if side == 0:
@@ -443,7 +734,7 @@ class DslInterpreterV1:
                     signal_events.append({"timestamp": ts.isoformat(), "event": "entry", "reason": "blueprint_entry"})
             positions.append(int(in_pos))
 
-        out = pd.Series(positions, index=merged["timestamp"], name="position", dtype=int)
+        out = pd.Series(positions, index=frame["timestamp"], name="position", dtype=int)
         out.attrs["signal_events"] = signal_events
         out.attrs["strategy_metadata"] = {
             "family": "dsl",

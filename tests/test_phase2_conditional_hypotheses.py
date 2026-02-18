@@ -70,6 +70,26 @@ def _write_phase1_fixture(tmp_path: Path, run_id: str) -> None:
     )
 
 
+def _write_hypothesis_queue_fixture(tmp_path: Path, run_id: str, event_types: list[str]) -> None:
+    out_dir = tmp_path / "reports" / "hypothesis_generator" / run_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    queue = pd.DataFrame(
+        [
+            {
+                "hypothesis_id": "H_MATCH",
+                "priority_score": 0.91,
+                "target_phase2_event_types": json.dumps(event_types),
+            },
+            {
+                "hypothesis_id": "H_OTHER",
+                "priority_score": 0.41,
+                "target_phase2_event_types": json.dumps(["cross_venue_desync"]),
+            },
+        ]
+    )
+    queue.to_csv(out_dir / "phase1_hypothesis_queue.csv", index=False)
+
+
 def _run_phase2(tmp_path: Path, run_id: str, extra_args: list[str] | None = None) -> None:
     extra_args = extra_args or []
     env = os.environ.copy()
@@ -318,6 +338,7 @@ def test_phase2_manifest_and_candidates_include_oos_and_multiplicity_fields(tmp_
             "test_samples",
             "test_p_value",
             "test_p_value_adj_bh",
+            "gate_oos_min_samples",
             "gate_oos_validation_test",
             "gate_multiplicity",
         ]:
@@ -365,6 +386,80 @@ def test_phase2_promotion_rejection_reason_codes_and_summary_counts(tmp_path: Pa
     assert rejected_by_reason == promoted_payload["rejected_by_reason"]
     assert {"NEGATIVE_EV", "UNSTABLE", "LOW_SAMPLE"}.issubset(set(rejected_by_reason.keys()))
 
+
+def test_phase2_attaches_supporting_hypotheses_when_queue_exists(tmp_path: Path) -> None:
+    run_id = "phase2_hypothesis_context"
+    _write_phase1_fixture(tmp_path=tmp_path, run_id=run_id)
+    _write_hypothesis_queue_fixture(
+        tmp_path=tmp_path,
+        run_id=run_id,
+        event_types=["vol_shock_relaxation", "vol_aftershock_window"],
+    )
+
+    _run_phase2(tmp_path=tmp_path, run_id=run_id)
+    out_dir = tmp_path / "reports" / "phase2" / run_id / "vol_shock_relaxation"
+    manifest = json.loads((out_dir / "phase2_manifests.json").read_text())
+    promoted = json.loads((out_dir / "promoted_candidates.json").read_text())
+    candidates = pd.read_csv(out_dir / "phase2_candidates.csv")
+
+    assert manifest["phase1_hypothesis_queue_exists"] is True
+    assert int(manifest["matched_hypothesis_count"]) >= 1
+    assert promoted["phase1_hypothesis_queue_exists"] is True
+    assert int(promoted["matched_hypothesis_count"]) >= 1
+    if not candidates.empty:
+        assert "supporting_hypothesis_count" in candidates.columns
+        assert "supporting_hypothesis_ids" in candidates.columns
+        assert int(candidates["supporting_hypothesis_count"].iloc[0]) >= 1
+
+
+def test_phase2_fails_when_phase1_summary_missing_and_required(tmp_path: Path) -> None:
+    run_id = "phase2_missing_summary"
+    _write_phase1_fixture(tmp_path=tmp_path, run_id=run_id)
+    in_dir = tmp_path / "reports" / "vol_shock_relaxation" / run_id
+    (in_dir / "vol_shock_relaxation_summary.json").unlink()
+
+    env = os.environ.copy()
+    env["BACKTEST_DATA_ROOT"] = str(tmp_path)
+    cmd = [
+        sys.executable,
+        str(ROOT / "project" / "pipelines" / "research" / "phase2_conditional_hypotheses.py"),
+        "--run_id",
+        run_id,
+        "--event_type",
+        "vol_shock_relaxation",
+        "--symbols",
+        "BTCUSDT,ETHUSDT",
+    ]
+    proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    assert proc.returncode != 0
+    assert "summary" in (proc.stderr + proc.stdout).lower()
+
+
+def test_phase2_fails_when_queue_has_no_matching_event_family(tmp_path: Path) -> None:
+    run_id = "phase2_queue_mismatch"
+    _write_phase1_fixture(tmp_path=tmp_path, run_id=run_id)
+    _write_hypothesis_queue_fixture(
+        tmp_path=tmp_path,
+        run_id=run_id,
+        event_types=["cross_venue_desync"],
+    )
+
+    env = os.environ.copy()
+    env["BACKTEST_DATA_ROOT"] = str(tmp_path)
+    cmd = [
+        sys.executable,
+        str(ROOT / "project" / "pipelines" / "research" / "phase2_conditional_hypotheses.py"),
+        "--run_id",
+        run_id,
+        "--event_type",
+        "vol_shock_relaxation",
+        "--symbols",
+        "BTCUSDT,ETHUSDT",
+    ]
+    proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    assert proc.returncode != 0
+    assert "no entries mapped to event_type" in (proc.stderr + proc.stdout)
+
 def test_phase2_fails_without_split_or_timestamp(tmp_path: Path) -> None:
     run_id = "phase2_missing_split"
     _write_phase1_fixture(tmp_path=tmp_path, run_id=run_id)
@@ -390,6 +485,29 @@ def test_phase2_fails_without_split_or_timestamp(tmp_path: Path) -> None:
     proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
     assert proc.returncode != 0
     assert "split_label" in (proc.stderr + proc.stdout)
+
+
+def test_phase2_freezes_when_controls_coverage_is_below_threshold(tmp_path: Path) -> None:
+    run_id = "phase2_low_controls_coverage"
+    _write_phase1_fixture(tmp_path=tmp_path, run_id=run_id)
+
+    in_dir = tmp_path / "reports" / "vol_shock_relaxation" / run_id
+    controls_path = in_dir / "vol_shock_relaxation_controls.csv"
+    controls = pd.read_csv(controls_path).head(5)
+    controls.to_csv(controls_path, index=False)
+
+    _run_phase2(tmp_path=tmp_path, run_id=run_id)
+
+    out_dir = tmp_path / "reports" / "phase2" / run_id / "vol_shock_relaxation"
+    promoted = json.loads((out_dir / "promoted_candidates.json").read_text())
+    manifest = json.loads((out_dir / "phase2_manifests.json").read_text())
+    candidates = pd.read_csv(out_dir / "phase2_candidates.csv")
+
+    assert promoted["decision"] == "freeze"
+    assert promoted["reason"] == "insufficient_controls_coverage"
+    assert manifest["freeze_reason"] == "insufficient_controls_coverage"
+    assert float(promoted["controls_coverage_ratio"]) < 0.8
+    assert candidates.empty
 
 
 def test_phase2_oos_gate_blocks_positive_test_split() -> None:
@@ -430,6 +548,48 @@ def test_phase2_oos_gate_blocks_positive_test_split() -> None:
     assert result["validation_delta_adverse_mean"] < 0
     assert result["test_delta_adverse_mean"] > 0
     assert result["gate_oos_validation_test"] is False
+
+
+def test_phase2_oos_gate_requires_minimum_split_samples() -> None:
+    split_label = ["train"] * 20 + ["validation"] * 5 + ["test"] * 5
+    n = len(split_label)
+    sub = pd.DataFrame(
+        {
+            "year": [2022] * n,
+            "symbol": ["BTCUSDT"] * n,
+            "vol_regime": ["high"] * n,
+            "split_label": split_label,
+            "baseline_mode": ["matched_controls_excess"] * n,
+            "adverse_proxy_excess": [0.02] * n,
+            "opportunity_value_excess": [0.0] * n,
+            "forward_abs_return_h": [0.0] * n,
+            "time_to_secondary_shock": [12.0] * n,
+            "rv_decay_half_life": [20.0] * n,
+        }
+    )
+    condition = ConditionSpec("all", "all", lambda d: pd.Series(True, index=d.index))
+    action = ActionSpec("risk_throttle_0.5", "risk_throttle", {"k": 0.5})
+
+    result = _evaluate_candidate(
+        sub=sub,
+        condition=condition,
+        action=action,
+        bootstrap_iters=200,
+        seed=17,
+        cost_floor=0.0,
+        tail_material_threshold=0.0,
+        opportunity_tight_eps=0.005,
+        opportunity_near_zero_eps=0.001,
+        net_benefit_floor=0.0,
+        simplicity_gate=True,
+        min_oos_split_samples=10,
+    )
+
+    assert result["validation_delta_adverse_mean"] < 0
+    assert result["test_delta_adverse_mean"] < 0
+    assert result["gate_oos_min_samples"] is False
+    assert result["gate_oos_validation_test"] is False
+    assert "gate_oos_min_samples" in result["fail_reasons"]
 
 
 def test_deployment_mode_concentrate_when_top_symbol_clearly_dominates() -> None:

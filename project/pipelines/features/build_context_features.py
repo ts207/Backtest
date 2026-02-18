@@ -22,7 +22,7 @@ from pipelines._lib.io_utils import (
     run_scoped_lake_path,
     write_parquet,
 )
-from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from pipelines._lib.run_manifest import finalize_manifest, schema_hash_from_columns, start_manifest, validate_input_provenance
 
 
 def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
@@ -33,6 +33,17 @@ def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
         "start_ts": df["timestamp"].min().isoformat(),
         "end_ts": df["timestamp"].max().isoformat(),
     }
+
+
+def _dedupe_timestamp_rows(df: pd.DataFrame, label: str) -> tuple[pd.DataFrame, int]:
+    if "timestamp" not in df.columns or df.empty:
+        return df, 0
+    out = df.sort_values("timestamp").copy()
+    dupes = int(out["timestamp"].duplicated(keep="last").sum())
+    if dupes > 0:
+        logging.warning("Dropping %s duplicate timestamp rows for %s (keeping last).", dupes, label)
+        out = out.drop_duplicates(subset=["timestamp"], keep="last")
+    return out.reset_index(drop=True), dupes
 
 
 def main() -> int:
@@ -104,7 +115,7 @@ def main() -> int:
             if bars.empty:
                 raise ValueError(f"No cleaned bars found for {symbol} at timeframe={args.timeframe}")
             bars["timestamp"] = pd.to_datetime(bars["timestamp"], utc=True)
-            bars = bars.sort_values("timestamp").reset_index(drop=True)
+            bars, bars_dupes = _dedupe_timestamp_rows(bars, label=f"bars:{symbol}:{args.timeframe}")
             bars = bars[(bars["timestamp"] >= start) & (bars["timestamp"] < end_exclusive)].copy()
             if bars.empty:
                 raise ValueError(f"No bars in requested range for {symbol}")
@@ -129,16 +140,49 @@ def main() -> int:
                 funding = (
                     funding[["timestamp", "funding_rate_scaled"]]
                     .dropna(subset=["timestamp"])
-                    .sort_values("timestamp")
-                    .drop_duplicates(subset=["timestamp"], keep="last")
+                )
+                funding, funding_dupes = _dedupe_timestamp_rows(
+                    funding, label=f"funding:{symbol}:{args.timeframe}"
                 )
                 bars = bars.merge(funding, on="timestamp", how="left", validate="one_to_one")
                 bars["funding_rate_scaled"] = pd.to_numeric(bars["funding_rate_scaled"], errors="coerce")
                 if bars["funding_rate_scaled"].isna().all():
                     raise ValueError(f"Unable to align funding_rate_scaled for {symbol}")
                 bars["funding_rate_scaled"] = bars["funding_rate_scaled"].ffill().fillna(0.0)
+            else:
+                funding_dupes = 0
 
-            inputs.append({"path": str(bars_dir), **_collect_stats(bars)})
+            inputs.append(
+                {
+                    "path": str(bars_dir),
+                    **_collect_stats(bars),
+                    "provenance": {
+                        "vendor": "binance",
+                        "exchange": "binance",
+                        "schema_version": "cleaned_bars_15m_v1",
+                        "schema_hash": schema_hash_from_columns(bars.columns.tolist()),
+                        "extraction_start": bars["timestamp"].min().isoformat(),
+                        "extraction_end": bars["timestamp"].max().isoformat(),
+                    },
+                }
+            )
+            if "funding_rate_scaled" in bars.columns:
+                funding_non_null = bars[["timestamp", "funding_rate_scaled"]].dropna(subset=["funding_rate_scaled"]).copy()
+                if not funding_non_null.empty:
+                    inputs.append(
+                        {
+                            "path": str(bars_dir),
+                            **_collect_stats(funding_non_null),
+                            "provenance": {
+                                "vendor": "binance",
+                                "exchange": "binance",
+                                "schema_version": "funding_15m_v1",
+                                "schema_hash": schema_hash_from_columns(funding_non_null.columns.tolist()),
+                                "extraction_start": funding_non_null["timestamp"].min().isoformat(),
+                                "extraction_end": funding_non_null["timestamp"].max().isoformat(),
+                            },
+                        }
+                    )
             fp = build_funding_persistence_state(bars, symbol=symbol, config=DEFAULT_FP_CONFIG)
 
             out_path = output_root / symbol / f"{args.timeframe}.parquet"
@@ -156,8 +200,11 @@ def main() -> int:
                 "active_bars": int(fp["fp_active"].sum()),
                 "event_count": int(fp["fp_event_id"].dropna().nunique()),
                 "fp_def_version": DEFAULT_FP_CONFIG.def_version,
+                "bars_duplicate_rows_dropped": int(bars_dupes),
+                "funding_duplicate_rows_dropped": int(funding_dupes),
             }
 
+        validate_input_provenance(inputs)
         finalize_manifest(manifest, "success", stats=stats)
         return 0
     except Exception as exc:

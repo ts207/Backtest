@@ -77,7 +77,6 @@ def main() -> int:
                     "listing_start": start_ts,
                     "listing_end": end_ts,
                     "market": args.market,
-                    "status": "active" if end_ts >= (pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=7)) else "inactive",
                 }
             )
             stats["symbols"][symbol] = {
@@ -86,10 +85,15 @@ def main() -> int:
                 "listing_start": start_ts.isoformat(),
                 "listing_end": end_ts.isoformat(),
             }
-            month_periods = pd.period_range(start=start_ts.to_period("M"), end=end_ts.to_period("M"), freq="M")
-            for period in month_periods:
-                key = str(period)
+            month_cursor = pd.Timestamp(start_ts.year, start_ts.month, 1, tz="UTC")
+            month_end = pd.Timestamp(end_ts.year, end_ts.month, 1, tz="UTC")
+            while month_cursor <= month_end:
+                key = f"{month_cursor.year:04d}-{month_cursor.month:02d}"
                 stats["monthly_membership"].setdefault(key, []).append(symbol)
+                if month_cursor.month == 12:
+                    month_cursor = pd.Timestamp(month_cursor.year + 1, 1, 1, tz="UTC")
+                else:
+                    month_cursor = pd.Timestamp(month_cursor.year, month_cursor.month + 1, 1, tz="UTC")
 
             inputs.append({
                 "path": str(run_scoped_lake_path(DATA_ROOT, args.run_id, "cleaned", args.market, symbol, "bars_15m")),
@@ -99,6 +103,16 @@ def main() -> int:
             })
 
         snap_df = pd.DataFrame(rows)
+        if not snap_df.empty:
+            global_latest = pd.to_datetime(snap_df["listing_end"], utc=True, errors="coerce").max()
+            active_threshold = global_latest - pd.Timedelta(days=7) if pd.notna(global_latest) else pd.Timestamp(
+                "1970-01-01", tz="UTC"
+            )
+            snap_df["status"] = snap_df["listing_end"].apply(
+                lambda ts: "active" if pd.to_datetime(ts, utc=True, errors="coerce") >= active_threshold else "inactive"
+            )
+        else:
+            snap_df["status"] = pd.Series(dtype=str)
         for key, members in list(stats["monthly_membership"].items()):
             stats["monthly_membership"][key] = sorted(set(members))
 

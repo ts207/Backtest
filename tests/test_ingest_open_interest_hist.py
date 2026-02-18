@@ -2,6 +2,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pandas as pd
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "project"))
 
@@ -67,3 +69,10 @@ def test_fetch_open_interest_hist_pages_and_parses() -> None:
         "source",
     ]
     assert out["symbol"].nunique() == 1
+
+
+def test_partition_has_rows_csv_fallback(tmp_path: Path) -> None:
+    parquet_path = tmp_path / "open_interest.parquet"
+    csv_path = parquet_path.with_suffix(".csv")
+    pd.DataFrame({"timestamp": ["2024-01-01T00:00:00Z"], "sum_open_interest": [1.0]}).to_csv(csv_path, index=False)
+    assert oi._partition_has_rows(parquet_path) is True

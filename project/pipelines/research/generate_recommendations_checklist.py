@@ -30,6 +30,7 @@ def _parse_args() -> argparse.Namespace:
         help="Optional output directory (default: data/runs/<run_id>/research_checklist)",
     )
     parser.add_argument("--min_edge_candidates", type=int, default=1)
+    parser.add_argument("--min_promoted_candidates", type=int, default=1)
     parser.add_argument("--min_expectancy_evidence", type=int, default=1)
     parser.add_argument("--min_robust_survivors", type=int, default=1)
     parser.add_argument("--require_expectancy_exists", type=int, default=1)
@@ -88,10 +89,15 @@ def _build_payload(
     gates: list[dict[str, Any]] = []
 
     candidate_rows = int(edge_metrics.get("rows", 0) or 0)
+    promoted_rows = int(edge_metrics.get("promoted", 0) or 0)
     candidate_ok = candidate_rows >= int(args.min_edge_candidates)
     gates.append(_gate_result("edge_candidates_generated", candidate_ok, candidate_rows, int(args.min_edge_candidates)))
     if not candidate_ok:
         reasons.append(f"edge candidates below threshold ({candidate_rows} < {args.min_edge_candidates})")
+    promoted_ok = promoted_rows >= int(args.min_promoted_candidates)
+    gates.append(_gate_result("promoted_edge_candidates", promoted_ok, promoted_rows, int(args.min_promoted_candidates)))
+    if not promoted_ok:
+        reasons.append(f"promoted edge candidates below threshold ({promoted_rows} < {args.min_promoted_candidates})")
 
     expectancy_exists = bool(expectancy_payload.get("expectancy_exists", False))
     require_expectancy = bool(int(args.require_expectancy_exists))
@@ -154,6 +160,7 @@ def _build_payload(
         "failure_reasons": reasons,
         "config": {
             "min_edge_candidates": int(args.min_edge_candidates),
+            "min_promoted_candidates": int(args.min_promoted_candidates),
             "min_expectancy_evidence": int(args.min_expectancy_evidence),
             "min_robust_survivors": int(args.min_robust_survivors),
             "require_expectancy_exists": bool(int(args.require_expectancy_exists)),
@@ -162,7 +169,7 @@ def _build_payload(
         },
         "metrics": {
             "edge_candidate_rows": candidate_rows,
-            "edge_candidate_promoted": int(edge_metrics.get("promoted", 0) or 0),
+            "edge_candidate_promoted": promoted_rows,
             "expectancy_exists": expectancy_exists,
             "expectancy_evidence_count": expectancy_evidence_count,
             "robust_survivor_count": survivor_count,

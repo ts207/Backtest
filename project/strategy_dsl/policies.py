@@ -98,15 +98,17 @@ def overlay_defaults(names: List[str], robustness_score: float) -> List[dict]:
     overlays = []
     for name in names:
         if name == "liquidity_guard":
-            overlays.append({"name": name, "params": {"min_notional": 0.0}})
+            overlays.append({"name": name, "params": {"min_notional": 100_000.0}})
         elif name == "spread_guard":
-            overlays.append({"name": name, "params": {"max_spread_bps": 12.0}})
+            overlays.append({"name": name, "params": {"max_spread_bps": 8.0}})
         elif name == "session_guard":
             overlays.append({"name": name, "params": {"session": "all"}})
         elif name == "funding_guard":
-            overlays.append({"name": name, "params": {"max_abs_funding_bps": 15.0}})
+            overlays.append({"name": name, "params": {"max_abs_funding_bps": 12.0}})
         elif name == "cross_venue_guard":
-            overlays.append({"name": name, "params": {"max_desync_bps": 20.0}})
-    if robustness_score < 0.7:
+            overlays.append({"name": name, "params": {"max_desync_bps": 12.0}})
+    if robustness_score < 0.6:
+        overlays.append({"name": "risk_throttle", "params": {"size_scale": 0.25}})
+    elif robustness_score < 0.8:
         overlays.append({"name": "risk_throttle", "params": {"size_scale": 0.5}})
     return overlays

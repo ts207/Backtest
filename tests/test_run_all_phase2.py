@@ -313,6 +313,12 @@ def test_run_all_includes_backtest_and_report_when_enabled(monkeypatch) -> None:
     assert "--cost_bps" in backtest_args and "4.0" in backtest_args
     assert "--strategies" in backtest_args and "vol_compression_v1" in backtest_args
     assert "--overlays" in backtest_args and "funding_extreme_filter" in backtest_args
+    promote_args = next(base_args for stage, _, base_args, _ in captured if stage == "promote_blueprints")
+    assert "--allow_fallback_evidence" in promote_args
+    assert promote_args[promote_args.index("--allow_fallback_evidence") + 1] == "0"
+    report_args = next(base_args for stage, _, base_args, _ in captured if stage == "make_report")
+    assert "--allow_backtest_artifact_fallback" in report_args
+    assert report_args[report_args.index("--allow_backtest_artifact_fallback") + 1] == "0"
 
 
 def test_run_all_omits_backtest_by_default(monkeypatch) -> None:
@@ -380,7 +386,7 @@ def test_run_all_can_disable_blueprint_promotion(monkeypatch) -> None:
     assert "promote_blueprints" not in captured
 
 
-def test_run_all_requires_strategies_when_backtest_enabled(monkeypatch) -> None:
+def test_run_all_requires_execution_source_when_backtest_enabled_and_compiler_off(monkeypatch) -> None:
     captured = []
 
     def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
@@ -403,6 +409,8 @@ def test_run_all_requires_strategies_when_backtest_enabled(monkeypatch) -> None:
             "2024-01-31",
             "--run_backtest",
             "1",
+            "--run_strategy_blueprint_compiler",
+            "0",
         ],
     )
 
@@ -440,6 +448,44 @@ def test_run_all_accepts_blueprint_path_when_backtest_enabled(monkeypatch) -> No
 
     assert run_all.main() == 0
     assert "backtest_strategies" in captured
+
+
+def test_run_all_auto_infers_blueprints_path_for_execution(monkeypatch) -> None:
+    captured: list[tuple[str, list[str]]] = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_auto_bp_path",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_backtest",
+            "1",
+            "--run_walkforward_eval",
+            "1",
+        ],
+    )
+
+    assert run_all.main() == 0
+    expected_path = str(run_all.DATA_ROOT / "reports" / "strategy_blueprints" / "run_auto_bp_path" / "blueprints.jsonl")
+    backtest_args = next(base_args for stage, base_args in captured if stage == "backtest_strategies")
+    walkforward_args = next(base_args for stage, base_args in captured if stage == "run_walkforward")
+    assert "--blueprints_path" in backtest_args
+    assert backtest_args[backtest_args.index("--blueprints_path") + 1] == expected_path
+    assert "--blueprints_path" in walkforward_args
+    assert walkforward_args[walkforward_args.index("--blueprints_path") + 1] == expected_path
 
 
 def test_run_all_includes_walkforward_stage_when_enabled(monkeypatch) -> None:
@@ -483,6 +529,155 @@ def test_run_all_includes_walkforward_stage_when_enabled(monkeypatch) -> None:
     assert "--embargo_days" in wf_args and "2" in wf_args
     assert "--train_frac" in wf_args and "0.65" in wf_args
     assert "--validation_frac" in wf_args and "0.2" in wf_args
+
+
+def test_run_all_passes_config_to_walkforward(monkeypatch) -> None:
+    captured = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_wf_cfg_passthrough",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_walkforward_eval",
+            "1",
+            "--strategies",
+            "vol_compression_v1",
+            "--config",
+            "configs/pipeline.yaml",
+            "--config",
+            "configs/fees.yaml",
+        ],
+    )
+
+    assert run_all.main() == 0
+    wf_args = next(base_args for stage, base_args in captured if stage == "run_walkforward")
+    assert wf_args.count("--config") == 2
+    assert "configs/pipeline.yaml" in wf_args
+    assert "configs/fees.yaml" in wf_args
+
+
+def test_run_all_orders_walkforward_before_promotion_when_both_enabled(monkeypatch) -> None:
+    captured: list[str] = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append(stage)
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_wf_before_promotion",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_backtest",
+            "1",
+            "--run_walkforward_eval",
+            "1",
+            "--run_blueprint_promotion",
+            "1",
+            "--strategies",
+            "vol_compression_v1",
+        ],
+    )
+
+    assert run_all.main() == 0
+    assert "run_walkforward" in captured
+    assert "promote_blueprints" in captured
+    assert captured.index("run_walkforward") < captured.index("promote_blueprints")
+
+
+def test_run_all_passes_promotion_fallback_flag(monkeypatch) -> None:
+    captured: list[tuple[str, list[str]]] = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_promotion_fallback_flag",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_backtest",
+            "1",
+            "--strategies",
+            "vol_compression_v1",
+            "--promotion_allow_fallback_evidence",
+            "1",
+        ],
+    )
+
+    assert run_all.main() == 0
+    promote_args = next(base_args for stage, base_args in captured if stage == "promote_blueprints")
+    assert "--allow_fallback_evidence" in promote_args
+    assert promote_args[promote_args.index("--allow_fallback_evidence") + 1] == "1"
+
+
+def test_run_all_passes_report_fallback_flag(monkeypatch) -> None:
+    captured: list[tuple[str, list[str]]] = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_report_fallback_flag",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_backtest",
+            "1",
+            "--strategies",
+            "vol_compression_v1",
+            "--report_allow_backtest_artifact_fallback",
+            "1",
+        ],
+    )
+
+    assert run_all.main() == 0
+    report_args = next(base_args for stage, base_args in captured if stage == "make_report")
+    assert "--allow_backtest_artifact_fallback" in report_args
+    assert report_args[report_args.index("--allow_backtest_artifact_fallback") + 1] == "1"
 
 
 def test_run_all_auto_adds_spot_pipeline_for_cross_venue(monkeypatch) -> None:
@@ -584,3 +779,51 @@ def test_run_all_normalizes_multi_symbol_csv(monkeypatch) -> None:
     assert "--symbols" in first_stage_args
     symbols_value = first_stage_args[first_stage_args.index("--symbols") + 1]
     assert symbols_value == "BTCUSDT,ETHUSDT"
+
+
+def test_run_all_passes_strategy_preparation_strictness_flags(monkeypatch) -> None:
+    captured: list[tuple[str, list[str]]] = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_strategy_prep_flags",
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--strategy_blueprint_ignore_checklist",
+            "1",
+            "--strategy_blueprint_allow_fallback",
+            "1",
+            "--strategy_blueprint_allow_non_executable_conditions",
+            "1",
+            "--strategy_builder_ignore_checklist",
+            "1",
+            "--strategy_builder_allow_non_promoted",
+            "1",
+            "--strategy_builder_allow_missing_candidate_detail",
+            "1",
+        ],
+    )
+
+    assert run_all.main() == 0
+    blueprint_args = next(base_args for stage, base_args in captured if stage == "compile_strategy_blueprints")
+    assert "--ignore_checklist" in blueprint_args and "1" in blueprint_args
+    assert "--allow_fallback_blueprints" in blueprint_args and "1" in blueprint_args
+    assert "--allow_non_executable_conditions" in blueprint_args and "1" in blueprint_args
+
+    builder_args = next(base_args for stage, base_args in captured if stage == "build_strategy_candidates")
+    assert "--ignore_checklist" in builder_args and "1" in builder_args
+    assert "--allow_non_promoted" in builder_args and "1" in builder_args
+    assert "--allow_missing_candidate_detail" in builder_args and "1" in builder_args

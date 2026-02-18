@@ -1,34 +1,66 @@
-# Project Package
+# Project Package Guide
 
-This package contains the discovery-core runtime used by `project/pipelines/run_all.py`.
+`project/` contains the executable runtime used by `project/pipelines/run_all.py`.
 
-Active areas:
-- `pipelines/ingest`
-- `pipelines/clean`
-- `pipelines/features`
-- `pipelines/research`
-- `pipelines/backtest`
-- `pipelines/report`
-- `pipelines/alpha_bundle` (experimental)
-- `pipelines/_lib`
-- `features/`
-- `engine/`
-- `strategies/`
+## Layout
 
-Runtime data contract:
-- root: `data/`
-- manifests/logs: `data/runs/<run_id>/...`
-- research outputs: `data/reports/<stage>/<run_id>/...`
-- backtest outputs: `data/lake/trades/backtests/vol_compression_expansion_v1/<run_id>/...`
-- backtest reports: `data/reports/vol_compression_expansion_v1/<run_id>/...`
-- alpha bundle artifacts: `data/feature_store/{signals,cross_section,regimes,alpha_bundle,...}`
-- model registry artifacts: `data/model_registry/CombModelRidge_*.json`
+- `pipelines/ingest`: raw market ingestion
+- `pipelines/clean`: cleaned bar/funding datasets
+- `pipelines/features`: feature and context construction
+- `pipelines/research`: phase-1/phase-2 discovery and strategy preparation
+- `pipelines/backtest`: strategy/blueprint execution
+- `pipelines/eval`: walkforward split evaluation
+- `pipelines/report`: final report generation
+- `pipelines/alpha_bundle`: optional parallel signal pipeline
+- `engine/`: runtime execution and pnl plumbing
+- `strategies/`: strategy implementations, adapters, DSL interpreter
+- `strategy_dsl/`: blueprint schema and policy mapping
+- `features/`: reusable feature logic
 
-Backtesting is optional and can be enabled from `project/pipelines/run_all.py` with:
-- `--run_backtest 1`
-- `--run_make_report 1`
-- `--strategies <comma-separated ids>` (required; no default strategy is auto-selected)
+## Data Contract
 
-AlphaBundle is additive and does not replace `run_all.py` orchestration. See:
-- `docs/combined_model_1_3_architecture.md`
-- `project/specs/combined_model_1_3_spec_v1.yaml`
+All runtime artifacts are rooted under `BACKTEST_DATA_ROOT`.
+
+Key locations:
+- Run manifests/logs: `data/runs/<run_id>/...`
+- Lake raw: `data/lake/raw/...`
+- Lake cleaned: `data/lake/cleaned/...`
+- Lake features: `data/lake/features/...`
+- Research reports: `data/reports/<stage>/<run_id>/...`
+- Engine outputs: `data/runs/<run_id>/engine/...`
+- Backtest metrics/trades: `data/lake/trades/backtests/vol_compression_expansion_v1/<run_id>/...`
+- Eval outputs: `data/reports/eval/<run_id>/...`
+- Promotion outputs: `data/reports/promotions/<run_id>/...`
+- Final report outputs: `data/reports/vol_compression_expansion_v1/<run_id>/...`
+
+## Important Orchestration Defaults (`run_all.py`)
+
+- `run_backtest=0`
+- `run_walkforward_eval=0`
+- `run_make_report=0`
+- `run_strategy_blueprint_compiler=1`
+- `run_strategy_builder=1`
+
+So discovery runs are not equivalent to full backtest/eval/report runs unless those flags are enabled.
+
+## Minimal Full-Path Enablement
+
+To force end-to-end execution via orchestrator:
+```bash
+--run_edge_candidate_universe 1 \
+--run_backtest 1 \
+--run_walkforward_eval 1 \
+--run_make_report 1
+```
+
+## Strategy DSL Notes
+
+- Blueprints compile to `data/reports/strategy_blueprints/<run_id>/blueprints.jsonl`.
+- The DSL interpreter executes trigger/confirmation/condition logic directly.
+- Unknown trigger/confirmation names are hard-fail validation errors.
+
+## Testing
+
+```bash
+./.venv/bin/pytest -q
+```

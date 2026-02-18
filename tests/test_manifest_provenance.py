@@ -82,8 +82,26 @@ def test_clean_and_features_manifests_include_input_provenance(tmp_path: Path) -
 
     clean_manifest = json.loads((tmp_path / "runs" / run_id / "build_cleaned_15m.json").read_text(encoding="utf-8"))
     features_manifest = json.loads((tmp_path / "runs" / run_id / "build_features_v1.json").read_text(encoding="utf-8"))
+    context_cmd = [
+        sys.executable,
+        str(ROOT / "project" / "pipelines" / "features" / "build_context_features.py"),
+        "--run_id",
+        run_id,
+        "--symbols",
+        symbol,
+        "--timeframe",
+        "15m",
+        "--start",
+        "2024-01-01",
+        "--end",
+        "2024-01-01",
+        "--force",
+        "1",
+    ]
+    subprocess.run(context_cmd, check=True, env=env)
+    context_manifest = json.loads((tmp_path / "runs" / run_id / "build_context_features.json").read_text(encoding="utf-8"))
 
-    for manifest in [clean_manifest, features_manifest]:
+    for manifest in [clean_manifest, features_manifest, context_manifest]:
         assert manifest["status"] == "success"
         assert manifest["inputs"]
         for row in manifest["inputs"]:

@@ -15,7 +15,7 @@ DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.config import load_configs
-from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet, write_parquet
+from pipelines._lib.io_utils import choose_partition_dir, ensure_dir, list_parquet_files, read_parquet, run_scoped_lake_path, write_parquet
 from pipelines._lib.run_manifest import (
     finalize_manifest,
     schema_hash_from_columns,
@@ -54,7 +54,16 @@ def _partition_complete(path: Path, expected_rows: int) -> bool:
         if expected_rows == 0:
             return True
         data = read_parquet([path])
-        return len(data) >= expected_rows
+        if len(data) != expected_rows:
+            return False
+        if "timestamp" not in data.columns:
+            return False
+        ts = pd.to_datetime(data["timestamp"], utc=True, errors="coerce")
+        if ts.isna().any():
+            return False
+        if ts.duplicated().any():
+            return False
+        return ts.is_monotonic_increasing
     except Exception:
         return False
 
@@ -248,10 +257,18 @@ def main() -> int:
 
     try:
         for symbol in symbols:
-            cleaned_dir = DATA_ROOT / "lake" / "cleaned" / market / symbol / "bars_15m"
-            funding_dir = DATA_ROOT / "lake" / "cleaned" / market / symbol / "funding_15m"
-            cleaned_files = list_parquet_files(cleaned_dir)
-            funding_files = list_parquet_files(funding_dir)
+            cleaned_candidates = [
+                run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", market, symbol, "bars_15m"),
+                DATA_ROOT / "lake" / "cleaned" / market / symbol / "bars_15m",
+            ]
+            funding_candidates = [
+                run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", market, symbol, "funding_15m"),
+                DATA_ROOT / "lake" / "cleaned" / market / symbol / "funding_15m",
+            ]
+            cleaned_dir = choose_partition_dir(cleaned_candidates)
+            funding_dir = choose_partition_dir(funding_candidates)
+            cleaned_files = list_parquet_files(cleaned_dir) if cleaned_dir else []
+            funding_files = list_parquet_files(funding_dir) if funding_dir else []
             bars = read_parquet(cleaned_files)
             funding = read_parquet(funding_files) if market == "perp" else pd.DataFrame()
             if bars.empty:
@@ -346,7 +363,8 @@ def main() -> int:
 
             features["year"] = features["timestamp"].dt.year
             features["month"] = features["timestamp"].dt.month
-            out_dir = DATA_ROOT / "lake" / "features" / market / symbol / "15m" / "features_v1"
+            out_dir = run_scoped_lake_path(DATA_ROOT, run_id, "features", market, symbol, "15m", "features_v1")
+            out_dir_compat = DATA_ROOT / "lake" / "features" / market / symbol / "15m" / "features_v1"
 
             partitions_written: List[str] = []
             partitions_skipped: List[str] = []
@@ -360,6 +378,9 @@ def main() -> int:
                     continue
                 ensure_dir(out_path.parent)
                 written_path, storage = write_parquet(group_out, out_path)
+                compat_path = out_dir_compat / f"year={year}" / f"month={month:02d}" / f"features_{symbol}_v1_{year}-{month:02d}.parquet"
+                ensure_dir(compat_path.parent)
+                write_parquet(group_out, compat_path)
                 outputs.append({"path": str(written_path), **_collect_stats(group_out), "storage": storage})
                 partitions_written.append(str(written_path))
 

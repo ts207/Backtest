@@ -1,143 +1,171 @@
-# Operator Runbook (Unified Mainline + AlphaBundle)
+# Operator Runbook
 
 ## 0) Environment
+
 ```bash
 python3 -m venv .venv
 ./.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
-export BACKTEST_DATA_ROOT=/abs/path/to/data
+export BACKTEST_DATA_ROOT=/home/tstuv/backtest/Backtest/data
 ```
 
-## 1) Canonical discovery + strategy-builder run (2020-2025)
+## 1) Discovery-Only Canonical Run
+
 ```bash
+BACKTEST_DATA_ROOT=/home/tstuv/backtest/Backtest/data \
 ./.venv/bin/python project/pipelines/run_all.py \
-  --run_id edge_2020_2025_fresh \
+  --run_id RUN \
   --symbols BTCUSDT,ETHUSDT \
   --start 2020-01-01 \
   --end 2025-12-31 \
-  --seed 13 \
   --run_hypothesis_generator 1 \
+  --run_phase2_conditional 1 \
+  --phase2_event_type all
+```
+
+Use this when you only want discovery/blueprint/builder artifacts.
+
+## 2) Full End-to-End Run
+
+```bash
+BACKTEST_DATA_ROOT=/home/tstuv/backtest/Backtest/data \
+./.venv/bin/python project/pipelines/run_all.py \
+  --run_id RUN_FULL \
+  --symbols BTCUSDT,ETHUSDT \
+  --start 2020-01-01 \
+  --end 2025-12-31 \
   --run_phase2_conditional 1 \
   --phase2_event_type all \
   --run_edge_candidate_universe 1 \
-  --run_expectancy_analysis 1 \
-  --run_expectancy_robustness 1 \
-  --run_recommendations_checklist 1 \
-  --run_strategy_builder 1
+  --run_backtest 1 \
+  --run_walkforward_eval 1 \
+  --run_make_report 1 \
+  --blueprints_path data/reports/strategy_blueprints/RUN_FULL/blueprints.jsonl \
+  --blueprints_top_k 10 \
+  --blueprints_filter_event_type all \
+  --fees_bps 4 \
+  --slippage_bps 2 \
+  --cost_bps 6
 ```
 
-Checklist enforcement:
-- default (non-blocking): `--strict_recommendations_checklist 0`
-- strict (fail on `KEEP_RESEARCH`): `--strict_recommendations_checklist 1`
+## 3) Skip network ingest when raw already exists
 
-Cross-venue specifics:
-- If phase2 includes `cross_venue_desync` (or `all`), `run_all.py` auto-runs:
-  - `ingest_binance_spot_ohlcv_15m`
-  - `build_cleaned_15m --market spot`
-  - `build_features_v1 --market spot`
-- To reuse preloaded spot data and skip downloads:
 ```bash
---skip_ingest_spot_ohlcv 1
+--skip_ingest_ohlcv 1 --skip_ingest_funding 1 --skip_ingest_spot_ohlcv 1 --force 0
 ```
 
-Expected outputs:
-- `data/runs/<run_id>/*.json|*.log`
-- `data/lake/runs/<run_id>/context/funding_persistence/...`
-- `data/lake/runs/<run_id>/context/market_state/...`
-- `data/reports/phase2/<run_id>/<event_type>/...`
-- `data/reports/edge_candidates/<run_id>/edge_candidates_normalized.csv`
-- `data/reports/expectancy/<run_id>/conditional_expectancy*.json`
-- `data/reports/strategy_builder/<run_id>/*`
+## 4) Downstream Reruns for an existing run
 
-Execution order (high-level):
-1. ingest -> clean -> features (perp, optional spot)
-2. context build
-3. phase1 family analyzers
-4. phase2 conditional hypotheses
-5. edge candidate export + expectancy checks
-6. strategy builder handoff
-
-## 2) Manual backtest after strategy builder
-Backtests are not auto-triggered by default. Use strategy-builder outputs first, then run manual backtests.
-
-Manual command template:
 ```bash
+BACKTEST_DATA_ROOT=/home/tstuv/backtest/Backtest/data \
 ./.venv/bin/python project/pipelines/backtest/backtest_strategies.py \
-  --run_id <manual_backtest_run_id> \
+  --run_id RUN \
   --symbols BTCUSDT,ETHUSDT \
-  --strategies vol_compression_v1 \
-  --force 1
+  --blueprints_path data/reports/strategy_blueprints/RUN/blueprints.jsonl \
+  --blueprints_top_k 10 \
+  --blueprints_filter_event_type all \
+  --fees_bps 4 --slippage_bps 2 --cost_bps 6 --force 1
+
+BACKTEST_DATA_ROOT=/home/tstuv/backtest/Backtest/data \
+./.venv/bin/python project/pipelines/eval/run_walkforward.py \
+  --run_id RUN \
+  --symbols BTCUSDT,ETHUSDT \
+  --start 2020-01-01 --end 2025-12-31 \
+  --embargo_days 0 --train_frac 0.6 --validation_frac 0.2 \
+  --blueprints_path data/reports/strategy_blueprints/RUN/blueprints.jsonl \
+  --blueprints_top_k 10 --blueprints_filter_event_type all \
+  --fees_bps 4 --slippage_bps 2 --cost_bps 6 --force 1 \
+  --config project/configs/pipeline.yaml --config project/configs/fees.yaml
+
+BACKTEST_DATA_ROOT=/home/tstuv/backtest/Backtest/data \
+./.venv/bin/python project/pipelines/research/promote_blueprints.py --run_id RUN
+
+BACKTEST_DATA_ROOT=/home/tstuv/backtest/Backtest/data \
+./.venv/bin/python project/pipelines/report/make_report.py --run_id RUN
 ```
 
-## 2.1) Run the report stage
-- After strategy builder exports promoted edges, use `./.venv/bin/python project/pipelines/report/make_report.py --run_id <run_id>` to create `reports/vol_compression_expansion_v1/<run_id>/allocation_weights.{csv,json}` and the associated metadata.
-- That report relies on `pipelines/report/capital_allocation.build_allocation_weights`, which enforces the max/min weight caps and volatility targets referenced in the README summary and has a test in `tests/test_capital_allocation.py`.
+## 5) Fast Triage Checklist
 
-## 3) Strategy-builder direct run (optional)
+1. `data/runs/<run_id>/` has stage JSON manifests.
+2. If no `backtest_strategies.json`, downstream never ran.
+3. If strategy builder shows zero candidates, check edge export stage and checklist.
+4. If promotion is empty, inspect `promotion_report.json` gates and `walkforward_summary.json`.
+
+## 6) Safety
+
+- Use a new `run_id` to avoid overwriting existing artifacts.
+- Keep `BACKTEST_DATA_ROOT` explicit to avoid mixing datasets across directories.
+
+## 7) Walkforward Strictness (Defaults)
+
+Walkforward is fail-closed by default:
+
+- Requires one execution source: `--strategies` or `--blueprints_path`
+- Requires a `test` split window
+- Fails if split artifacts are missing/invalid:
+  - `metrics.json`
+  - `strategy_returns_*.csv`
+- Uses validated `cost_decomposition.net_alpha` for stressed split PnL
+- Supports repeated `--config` passthrough so split backtests match canonical config behavior
+
+## 8) Strategy-Prep Strictness (Defaults)
+
+Strict mode is the default for strategy preparation:
+
+- Compiler:
+  - `--strategy_blueprint_ignore_checklist 0`
+  - `--strategy_blueprint_allow_fallback 0`
+  - `--strategy_blueprint_allow_non_executable_conditions 0`
+- Builder:
+  - `--strategy_builder_ignore_checklist 0`
+  - `--strategy_builder_allow_non_promoted 0`
+  - `--strategy_builder_allow_missing_candidate_detail 0`
+
+Explicit override example:
+
 ```bash
-./.venv/bin/python project/pipelines/research/build_strategy_candidates.py \
-  --run_id edge_2020_2025_fresh \
-  --symbols BTCUSDT,ETHUSDT \
-  --top_k_per_event 2 \
-  --max_candidates 20 \
-  --include_alpha_bundle 1
-```
-
-Interpretation:
-- `base_strategy` is event-family template mapping.
-- `backtest_ready=true` means executable adapter exists now.
-- `backtest_ready=false` means translate candidate into concrete strategy implementation first.
-- Built-in overlays: `funding_extreme_filter`, `mev_aware_risk_filter`
-
-## 4) AlphaBundle parallel flow (equal policy)
-Use AlphaBundle when multi-signal, cross-sectional research is required. Keep promotion gates equivalent to mainline.
-
-Avoid AlphaBundle when your question is narrow and event-mechanism specific (single-family validation is faster and cleaner in mainline phase1/phase2).
-
-Minimal path:
-```bash
-./.venv/bin/python project/pipelines/alpha_bundle/build_universe_snapshot.py \
-  --run_id RUN \
-  --universe_id top_liquid_v1 \
-  --symbols BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT \
-  --bar_interval 15m \
-  --adv_window_bars 96 \
-  --adv_min_usd 1000000
-
-./.venv/bin/python project/pipelines/alpha_bundle/build_alpha_signals_v2.py \
-  --run_id RUN \
-  --symbols BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT \
-  --bar_interval 15m
-
-./.venv/bin/python project/pipelines/alpha_bundle/merge_signals.py \
-  --run_id RUN \
-  --signals_dir data/feature_store/signals
-
-./.venv/bin/python project/pipelines/alpha_bundle/fit_orth_and_ridge.py \
-  --run_id RUN \
-  --signals_path data/feature_store/alpha_bundle/merged_signals.parquet \
-  --label_path <labels_panel.parquet> \
-  --signal_cols ts_momentum_multi,xs_momentum,mean_reversion_state,funding_carry_adjusted,onchain_flow_mc,orderflow_imbalance
-```
-
-## 5) Optional ingestion sensors
-```bash
-./.venv/bin/python project/pipelines/ingest/ingest_binance_um_liquidation_snapshot.py \
-  --run_id edge_2020_2025_fresh \
-  --symbols BTCUSDT,ETHUSDT \
-  --start 2020-01-01 \
-  --end 2025-12-31
-
-./.venv/bin/python project/pipelines/ingest/ingest_binance_um_open_interest_hist.py \
-  --run_id edge_2020_2025_fresh \
+./.venv/bin/python project/pipelines/run_all.py \
+  --run_id RUN_OVERRIDE \
   --symbols BTCUSDT,ETHUSDT \
   --start 2020-01-01 \
   --end 2025-12-31 \
-  --period 5m
+  --strategy_blueprint_ignore_checklist 1 \
+  --strategy_blueprint_allow_fallback 1 \
+  --strategy_blueprint_allow_non_executable_conditions 1 \
+  --strategy_builder_ignore_checklist 1 \
+  --strategy_builder_allow_non_promoted 1 \
+  --strategy_builder_allow_missing_candidate_detail 1 \
+  --promotion_allow_fallback_evidence 1
 ```
 
-## Cleanup
+## 9) Promotion Strictness (Defaults)
+
+Promotion is fail-closed by default:
+
+- Requires strategy-level walkforward evidence when blueprints exist (`walkforward_summary.json` with `per_strategy_split_metrics`)
+- Fails if a blueprint has no matching strategy walkforward block
+- Reads strategy return files with required columns; invalid/missing artifacts fail the stage
+
+Fallback override (not recommended for production):
+
 ```bash
-project/scripts/clean_data.sh runtime
-project/scripts/clean_data.sh all
-project/scripts/clean_data.sh repo
+./.venv/bin/python project/pipelines/research/promote_blueprints.py \
+  --run_id RUN \
+  --allow_fallback_evidence 1
+```
+
+## 10) Report Strictness (Defaults)
+
+Report generation is fail-closed by default:
+
+- Requires valid backtest metrics in `lake/trades/backtests/vol_compression_expansion_v1/<run_id>/metrics.json`
+- Requires `equity_curve.csv` with `equity` column
+- Requires trade evidence from `trades_*.csv` or engine fallback (`strategy_returns_*.csv`)
+- Requires numeric `metrics.cost_decomposition.net_alpha`
+
+Fallback override for alternate backtest strategy dirs:
+
+```bash
+./.venv/bin/python project/pipelines/report/make_report.py \
+  --run_id RUN \
+  --allow_backtest_artifact_fallback 1
 ```

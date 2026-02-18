@@ -598,7 +598,11 @@ def _cost_components_from_frame(
     else:
         position_scale = pd.Series(1.0, index=frame.index, dtype=float)
     pos = pd.to_numeric(frame["pos"], errors="coerce").fillna(0.0) * position_scale
-    ret = pd.to_numeric(frame["ret"], errors="coerce").fillna(0.0)
+    scaled_ret = pd.to_numeric(frame["ret"], errors="coerce").fillna(0.0)
+    # Engine frames already store scaled returns; recover raw returns so gross/cost decomposition
+    # is computed once against effective (scaled) position.
+    safe_scale = position_scale.where(position_scale.abs() > 1e-12, np.nan)
+    ret = (scaled_ret / safe_scale).replace([np.inf, -np.inf], np.nan).fillna(0.0)
     prior_pos = pos.shift(1).fillna(0.0)
     turnover = (pos - prior_pos).abs()
     gross = float((prior_pos * ret).sum())
@@ -921,10 +925,12 @@ def main() -> int:
                     if "position_scale" in indexed.columns:
                         scale_series = pd.to_numeric(indexed["position_scale"], errors="coerce").fillna(1.0)
                     else:
-                        scale_series = 1.0
+                        scale_series = pd.Series(1.0, index=indexed.index, dtype=float)
                     pos = indexed["pos"] * scale_series
-                    ret = indexed["ret"]
-                    pnl = compute_pnl(pos, ret, scenario_cost)
+                    scaled_ret = pd.to_numeric(indexed["ret"], errors="coerce").fillna(0.0)
+                    safe_scale = scale_series.where(scale_series.abs() > 1e-12, np.nan)
+                    raw_ret = (scaled_ret / safe_scale).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+                    pnl = compute_pnl(pos, raw_ret, scenario_cost)
                     scenario_pnl_frames.append(pnl)
                     prior = pos.shift(1).fillna(0)
                     entry_count += int(((prior == 0) & (pos != 0)).sum())

@@ -19,6 +19,18 @@ from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines.research.analyze_conditional_expectancy import build_walk_forward_split_labels
 
+REQUIRED_WF_SPLITS = ("train", "validation", "test")
+REQUIRED_WF_STRATEGY_KEYS = ("total_trades", "net_pnl", "stressed_net_pnl")
+REQUIRED_RETURNS_COLUMNS = (
+    "timestamp",
+    "symbol",
+    "pos",
+    "pnl",
+    "close",
+    "high",
+    "low",
+)
+
 
 def _sanitize(value: str) -> str:
     return re.sub(r"[^a-z0-9_]+", "_", str(value).strip().lower()).strip("_")
@@ -34,6 +46,16 @@ def _to_float(value: object, default: float = 0.0) -> float:
         return default
 
 
+def _to_float_strict(value: object, *, field_name: str) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid numeric field '{field_name}': {value!r}") from exc
+    if not np.isfinite(out):
+        raise ValueError(f"Invalid numeric field '{field_name}': {value!r}")
+    return out
+
+
 def _as_bool(value: object) -> bool:
     if isinstance(value, bool):
         return value
@@ -46,7 +68,7 @@ def _as_bool(value: object) -> bool:
 
 def _load_blueprints(path: Path) -> List[Dict[str, object]]:
     if not path.exists():
-        return []
+        raise FileNotFoundError(f"Blueprint file not found: {path}")
     rows: List[Dict[str, object]] = []
     for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
@@ -162,22 +184,56 @@ def _parameter_neighborhood_stability(blueprint: Dict[str, object], split_pnl: D
 def _load_strategy_returns(engine_dir: Path, strategy_id: str) -> pd.DataFrame:
     path = engine_dir / f"strategy_returns_{strategy_id}.csv"
     if not path.exists():
-        return pd.DataFrame()
+        raise FileNotFoundError(f"Missing strategy returns for {strategy_id}: {path}")
     try:
-        return pd.read_csv(path)
-    except Exception:
-        return pd.DataFrame()
+        frame = pd.read_csv(path)
+    except Exception as exc:
+        raise ValueError(f"Failed reading strategy returns for {strategy_id}: {path}") from exc
+    missing = [col for col in REQUIRED_RETURNS_COLUMNS if col not in frame.columns]
+    if missing:
+        raise ValueError(
+            f"Strategy returns missing required columns for {strategy_id}: {missing} in {path}"
+        )
+    return frame
 
 
-def _load_walkforward_summary(run_id: str) -> Dict[str, object]:
+def _load_walkforward_summary(run_id: str, *, required: bool) -> Dict[str, object]:
     path = DATA_ROOT / "reports" / "eval" / run_id / "walkforward_summary.json"
     if not path.exists():
+        if required:
+            raise FileNotFoundError(f"Missing walkforward summary: {path}")
         return {}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return payload if isinstance(payload, dict) else {}
+    except Exception as exc:
+        raise ValueError(f"Invalid walkforward summary JSON: {path}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"Invalid walkforward summary payload (expected object): {path}")
+    return payload
+
+
+def _extract_strategy_wf_metrics(
+    wf_per_strategy: Dict[str, object],
+    *,
+    strategy_id: str,
+) -> Dict[str, Dict[str, float]]:
+    strategy_wf = wf_per_strategy.get(strategy_id, {})
+    if not isinstance(strategy_wf, dict):
+        raise ValueError(f"Invalid walkforward strategy payload for {strategy_id}")
+
+    out: Dict[str, Dict[str, float]] = {}
+    for split_label in REQUIRED_WF_SPLITS:
+        split_row = strategy_wf.get(split_label, {})
+        if not isinstance(split_row, dict):
+            raise ValueError(f"Missing walkforward split '{split_label}' for {strategy_id}")
+        parsed: Dict[str, float] = {}
+        for key in REQUIRED_WF_STRATEGY_KEYS:
+            parsed[key] = _to_float_strict(
+                split_row.get(key),
+                field_name=f"{strategy_id}.{split_label}.{key}",
+            )
+        out[split_label] = parsed
+    return out
 
 
 def main() -> int:
@@ -188,6 +244,7 @@ def main() -> int:
     parser.add_argument("--max_regime_dominance_share", type=float, default=0.999)
     parser.add_argument("--blueprints_path", default=None)
     parser.add_argument("--out_dir", default=None)
+    parser.add_argument("--allow_fallback_evidence", type=int, default=0)
     args = parser.parse_args()
 
     blueprints_path = (
@@ -206,6 +263,7 @@ def main() -> int:
         "min_cross_symbol_pass_rate": float(args.min_cross_symbol_pass_rate),
         "max_regime_dominance_share": float(args.max_regime_dominance_share),
         "blueprints_path": str(blueprints_path),
+        "allow_fallback_evidence": int(args.allow_fallback_evidence),
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
@@ -214,21 +272,21 @@ def main() -> int:
     try:
         blueprints = _load_blueprints(blueprints_path)
         inputs.append({"path": str(blueprints_path), "rows": int(len(blueprints)), "start_ts": None, "end_ts": None})
-        walkforward_summary = _load_walkforward_summary(args.run_id)
-        wf_per_split = (
-            walkforward_summary.get("per_split_metrics", {})
-            if isinstance(walkforward_summary.get("per_split_metrics", {}), dict)
+        fallback_enabled = bool(int(args.allow_fallback_evidence))
+        require_wf = bool((not fallback_enabled) and bool(blueprints))
+        walkforward_summary = _load_walkforward_summary(args.run_id, required=require_wf)
+        wf_per_strategy = (
+            walkforward_summary.get("per_strategy_split_metrics", {})
+            if isinstance(walkforward_summary.get("per_strategy_split_metrics", {}), dict)
             else {}
         )
-        wf_final = (
-            walkforward_summary.get("final_test_metrics", {})
-            if isinstance(walkforward_summary.get("final_test_metrics", {}), dict)
-            else {}
-        )
+        if require_wf and (not wf_per_strategy):
+            raise ValueError("walkforward_summary.json missing non-empty per_strategy_split_metrics")
 
         engine_dir = DATA_ROOT / "runs" / args.run_id / "engine"
         tested_rows: List[Dict[str, object]] = []
         survivors: List[Dict[str, object]] = []
+        evidence_mode_counts = {"walkforward_strategy": 0, "fallback": 0}
 
         for bp in blueprints:
             bp_id = str(bp.get("id", "")).strip()
@@ -237,8 +295,6 @@ def main() -> int:
             strategy_id = f"dsl_interpreter_v1__{_sanitize(bp_id)}"
             evidence_mode = "fallback"
             returns = _load_strategy_returns(engine_dir=engine_dir, strategy_id=strategy_id)
-            if returns.empty:
-                continue
 
             frame = _assign_splits(returns)
             trades = _count_entries(frame)
@@ -246,28 +302,20 @@ def main() -> int:
             stressed_split_pnl = _stressed_pnl(frame)
             symbol_pass_rate = _symbol_pass_rate(frame)
             regime_dominance_share = _regime_dominance_share(frame)
-            if wf_per_split:
-                wf_meta = wf_final.get("metadata", {}) if isinstance(wf_final.get("metadata", {}), dict) else {}
-                wf_strategy_ids = (
-                    wf_meta.get("strategy_ids", [])
-                    if isinstance(wf_meta.get("strategy_ids", []), list)
-                    else []
+            strategy_wf = wf_per_strategy.get(strategy_id, {}) if isinstance(wf_per_strategy.get(strategy_id, {}), dict) else {}
+            if strategy_wf:
+                evidence_mode = "walkforward_strategy"
+                parsed_wf = _extract_strategy_wf_metrics(
+                    wf_per_strategy,
+                    strategy_id=strategy_id,
                 )
-                if (not wf_strategy_ids) or (strategy_id in [str(s) for s in wf_strategy_ids]):
-                    evidence_mode = "walkforward"
-                    for split_label in ("train", "validation", "test"):
-                        row = wf_per_split.get(split_label, {})
-                        if isinstance(row, dict):
-                            split_pnl[split_label] = _to_float(row.get("stressed_net_pnl"), split_pnl.get(split_label, 0.0))
-                            stressed_split_pnl[split_label] = _to_float(
-                                row.get("stressed_net_pnl"), stressed_split_pnl.get(split_label, 0.0)
-                            )
-                    trades = max(
-                        trades,
-                        int(_to_float(wf_per_split.get("train", {}).get("total_trades", 0), 0))
-                        + int(_to_float(wf_per_split.get("validation", {}).get("total_trades", 0), 0))
-                        + int(_to_float(wf_per_split.get("test", {}).get("total_trades", 0), 0)),
-                    )
+                trades = int(sum(int(parsed_wf[s]["total_trades"]) for s in REQUIRED_WF_SPLITS))
+                for split_label in REQUIRED_WF_SPLITS:
+                    split_pnl[split_label] = float(parsed_wf[split_label]["net_pnl"])
+                    stressed_split_pnl[split_label] = float(parsed_wf[split_label]["stressed_net_pnl"])
+            elif not fallback_enabled:
+                raise ValueError(f"Missing walkforward strategy evidence for {strategy_id}")
+            evidence_mode_counts[evidence_mode] += 1
 
             eval_spec = bp.get("evaluation", {}) if isinstance(bp.get("evaluation"), dict) else {}
             robust_flags = eval_spec.get("robustness_flags", {}) if isinstance(eval_spec.get("robustness_flags"), dict) else {}
@@ -318,6 +366,12 @@ def main() -> int:
             "run_id": args.run_id,
             "tested_count": int(len(tested_rows)),
             "survivors_count": int(len(survivors)),
+            "integrity_checks": {
+                "artifacts_validated": True,
+                "walkforward_strategy_evidence_required": bool(not fallback_enabled),
+                "walkforward_summary_validated": bool(bool(walkforward_summary) or fallback_enabled),
+            },
+            "evidence_mode_counts": evidence_mode_counts,
             "tested": tested_rows,
             "thresholds": {
                 "min_trades": int(args.min_trades),
@@ -333,7 +387,12 @@ def main() -> int:
         finalize_manifest(
             manifest,
             "success",
-            stats={"tested_count": int(len(tested_rows)), "survivors_count": int(len(survivors))},
+            stats={
+                "tested_count": int(len(tested_rows)),
+                "survivors_count": int(len(survivors)),
+                "walkforward_strategy_evidence_required": bool(not fallback_enabled),
+                "evidence_mode_counts": evidence_mode_counts,
+            },
         )
         return 0
     except Exception as exc:

@@ -273,12 +273,16 @@ def main() -> int:
             }
         )
 
-    # Concatenate all event tables and persist if any events were found.
+    # Concatenate all event tables and persist a stable events artifact.
+    # Phase-2 expects the events CSV to exist for strict phase1->phase2 contracts,
+    # even when no events were detected.
     events_df = pd.concat(all_events, ignore_index=True) if all_events else pd.DataFrame()
+    csv_path = out_dir / "liquidity_vacuum_events.csv"
+    events_df.to_csv(csv_path, index=False)
     if not events_df.empty:
-        csv_path = out_dir / "liquidity_vacuum_events.csv"
-        events_df.to_csv(csv_path, index=False)
         logging.info("Wrote events to %s", csv_path)
+    else:
+        logging.info("Wrote empty events scaffold to %s", csv_path)
     controls_path = out_dir / "liquidity_vacuum_controls.csv"
     pd.DataFrame(columns=["event_id", "symbol", "start_idx", "end_idx"]).to_csv(controls_path, index=False)
     logging.info("Wrote controls scaffold to %s", controls_path)

@@ -82,33 +82,50 @@ def _safe_int(value: object, default: int = 0) -> int:
         return default
 
 
-def _candidate_index(candidate_id: str) -> int:
-    if not candidate_id:
-        return 0
-    tail = candidate_id.rsplit("_", 1)[-1]
-    return int(tail) if tail.isdigit() else 0
+def _checklist_decision(run_id: str) -> str:
+    path = DATA_ROOT / "runs" / run_id / "research_checklist" / "checklist.json"
+    if not path.exists():
+        return "missing"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return "invalid"
+    if not isinstance(payload, dict):
+        return "invalid"
+    return str(payload.get("decision", "missing")).strip().upper() or "missing"
 
 
-def _load_candidate_detail(source_path: Path, candidate_index: int) -> Dict[str, object]:
+def _load_candidate_detail(source_path: Path, candidate_id: str) -> Dict[str, object]:
     if not source_path.exists():
+        return {}
+    normalized_candidate_id = str(candidate_id).strip()
+    if not normalized_candidate_id:
         return {}
     try:
         if source_path.suffix.lower() == ".json":
             payload = json.loads(source_path.read_text(encoding="utf-8"))
             if isinstance(payload, dict):
                 candidates = payload.get("candidates", [])
-                if isinstance(candidates, list) and candidate_index < len(candidates) and isinstance(candidates[candidate_index], dict):
-                    return dict(candidates[candidate_index])
-                return payload if all(isinstance(v, (str, int, float, bool, type(None))) for v in payload.values()) else {}
-            if isinstance(payload, list) and candidate_index < len(payload) and isinstance(payload[candidate_index], dict):
-                return dict(payload[candidate_index])
+                if isinstance(candidates, list):
+                    for item in candidates:
+                        if isinstance(item, dict) and str(item.get("candidate_id", "")).strip() == normalized_candidate_id:
+                            return dict(item)
+                if str(payload.get("candidate_id", "")).strip() == normalized_candidate_id:
+                    return dict(payload)
+                return {}
+            if isinstance(payload, list):
+                for item in payload:
+                    if isinstance(item, dict) and str(item.get("candidate_id", "")).strip() == normalized_candidate_id:
+                        return dict(item)
         if source_path.suffix.lower() == ".csv":
             df = pd.read_csv(source_path)
             if df.empty:
                 return {}
-            if candidate_index >= len(df):
-                candidate_index = len(df) - 1
-            return df.iloc[int(candidate_index)].to_dict()
+            if "candidate_id" in df.columns:
+                matched = df[df["candidate_id"].astype(str).str.strip() == normalized_candidate_id]
+                if not matched.empty:
+                    return matched.iloc[0].to_dict()
+            return {}
     except Exception:
         return {}
     return {}
@@ -520,6 +537,9 @@ def main() -> int:
     parser.add_argument("--max_candidates", type=int, default=20)
     parser.add_argument("--min_edge_score", type=float, default=0.0)
     parser.add_argument("--include_alpha_bundle", type=int, default=1)
+    parser.add_argument("--ignore_checklist", type=int, default=0)
+    parser.add_argument("--allow_non_promoted", type=int, default=0)
+    parser.add_argument("--allow_missing_candidate_detail", type=int, default=0)
     parser.add_argument("--out_dir", default=None)
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
@@ -551,12 +571,25 @@ def main() -> int:
         "max_candidates": int(args.max_candidates),
         "min_edge_score": float(args.min_edge_score),
         "include_alpha_bundle": int(args.include_alpha_bundle),
+        "ignore_checklist": int(args.ignore_checklist),
+        "allow_non_promoted": int(args.allow_non_promoted),
+        "allow_missing_candidate_detail": int(args.allow_missing_candidate_detail),
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
     manifest = start_manifest("build_strategy_candidates", args.run_id, params, inputs, outputs)
 
     try:
+        checklist_path = DATA_ROOT / "runs" / args.run_id / "research_checklist" / "checklist.json"
+        inputs.append({"path": str(checklist_path), "rows": None, "start_ts": None, "end_ts": None})
+        if not int(args.ignore_checklist):
+            decision = _checklist_decision(run_id=args.run_id)
+            if decision != "PROMOTE":
+                raise ValueError(
+                    f"Checklist decision must be PROMOTE before strategy candidate build (run_id={args.run_id}, decision={decision}). "
+                    "Use --ignore_checklist 1 only for explicit override."
+                )
+
         edge_csv = DATA_ROOT / "reports" / "edge_candidates" / args.run_id / "edge_candidates_normalized.csv"
         inputs.append({"path": str(edge_csv), "rows": None, "start_ts": None, "end_ts": None})
 
@@ -588,8 +621,15 @@ def main() -> int:
             edge_df["edge_score"] = pd.to_numeric(edge_df["edge_score"], errors="coerce").fillna(0.0)
             edge_df["stability_proxy"] = pd.to_numeric(edge_df["stability_proxy"], errors="coerce").fillna(0.0)
             edge_df = edge_df[edge_df["edge_score"] >= float(args.min_edge_score)].copy()
+            if not int(args.allow_non_promoted):
+                if "status" in edge_df.columns:
+                    status_series = edge_df["status"].astype(str).str.upper()
+                else:
+                    status_series = pd.Series("", index=edge_df.index, dtype=str)
+                edge_df = edge_df[status_series == "PROMOTED"].copy()
 
         strategy_rows: List[Dict[str, object]] = []
+        missing_detail_records: List[Dict[str, str]] = []
         if not edge_df.empty:
             edge_df["expectancy_per_trade"] = pd.to_numeric(edge_df.get("expectancy_per_trade"), errors="coerce").fillna(
                 pd.to_numeric(edge_df.get("expected_return_proxy"), errors="coerce").fillna(0.0)
@@ -613,11 +653,29 @@ def main() -> int:
                 selected = group.head(int(args.top_k_per_event))
                 for _, row in selected.iterrows():
                     source_path = Path(str(row.get("source_path", "")))
-                    detail = _load_candidate_detail(source_path=source_path, candidate_index=_candidate_index(str(row.get("candidate_id", ""))))
+                    detail = _load_candidate_detail(source_path=source_path, candidate_id=str(row.get("candidate_id", "")))
+                    if not detail:
+                        missing_detail_records.append(
+                            {
+                                "event": str(row.get("event", "")),
+                                "candidate_id": str(row.get("candidate_id", "")),
+                                "source_path": str(source_path),
+                            }
+                        )
+                        continue
                     strategy_rows.append(_build_edge_strategy_candidate(row=row.to_dict(), detail=detail, symbols=symbols))
 
+        skipped_missing_detail_count = int(len(missing_detail_records))
+        if missing_detail_records and not int(args.allow_missing_candidate_detail):
+            missing_preview = "; ".join(
+                f"{row['candidate_id']}@{row['source_path']}" for row in missing_detail_records[:10]
+            )
+            raise ValueError(
+                "Missing candidate detail rows for selected promoted edges. "
+                f"count={len(missing_detail_records)} examples={missing_preview}"
+            )
+
         strategy_rows = sorted(strategy_rows, key=lambda x: float(x["selection_score"]), reverse=True)
-        strategy_rows = strategy_rows[: int(args.max_candidates)]
 
         if int(args.include_alpha_bundle):
             alpha_candidate = _load_alpha_bundle_candidate(run_id=args.run_id, symbols=symbols)
@@ -625,6 +683,16 @@ def main() -> int:
                 strategy_rows.append(alpha_candidate)
 
         strategy_rows = sorted(strategy_rows, key=lambda x: float(x["selection_score"]), reverse=True)
+        deduped_rows: List[Dict[str, object]] = []
+        seen_candidate_ids = set()
+        for row in strategy_rows:
+            strategy_candidate_id = str(row.get("strategy_candidate_id", "")).strip()
+            if strategy_candidate_id and strategy_candidate_id in seen_candidate_ids:
+                continue
+            if strategy_candidate_id:
+                seen_candidate_ids.add(strategy_candidate_id)
+            deduped_rows.append(row)
+        strategy_rows = deduped_rows[: int(args.max_candidates)]
         for rank, row in enumerate(strategy_rows, start=1):
             row["rank"] = rank
 
@@ -636,6 +704,10 @@ def main() -> int:
         out_json.write_text(json.dumps(strategy_rows, indent=2), encoding="utf-8")
         deployment_manifest = {
             "run_id": args.run_id,
+            "builder_diagnostics": {
+                "missing_candidate_detail_count": skipped_missing_detail_count,
+                "skipped_missing_candidate_detail_count": skipped_missing_detail_count if int(args.allow_missing_candidate_detail) else 0,
+            },
             "strategies": [
                 {
                     "strategy_candidate_id": row["strategy_candidate_id"],
@@ -666,6 +738,10 @@ def main() -> int:
                 "strategy_candidate_count": int(len(strategy_rows)),
                 "edge_rows_seen": int(len(edge_df)),
                 "included_alpha_bundle": bool(int(args.include_alpha_bundle)),
+                "missing_candidate_detail_count": int(skipped_missing_detail_count),
+                "skipped_missing_candidate_detail_count": (
+                    int(skipped_missing_detail_count) if int(args.allow_missing_candidate_detail) else 0
+                ),
             },
         )
         return 0

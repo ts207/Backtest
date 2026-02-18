@@ -1,31 +1,40 @@
-# Repo Hygiene Policy
+# Repo Hygiene
 
-## Source Of Truth
-- Commit code, configs, tests, and concise docs.
-- Do **not** commit generated runtime artifacts.
+## Source-of-Truth Boundary
 
-## Generated Artifact Rules
-Blocked from tracking:
-- `data/reports/**`
+Commit:
+- code
+- tests
+- docs
+- deterministic configs/specs
+
+Do not commit:
+- generated run artifacts
+- generated reports
+- lake partitions
+
+## Blocked Runtime Paths
+
 - `data/runs/**`
+- `data/reports/**`
 - `data/lake/cleaned/**`
 - `data/lake/features/**`
 - `data/lake/runs/**`
+- `data/lake/trades/**`
 
-Tracked placeholders are allowed:
-- `data/.gitkeep`
-- `data/lake/.gitkeep`
-- `data/runs/.gitkeep`
-- `data/reports/.gitkeep`
+## Allowed Placeholders
 
-## Sidecar Metadata Files
-The following files must never be present:
+- `.gitkeep` placeholders in empty runtime dirs are acceptable.
+
+## Sidecar File Policy
+
+Never keep these files:
 - `*:Zone.Identifier`
 - `*#Uf03aZone.Identifier`
 - `*#Uf03aZone.Identifier:Zone.Identifier`
 
-## Hygiene Commands
-- Check: `make check-hygiene`
-- Clean sidecars: `make clean-hygiene`
+## Operational Checks
 
-CI enforces the same checks in `.github/workflows/pytest.yml`.
+- Use `git status --short` before commit.
+- Ensure no runtime outputs appear in staged files.
+- Keep docs synchronized with current CLI defaults and artifact contracts.

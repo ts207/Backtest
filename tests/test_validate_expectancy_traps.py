@@ -81,6 +81,27 @@ def test_parameter_stability_diagnostics_emits_sections() -> None:
     assert "pass" in diag
     assert "rank_consistency" in diag
     assert "scenarios" in diag
+    assert "neighborhood_supported" in diag
+
+
+def test_parameter_stability_diagnostics_uses_scenario_survivors_for_decay() -> None:
+    trap_df = pd.DataFrame(
+        [
+            {"condition": "compression", "horizon": 4, "event_samples": 120, "event_mean": 0.01, "event_t": 2.2},
+            {"condition": "compression", "horizon": 16, "event_samples": 121, "event_mean": 0.009, "event_t": 2.1},
+            {"condition": "compression_plus_funding_low", "horizon": 96, "event_samples": 60, "event_mean": -0.5, "event_t": -1.0},
+        ]
+    )
+    diag = validate_expectancy_traps._parameter_stability_diagnostics(
+        trap_df,
+        base_min_samples=100,
+        base_tstat_threshold=2.0,
+        sample_delta=20,
+        tstat_delta=0.5,
+    )
+    assert diag["neighborhood_supported"] is True
+    assert float(diag["performance_decay"]) <= 1.0
+    assert diag["pass"] is True
 
 
 def test_capacity_diagnostics_computes_symbol_details() -> None:

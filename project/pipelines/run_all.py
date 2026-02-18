@@ -101,6 +101,10 @@ def _parse_symbols_csv(symbols_csv: str) -> List[str]:
     return unique_symbols
 
 
+def _default_blueprints_path(run_id: str) -> Path:
+    return DATA_ROOT / "reports" / "strategy_blueprints" / run_id / "blueprints.jsonl"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -151,10 +155,16 @@ def main() -> int:
     parser.add_argument("--run_edge_candidate_universe", type=int, default=0)
     parser.add_argument("--run_strategy_blueprint_compiler", type=int, default=1)
     parser.add_argument("--strategy_blueprint_max_per_event", type=int, default=2)
+    parser.add_argument("--strategy_blueprint_ignore_checklist", type=int, default=0)
+    parser.add_argument("--strategy_blueprint_allow_fallback", type=int, default=0)
+    parser.add_argument("--strategy_blueprint_allow_non_executable_conditions", type=int, default=0)
     parser.add_argument("--run_strategy_builder", type=int, default=1)
     parser.add_argument("--strategy_builder_top_k_per_event", type=int, default=2)
     parser.add_argument("--strategy_builder_max_candidates", type=int, default=20)
     parser.add_argument("--strategy_builder_include_alpha_bundle", type=int, default=1)
+    parser.add_argument("--strategy_builder_ignore_checklist", type=int, default=0)
+    parser.add_argument("--strategy_builder_allow_non_promoted", type=int, default=0)
+    parser.add_argument("--strategy_builder_allow_missing_candidate_detail", type=int, default=0)
     parser.add_argument("--run_expectancy_analysis", type=int, default=0)
     parser.add_argument("--run_expectancy_robustness", type=int, default=0)
     parser.add_argument("--run_recommendations_checklist", type=int, default=1)
@@ -162,10 +172,12 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--run_backtest", type=int, default=0)
     parser.add_argument("--run_blueprint_promotion", type=int, default=1)
+    parser.add_argument("--promotion_allow_fallback_evidence", type=int, default=0)
     parser.add_argument("--run_walkforward_eval", type=int, default=0)
     parser.add_argument("--walkforward_embargo_days", type=int, default=0)
     parser.add_argument("--walkforward_train_frac", type=float, default=0.6)
     parser.add_argument("--walkforward_validation_frac", type=float, default=0.2)
+    parser.add_argument("--report_allow_backtest_artifact_fallback", type=int, default=0)
     parser.add_argument("--run_make_report", type=int, default=0)
     parser.add_argument("--fees_bps", type=float, default=None)
     parser.add_argument("--slippage_bps", type=float, default=None)
@@ -180,16 +192,6 @@ def main() -> int:
     global _STRICT_RECOMMENDATIONS_CHECKLIST
     _STRICT_RECOMMENDATIONS_CHECKLIST = bool(int(args.strict_recommendations_checklist))
 
-    if int(args.run_backtest):
-        has_strategies = bool(args.strategies and str(args.strategies).strip())
-        has_blueprints = bool(args.blueprints_path and str(args.blueprints_path).strip())
-        if not (has_strategies or has_blueprints):
-            print("run_backtest requires --strategies or --blueprints_path.", file=sys.stderr)
-            return 1
-        if has_strategies and has_blueprints:
-            print("run_backtest requires only one of --strategies or --blueprints_path.", file=sys.stderr)
-            return 1
-
     run_id = args.run_id or _run_id_default()
     parsed_symbols = _parse_symbols_csv(args.symbols)
     if not parsed_symbols:
@@ -202,6 +204,26 @@ def main() -> int:
     allow_missing_funding_flag = _as_flag(args.allow_missing_funding)
     allow_constant_funding_flag = _as_flag(args.allow_constant_funding)
     allow_funding_timestamp_rounding_flag = _as_flag(args.allow_funding_timestamp_rounding)
+    effective_strategies = str(args.strategies).strip() if args.strategies and str(args.strategies).strip() else None
+    effective_blueprints_path = (
+        str(args.blueprints_path).strip() if args.blueprints_path and str(args.blueprints_path).strip() else None
+    )
+    execution_requested = bool(int(args.run_backtest) or int(args.run_walkforward_eval))
+    if execution_requested:
+        if effective_strategies and effective_blueprints_path:
+            print("Execution requires only one of --strategies or --blueprints_path.", file=sys.stderr)
+            return 1
+        if not effective_strategies and not effective_blueprints_path:
+            inferred_blueprints = _default_blueprints_path(run_id)
+            if int(args.run_strategy_blueprint_compiler) or inferred_blueprints.exists():
+                effective_blueprints_path = str(inferred_blueprints)
+            else:
+                print(
+                    "Execution requires --strategies or --blueprints_path "
+                    "(or enable blueprint compiler / provide existing blueprint artifact).",
+                    file=sys.stderr,
+                )
+                return 1
 
     cross_venue_requested = bool(
         int(args.run_phase2_conditional)
@@ -584,6 +606,12 @@ def main() -> int:
                     symbols,
                     "--max_per_event",
                     str(int(args.strategy_blueprint_max_per_event)),
+                    "--ignore_checklist",
+                    str(int(args.strategy_blueprint_ignore_checklist)),
+                    "--allow_fallback_blueprints",
+                    str(int(args.strategy_blueprint_allow_fallback)),
+                    "--allow_non_executable_conditions",
+                    str(int(args.strategy_blueprint_allow_non_executable_conditions)),
                 ],
             )
         )
@@ -604,6 +632,12 @@ def main() -> int:
                     str(int(args.strategy_builder_max_candidates)),
                     "--include_alpha_bundle",
                     str(int(args.strategy_builder_include_alpha_bundle)),
+                    "--ignore_checklist",
+                    str(int(args.strategy_builder_ignore_checklist)),
+                    "--allow_non_promoted",
+                    str(int(args.strategy_builder_allow_non_promoted)),
+                    "--allow_missing_candidate_detail",
+                    str(int(args.strategy_builder_allow_missing_candidate_detail)),
                 ],
             )
         )
@@ -620,18 +654,6 @@ def main() -> int:
                     symbols,
                     "--force",
                     force_flag,
-                ],
-            )
-        )
-
-    if int(args.run_backtest) and int(args.run_blueprint_promotion):
-        stages.append(
-            (
-                "promote_blueprints",
-                PROJECT_ROOT / "pipelines" / "research" / "promote_blueprints.py",
-                [
-                    "--run_id",
-                    run_id,
                 ],
             )
         )
@@ -662,12 +684,31 @@ def main() -> int:
             )
         )
 
+    if int(args.run_backtest) and int(args.run_blueprint_promotion):
+        stages.append(
+            (
+                "promote_blueprints",
+                PROJECT_ROOT / "pipelines" / "research" / "promote_blueprints.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--allow_fallback_evidence",
+                    str(int(args.promotion_allow_fallback_evidence)),
+                ],
+            )
+        )
+
     if int(args.run_make_report) or int(args.run_backtest):
         stages.append(
             (
                 "make_report",
                 PROJECT_ROOT / "pipelines" / "report" / "make_report.py",
-                ["--run_id", run_id],
+                [
+                    "--run_id",
+                    run_id,
+                    "--allow_backtest_artifact_fallback",
+                    str(int(args.report_allow_backtest_artifact_fallback)),
+                ],
             )
         )
 
@@ -677,6 +718,7 @@ def main() -> int:
         "build_context_features",
         "build_market_context",
         "backtest_strategies",
+        "run_walkforward",
         "make_report",
     }
     for stage_name, _, base_args in stages:
@@ -690,12 +732,12 @@ def main() -> int:
                 base_args.extend(["--slippage_bps", str(args.slippage_bps)])
             if args.cost_bps is not None:
                 base_args.extend(["--cost_bps", str(args.cost_bps)])
-            if args.strategies is not None:
-                base_args.extend(["--strategies", str(args.strategies)])
+            if effective_strategies is not None:
+                base_args.extend(["--strategies", str(effective_strategies)])
             if args.overlays:
                 base_args.extend(["--overlays", str(args.overlays)])
-            if args.blueprints_path is not None and str(args.blueprints_path).strip():
-                base_args.extend(["--blueprints_path", str(args.blueprints_path)])
+            if effective_blueprints_path is not None:
+                base_args.extend(["--blueprints_path", str(effective_blueprints_path)])
                 base_args.extend(["--blueprints_top_k", str(int(args.blueprints_top_k))])
                 base_args.extend(["--blueprints_filter_event_type", str(args.blueprints_filter_event_type)])
         if stage_name == "run_walkforward":
@@ -705,12 +747,12 @@ def main() -> int:
                 base_args.extend(["--slippage_bps", str(args.slippage_bps)])
             if args.cost_bps is not None:
                 base_args.extend(["--cost_bps", str(args.cost_bps)])
-            if args.strategies is not None:
-                base_args.extend(["--strategies", str(args.strategies)])
+            if effective_strategies is not None:
+                base_args.extend(["--strategies", str(effective_strategies)])
             if args.overlays:
                 base_args.extend(["--overlays", str(args.overlays)])
-            if args.blueprints_path is not None and str(args.blueprints_path).strip():
-                base_args.extend(["--blueprints_path", str(args.blueprints_path)])
+            if effective_blueprints_path is not None:
+                base_args.extend(["--blueprints_path", str(effective_blueprints_path)])
                 base_args.extend(["--blueprints_top_k", str(int(args.blueprints_top_k))])
                 base_args.extend(["--blueprints_filter_event_type", str(args.blueprints_filter_event_type)])
 

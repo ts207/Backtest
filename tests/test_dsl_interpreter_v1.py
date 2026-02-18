@@ -34,7 +34,7 @@ def _features() -> pd.DataFrame:
             "quote_volume": [1000.0] * 8,
             "spread_bps": [2.0] * 8,
             "funding_rate_scaled": [0.0] * 8,
-            "forward_abs_return_h": [0.01] * 8,
+            "direction_score": [0.01] * 8,
         }
     )
 
@@ -48,9 +48,9 @@ def _blueprint(overlay_name: str = "liquidity_guard", condition: str = "all") ->
         "symbol_scope": {"mode": "single_symbol", "symbols": ["BTCUSDT"], "candidate_symbol": "BTCUSDT"},
         "direction": "long",
         "entry": {
-            "triggers": ["t"],
+            "triggers": ["event_detected"],
             "conditions": [condition],
-            "confirmations": ["c"],
+            "confirmations": ["oos_validation_pass"],
             "delay_bars": 0,
             "cooldown_bars": 2,
             "condition_logic": "all",
@@ -143,3 +143,75 @@ def test_interpreter_applies_delay_arming_state() -> None:
     non_zero_idx = [i for i, v in enumerate(pos.tolist()) if v != 0]
     assert non_zero_idx
     assert non_zero_idx[0] >= 2
+
+
+def test_interpreter_rejects_unknown_trigger_signal() -> None:
+    strat = DslInterpreterV1()
+    bp = _blueprint()
+    bp["entry"]["triggers"] = ["totally_unknown_signal"]
+    with pytest.raises(ValueError, match=r"Blueprint `bp_interp` has unknown trigger signals: totally_unknown_signal"):
+        strat.generate_positions(_bars(), _features(), {"dsl_blueprint": bp, "strategy_symbol": "BTCUSDT"})
+
+
+def test_interpreter_trigger_confirmation_gate_blocks_entries() -> None:
+    strat = DslInterpreterV1()
+    bp = _blueprint()
+    bp["entry"]["triggers"] = ["spread_guard_pass"]
+    bp["entry"]["confirmations"] = ["oos_validation_pass"]
+
+    features = _features()
+    features["spread_bps"] = [30.0] * len(features)
+
+    pos = strat.generate_positions(_bars(), features, {"dsl_blueprint": bp, "strategy_symbol": "BTCUSDT"})
+    assert (pos == 0).all()
+
+
+def test_interpreter_conditional_direction_can_take_short_side() -> None:
+    strat = DslInterpreterV1()
+    bp = _blueprint()
+    bp["direction"] = "conditional"
+    bp["event_type"] = "range_compression_breakout_window"
+
+    features = _features()
+    features["direction_score"] = [-0.02] * len(features)
+
+    pos = strat.generate_positions(_bars(), features, {"dsl_blueprint": bp, "strategy_symbol": "BTCUSDT"})
+    assert (-1 in set(pos.unique()))
+
+
+def test_interpreter_rejects_irrecoverable_missing_signal_inputs() -> None:
+    strat = DslInterpreterV1()
+    bp = _blueprint()
+    bp["entry"]["triggers"] = ["funding_extreme_event"]
+    bp["entry"]["confirmations"] = []
+
+    features = _features().drop(columns=["funding_rate_scaled"])
+    with pytest.raises(
+        ValueError,
+        match=r"Blueprint `bp_interp` missing required columns for entry signals -> funding_extreme_event: funding_rate_scaled",
+    ):
+        strat.generate_positions(_bars(), features, {"dsl_blueprint": bp, "strategy_symbol": "BTCUSDT"})
+
+
+def test_interpreter_derives_session_bull_bear_and_vol_regime_features() -> None:
+    strat = DslInterpreterV1()
+    bp = _blueprint()
+    bp["entry"]["conditions"] = []
+    bp["entry"]["condition_nodes"] = [
+        {"feature": "session_hour_utc", "operator": "in_range", "value": 0.0, "value_high": 0.0},
+        {"feature": "bull_bear_flag", "operator": "==", "value": 0.0},
+        {"feature": "vol_regime_code", "operator": ">=", "value": 0.0},
+    ]
+    pos = strat.generate_positions(_bars(), _features(), {"dsl_blueprint": bp, "strategy_symbol": "BTCUSDT"})
+    assert (pos != 0).any()
+
+
+def test_interpreter_mapped_condition_nodes_gate_entries() -> None:
+    strat = DslInterpreterV1()
+    bp = _blueprint()
+    bp["entry"]["conditions"] = []
+    bp["entry"]["condition_nodes"] = [
+        {"feature": "session_hour_utc", "operator": "in_range", "value": 10.0, "value_high": 11.0}
+    ]
+    pos = strat.generate_positions(_bars(), _features(), {"dsl_blueprint": bp, "strategy_symbol": "BTCUSDT"})
+    assert (pos == 0).all()

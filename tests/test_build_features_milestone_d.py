@@ -82,3 +82,55 @@ def test_build_features_includes_oi_liquidation_and_revision_lag(tmp_path: Path)
         assert col in frame.columns
     assert int(frame["revision_lag_bars"].iloc[-1]) == 3
     assert int(frame["revision_lag_minutes"].iloc[-1]) == 45
+
+
+def test_build_features_prefers_run_scoped_cleaned_input(tmp_path: Path) -> None:
+    run_id = "feat_run_scoped_priority"
+    symbol = "BTCUSDT"
+    ts = pd.date_range("2024-01-01", periods=100, freq="15min", tz="UTC")
+
+    global_bars = pd.DataFrame(
+        {
+            "timestamp": ts,
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 111.0,
+            "funding_rate_scaled": 0.0,
+            "funding_rate": 0.0,
+        }
+    )
+    run_bars = global_bars.copy()
+    run_bars["close"] = 222.0
+
+    _write_csv(global_bars, tmp_path / "lake" / "cleaned" / "perp" / symbol / "bars_15m" / "part.csv")
+    _write_csv(
+        run_bars,
+        tmp_path / "lake" / "runs" / run_id / "cleaned" / "perp" / symbol / "bars_15m" / "part.csv",
+    )
+
+    env = os.environ.copy()
+    env["BACKTEST_DATA_ROOT"] = str(tmp_path)
+    cmd = [
+        sys.executable,
+        str(ROOT / "project" / "pipelines" / "features" / "build_features_v1.py"),
+        "--run_id",
+        run_id,
+        "--symbols",
+        symbol,
+        "--market",
+        "perp",
+        "--force",
+        "1",
+    ]
+    subprocess.run(cmd, check=True, env=env)
+
+    out_dir = tmp_path / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
+    files = sorted(out_dir.rglob("*.csv")) + sorted(out_dir.rglob("*.parquet"))
+    assert files
+    frame = pd.read_csv(files[0]) if files[0].suffix == ".csv" else pd.read_parquet(files[0])
+    assert float(frame["close"].iloc[0]) == 222.0
+
+    compat_out_dir = tmp_path / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
+    compat_files = sorted(compat_out_dir.rglob("*.csv")) + sorted(compat_out_dir.rglob("*.parquet"))
+    assert compat_files

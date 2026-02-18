@@ -1,27 +1,35 @@
 # Data Strategy
 
-## Decision
-`data/` remains local-only and is not committed to git.
+## Policy
 
-## What stays in git
-- Source code under `project/`
-- Tests under `tests/`
-- Documentation under `docs/`
-- Small, deterministic config files and manifests
+`data/` is runtime storage, not source control content.
 
-## What stays out of git
-- Raw exchange downloads (`data/lake/raw/...`)
-- Cleaned/feature parquet partitions (`data/lake/...`)
-- Run outputs/logs/reports generated per run (`data/runs/...`, `data/reports/...`)
+## Keep in Git
 
-## Operational policy
-- Treat `run_id` as the immutable join key across artifacts.
-- Keep at least one durable external backup target for large artifacts (for example: S3-compatible object storage or NAS).
-- If sharing results, export compressed run snapshots keyed by `run_id` instead of committing data files.
+- code (`project/`)
+- tests (`tests/`)
+- docs (`docs/`)
+- configs/specs
 
-## Minimal backup scope recommendation
-- `data/runs/<run_id>/` manifests and logs
-- `data/reports/<strategy_or_research>/<run_id>/` summaries
-- Any custom configs used for that run
+## Do Not Commit
 
-This keeps the repository lightweight while preserving reproducibility and auditability.
+- raw exchange downloads (`data/lake/raw/...`)
+- cleaned/features/trades artifacts (`data/lake/...`)
+- manifests/logs/reports (`data/runs/...`, `data/reports/...`)
+
+## Reproducibility Rules
+
+- Treat `run_id` as immutable join key.
+- Persist stage manifests in `data/runs/<run_id>/*.json`.
+- Record the exact command and env (`BACKTEST_DATA_ROOT`, flags, symbols, dates).
+
+## Retention Recommendation
+
+Minimum snapshot for audit:
+- `data/runs/<run_id>/`
+- `data/reports/phase2/<run_id>/`
+- `data/reports/strategy_blueprints/<run_id>/`
+- if downstream run enabled:
+  - `data/reports/eval/<run_id>/`
+  - `data/reports/promotions/<run_id>/`
+  - `data/reports/vol_compression_expansion_v1/<run_id>/`

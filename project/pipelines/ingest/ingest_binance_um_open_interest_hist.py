@@ -21,7 +21,7 @@ DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.http_utils import download_with_retries
-from pipelines._lib.io_utils import ensure_dir, write_parquet
+from pipelines._lib.io_utils import ensure_dir, read_parquet, write_parquet
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.url_utils import join_url
 from pipelines._lib.validation import ensure_utc_timestamp
@@ -328,6 +328,21 @@ def _fetch_open_interest_hist(
     )
 
 
+def _partition_has_rows(path: Path) -> bool:
+    target = path
+    if not target.exists():
+        csv_path = path.with_suffix(".csv")
+        if csv_path.exists():
+            target = csv_path
+        else:
+            return False
+    try:
+        df = read_parquet([target]) if target.suffix != ".csv" else pd.read_csv(target)
+    except Exception:
+        return False
+    return int(len(df)) > 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Ingest Binance USD-M open interest history (archive metrics + API tail in auto mode)"
@@ -517,6 +532,8 @@ def main() -> int:
                     / f"month={month_start.month:02d}"
                 )
                 out_path = out_dir / f"open_interest_{symbol}_{args.period}_{month_start.year}-{month_start.month:02d}.parquet"
+                if not int(args.force) and _partition_has_rows(out_path):
+                    continue
                 path_written, storage = write_parquet(part, out_path)
                 outputs.append({"path": str(path_written), "rows": int(len(part)), "storage": storage})
                 written_parts += 1

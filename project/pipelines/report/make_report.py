@@ -19,6 +19,15 @@ from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines.report.capital_allocation import AllocationConfig, allocation_metadata, build_allocation_weights
 
+REQUIRED_METRIC_FIELDS = (
+    "total_trades",
+    "avg_r",
+    "win_rate",
+    "ending_equity",
+    "sharpe_annualized",
+)
+REQUIRED_TRADE_COLUMNS = ("symbol", "r_multiple")
+REQUIRED_ENGINE_FALLBACK_COLUMNS = ("timestamp", "symbol", "pos")
 
 
 
@@ -29,8 +38,23 @@ def _table_text(df: pd.DataFrame) -> str:
         return df.to_string(index=False)
 
 def _read_json(path: Path) -> Dict[str, object]:
+    if not path.exists():
+        raise FileNotFoundError(f"Missing required JSON artifact: {path}")
     with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+        payload = json.load(f)
+    if not isinstance(payload, dict):
+        raise ValueError(f"Invalid JSON payload (expected object): {path}")
+    return payload
+
+
+def _to_float_strict(value: object, *, field_name: str) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid numeric field '{field_name}': {value!r}") from exc
+    if pd.isna(out):
+        raise ValueError(f"Invalid numeric field '{field_name}': {value!r}")
+    return out
 
 
 def _load_trades(trades_dir: Path) -> pd.DataFrame:
@@ -38,6 +62,9 @@ def _load_trades(trades_dir: Path) -> pd.DataFrame:
     if not trade_files:
         return pd.DataFrame()
     frames = [pd.read_csv(path) for path in trade_files]
+    missing_cols = [col for col in REQUIRED_TRADE_COLUMNS if any(col not in frame.columns for frame in frames)]
+    if missing_cols:
+        raise ValueError(f"Trade files missing required columns {missing_cols} under {trades_dir}")
     return pd.concat(frames, ignore_index=True)
 
 
@@ -48,7 +75,12 @@ def _load_engine_entries(engine_dir: Path) -> pd.DataFrame:
 
     per_symbol: Dict[str, int] = {}
     for path in strategy_files:
-        df = pd.read_csv(path, usecols=["timestamp", "symbol", "pos"])
+        try:
+            df = pd.read_csv(path, usecols=list(REQUIRED_ENGINE_FALLBACK_COLUMNS))
+        except ValueError as exc:
+            raise ValueError(
+                f"Engine fallback file missing required columns {list(REQUIRED_ENGINE_FALLBACK_COLUMNS)}: {path}"
+            ) from exc
         if df.empty:
             continue
         df = df.sort_values(["symbol", "timestamp"])
@@ -156,6 +188,7 @@ def main() -> int:
     parser.add_argument("--allocation_min_weight", type=float, default=0.02)
     parser.add_argument("--allocation_volatility_target", type=float, default=0.0)
     parser.add_argument("--allocation_volatility_adjustment_cap", type=float, default=3.0)
+    parser.add_argument("--allow_backtest_artifact_fallback", type=int, default=0)
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
 
@@ -175,6 +208,7 @@ def main() -> int:
         "trade_day_timezone": config.get("trade_day_timezone", "UTC"),
         "run_id": run_id,
         "out_dir": args.out_dir,
+        "allow_backtest_artifact_fallback": int(args.allow_backtest_artifact_fallback),
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
@@ -185,23 +219,49 @@ def main() -> int:
         backtests_root = DATA_ROOT / "lake" / "trades" / "backtests"
         preferred_strategy = "vol_compression_expansion_v1"
         trades_dir = backtests_root / preferred_strategy / run_id
+        used_backtest_fallback = False
         if not (trades_dir / "metrics.json").exists():
+            if not bool(int(args.allow_backtest_artifact_fallback)):
+                raise FileNotFoundError(
+                    f"Missing preferred backtest metrics at {trades_dir / 'metrics.json'} "
+                    "(set --allow_backtest_artifact_fallback 1 to scan alternate backtest dirs)"
+                )
             fallback_dirs = sorted(
                 path for path in backtests_root.glob(f"*/{run_id}") if (path / "metrics.json").exists()
             )
             if fallback_dirs:
                 trades_dir = fallback_dirs[0]
+                used_backtest_fallback = True
+            else:
+                raise FileNotFoundError(
+                    f"No backtest metrics found under {backtests_root} for run_id={run_id}"
+                )
         metrics_path = trades_dir / "metrics.json"
         equity_curve_path = trades_dir / "equity_curve.csv"
         fee_path = trades_dir / "fee_sensitivity.json"
         metrics = _read_json(metrics_path)
+        for key in REQUIRED_METRIC_FIELDS:
+            _to_float_strict(metrics.get(key), field_name=f"metrics.{key}")
+        cost_decomposition_raw = metrics.get("cost_decomposition")
+        if not isinstance(cost_decomposition_raw, dict):
+            raise ValueError(f"Missing/invalid metrics.cost_decomposition in {metrics_path}")
+        _to_float_strict(cost_decomposition_raw.get("net_alpha"), field_name="metrics.cost_decomposition.net_alpha")
         logging.info("Using backtest artifacts from %s", trades_dir)
         fee_sensitivity = _read_json(fee_path) if fee_path.exists() else {}
         trades = _load_trades(trades_dir)
         engine_dir = DATA_ROOT / "runs" / run_id / "engine"
         fallback_per_symbol = _load_engine_entries(engine_dir) if trades.empty else pd.DataFrame()
+        if trades.empty and fallback_per_symbol.empty:
+            raise ValueError(
+                f"No trade evidence found for run_id={run_id}; expected trades_*.csv under {trades_dir} "
+                f"or strategy_returns_*.csv under {engine_dir}"
+            )
         context_by_active, context_by_age = _load_context_segments(engine_dir)
         equity_curve = pd.read_csv(equity_curve_path) if equity_curve_path.exists() else pd.DataFrame()
+        if equity_curve.empty:
+            raise FileNotFoundError(f"Missing required equity curve: {equity_curve_path}")
+        if "equity" not in equity_curve.columns:
+            raise ValueError(f"equity_curve.csv missing required column 'equity': {equity_curve_path}")
 
         cleaned_manifest_path = DATA_ROOT / "runs" / run_id / "build_cleaned_15m.json"
         cleaned_stats = _read_json(cleaned_manifest_path).get("stats", {}) if cleaned_manifest_path.exists() else {}
@@ -237,12 +297,12 @@ def main() -> int:
             allocation_meta = allocation_metadata(allocation_config, allocation_df)
             inputs.append({"path": str(allocation_input_path), "rows": int(len(candidate_df)), "start_ts": None, "end_ts": None})
 
-        metrics_total_trades = int(metrics.get("total_trades", 0) or 0)
-        metrics_avg_r = float(metrics.get("avg_r", 0.0) or 0.0)
-        metrics_win_rate = float(metrics.get("win_rate", 0.0) or 0.0)
-        ending_equity = float(metrics.get("ending_equity", 0.0) or 0.0)
-        metrics_sharpe = float(metrics.get("sharpe_annualized", 0.0) or 0.0)
-        cost_decomposition = metrics.get("cost_decomposition", {}) if isinstance(metrics, dict) else {}
+        metrics_total_trades = int(_to_float_strict(metrics.get("total_trades"), field_name="metrics.total_trades"))
+        metrics_avg_r = _to_float_strict(metrics.get("avg_r"), field_name="metrics.avg_r")
+        metrics_win_rate = _to_float_strict(metrics.get("win_rate"), field_name="metrics.win_rate")
+        ending_equity = _to_float_strict(metrics.get("ending_equity"), field_name="metrics.ending_equity")
+        metrics_sharpe = _to_float_strict(metrics.get("sharpe_annualized"), field_name="metrics.sharpe_annualized")
+        cost_decomposition = cost_decomposition_raw
         reproducibility_meta = metrics.get("reproducibility", {}) if isinstance(metrics, dict) else {}
 
         if trades.empty and not fallback_per_symbol.empty:
@@ -484,6 +544,13 @@ def main() -> int:
                 "by_active": context_by_active.to_dict(orient="records") if not context_by_active.empty else [],
                 "by_age_bucket": context_by_age.to_dict(orient="records") if not context_by_age.empty else [],
             },
+            "integrity_checks": {
+                "artifacts_validated": True,
+                "used_backtest_dir_fallback": bool(used_backtest_fallback),
+                "used_engine_trade_fallback": bool(trades.empty and not fallback_per_symbol.empty),
+                "trade_files_found": bool(not trades.empty),
+                "equity_curve_validated": True,
+            },
         }
         summary_path = report_dir / "summary.json"
         summary_path.write_text(json.dumps(summary_json, indent=2, sort_keys=True), encoding="utf-8")
@@ -508,6 +575,15 @@ def main() -> int:
             logging.info("Wrote allocation weights: %s", allocation_csv_path)
             logging.info("Wrote allocation weights metadata: %s", allocation_json_path)
 
+        stats.update(
+            {
+                "artifacts_validated": True,
+                "used_backtest_dir_fallback": bool(used_backtest_fallback),
+                "used_engine_trade_fallback": bool(trades.empty and not fallback_per_symbol.empty),
+                "trade_rows": int(len(trades)),
+                "fallback_trade_rows": int(len(fallback_per_symbol)),
+            }
+        )
         finalize_manifest(manifest, "success", stats=stats)
         return 0
     except Exception as exc:

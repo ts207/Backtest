@@ -34,3 +34,10 @@ def test_parse_liquidation_snapshot_zip_basic(tmp_path: Path) -> None:
 def test_to_cm_contract_btc_eth_aliases() -> None:
     assert liq._to_cm_contract("BTCUSDT") == "BTCUSD_PERP"
     assert liq._to_cm_contract("ETHUSDT") == "ETHUSD_PERP"
+
+
+def test_partition_has_rows_csv_fallback(tmp_path: Path) -> None:
+    parquet_path = tmp_path / "liquidation.parquet"
+    csv_path = parquet_path.with_suffix(".csv")
+    pd.DataFrame({"ts": ["2024-01-01T00:00:00Z"], "notional": [100.0]}).to_csv(csv_path, index=False)
+    assert liq._partition_has_rows(parquet_path) is True

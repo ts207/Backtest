@@ -427,7 +427,13 @@ def _parameter_stability_diagnostics(
     tstat_delta: float,
 ) -> Dict[str, object]:
     if trap_df.empty:
-        return {"pass": False, "rank_consistency": 0.0, "performance_decay": 1.0, "scenarios": []}
+        return {
+            "pass": False,
+            "rank_consistency": 0.0,
+            "performance_decay": 1.0,
+            "neighborhood_supported": False,
+            "scenarios": [],
+        }
 
     scenarios = [
         {"name": "base", "min_samples": int(base_min_samples), "tstat": float(base_tstat_threshold)},
@@ -435,29 +441,58 @@ def _parameter_stability_diagnostics(
         {"name": "loose", "min_samples": max(1, int(base_min_samples - sample_delta)), "tstat": max(0.0, float(base_tstat_threshold - tstat_delta))},
     ]
 
-    def _survivor_set(min_samples: int, tstat: float) -> set[str]:
+    def _survivor_frame(min_samples: int, tstat: float) -> pd.DataFrame:
         sub = trap_df[(trap_df["event_samples"] >= min_samples) & (trap_df["event_mean"] > 0) & (trap_df["event_t"] >= tstat)]
+        return sub.copy()
+
+    def _survivor_set(sub: pd.DataFrame) -> set[str]:
         return {f"{r.condition}|{int(r.horizon)}" for r in sub.itertuples(index=False)}
 
-    base_set = _survivor_set(int(base_min_samples), float(base_tstat_threshold))
+    base_sub = _survivor_frame(int(base_min_samples), float(base_tstat_threshold))
+    base_set = _survivor_set(base_sub)
     rows = []
     overlap_scores = []
+    scenario_perf: Dict[str, float] = {}
     for sc in scenarios:
-        sset = _survivor_set(int(sc["min_samples"]), float(sc["tstat"]))
+        sub = _survivor_frame(int(sc["min_samples"]), float(sc["tstat"]))
+        sset = _survivor_set(sub)
         denom = max(1, len(base_set | sset))
         jaccard = float(len(base_set & sset) / denom)
         overlap_scores.append(jaccard)
-        rows.append({**sc, "survivors": len(sset), "jaccard_to_base": jaccard})
+        mean_perf = float(sub["event_mean"].mean()) if not sub.empty else np.nan
+        scenario_perf[str(sc["name"])] = mean_perf
+        rows.append(
+            {
+                **sc,
+                "survivors": len(sset),
+                "jaccard_to_base": jaccard,
+                "mean_event_return": (None if np.isnan(mean_perf) else mean_perf),
+            }
+        )
 
     rank_consistency = float(np.mean(overlap_scores)) if overlap_scores else 0.0
-    base_perf = float(trap_df["event_mean"].mean()) if not trap_df.empty else 0.0
-    worst_perf = float(trap_df["event_mean"].min()) if not trap_df.empty else 0.0
-    performance_decay = float(max(0.0, (base_perf - worst_perf) / max(abs(base_perf), 1e-9)))
-    passed = bool(rank_consistency >= 0.3 and performance_decay <= 1.0)
+    base_perf = scenario_perf.get("base", np.nan)
+    valid_perf = [v for v in scenario_perf.values() if np.isfinite(v)]
+    if np.isfinite(base_perf) and base_perf > 0.0 and valid_perf:
+        worst_perf = float(min(valid_perf))
+        performance_decay = float(max(0.0, (base_perf - worst_perf) / max(abs(base_perf), 1e-9)))
+    else:
+        performance_decay = 1.0
+
+    neighborhood_supported = any(
+        (row.get("name") != "base") and (int(row.get("survivors", 0)) > 0) for row in rows
+    )
+    passed = bool(
+        len(base_set) > 0
+        and neighborhood_supported
+        and rank_consistency >= 0.3
+        and performance_decay <= 1.0
+    )
     return {
         "pass": passed,
         "rank_consistency": rank_consistency,
         "performance_decay": performance_decay,
+        "neighborhood_supported": bool(neighborhood_supported),
         "scenarios": rows,
     }
 

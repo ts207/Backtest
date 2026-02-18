@@ -57,6 +57,51 @@ def _write_cleaned_fixture(tmp_path: Path, run_id: str, symbol: str) -> None:
     funding.to_parquet(funding_dir / "funding15m_BTCUSDT_2021-01.parquet", index=False)
 
 
+def _write_cleaned_fixture_with_bar_duplicates(tmp_path: Path, run_id: str, symbol: str) -> None:
+    ts = pd.date_range("2021-01-01 00:00", periods=12, freq="15min", tz="UTC")
+    bars = pd.DataFrame(
+        {
+            "timestamp": list(ts) + [ts[3], ts[7]],
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 1.0,
+            "is_gap": False,
+            "gap_len": 0,
+        }
+    )
+    funding = pd.DataFrame({"timestamp": ts, "funding_rate_scaled": 0.0001})
+    bars_dir = (
+        tmp_path
+        / "lake"
+        / "runs"
+        / run_id
+        / "cleaned"
+        / "perp"
+        / symbol
+        / "bars_15m"
+        / "year=2021"
+        / "month=01"
+    )
+    funding_dir = (
+        tmp_path
+        / "lake"
+        / "runs"
+        / run_id
+        / "cleaned"
+        / "perp"
+        / symbol
+        / "funding_15m"
+        / "year=2021"
+        / "month=01"
+    )
+    bars_dir.mkdir(parents=True, exist_ok=True)
+    funding_dir.mkdir(parents=True, exist_ok=True)
+    bars.to_parquet(bars_dir / "bars_BTCUSDT_15m_2021-01.parquet", index=False)
+    funding.to_parquet(funding_dir / "funding15m_BTCUSDT_2021-01.parquet", index=False)
+
+
 def test_context_build_end_date_is_inclusive_day(monkeypatch, tmp_path: Path) -> None:
     run_id = "ctx_date_fix"
     symbol = "BTCUSDT"
@@ -144,3 +189,41 @@ def test_context_skip_requires_timestamp_and_version_match(monkeypatch, tmp_path
     out = pd.read_parquet(output_path)
     assert out["timestamp"].min() == pd.Timestamp("2021-01-01 00:00:00+00:00")
     assert out["fp_def_version"].dropna().unique().tolist() == [DEFAULT_FP_CONFIG.def_version]
+
+
+def test_context_build_dedupes_duplicate_bar_timestamps(monkeypatch, tmp_path: Path) -> None:
+    run_id = "ctx_dedupe_bars"
+    symbol = "BTCUSDT"
+    _write_cleaned_fixture_with_bar_duplicates(tmp_path, run_id=run_id, symbol=symbol)
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(build_context_features, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_context_features.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            symbol,
+            "--timeframe",
+            "15m",
+            "--start",
+            "2021-01-01",
+            "--end",
+            "2021-01-01",
+            "--force",
+            "1",
+        ],
+    )
+    assert build_context_features.main() == 0
+
+    output_path = tmp_path / "lake" / "runs" / run_id / "context" / "funding_persistence" / symbol / "15m.parquet"
+    out = pd.read_parquet(output_path)
+    assert len(out) == 12
+    assert not pd.Series(out["timestamp"]).duplicated().any()
+
+    manifest_path = tmp_path / "runs" / run_id / "build_context_features.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["stats"]["symbols"][symbol]["bars_duplicate_rows_dropped"] == 2
