@@ -1,4 +1,4 @@
-.PHONY: help run discover-edges discover-edges-from-raw discover-hybrid clean-runtime clean-all-data clean-repo debloat check-hygiene clean-hygiene test compile
+.PHONY: help run discover-edges discover-edges-from-raw discover-hybrid clean-runtime clean-all-data clean-repo debloat check-hygiene clean-hygiene test test-fast compile
 
 help:
 	$(MAKE) -f project/Makefile help
@@ -35,6 +35,9 @@ clean-hygiene:
 
 test:
 	$(MAKE) -f project/Makefile test
+
+test-fast:
+	$(MAKE) -f project/Makefile test-fast
 
 compile:
 	$(MAKE) -f project/Makefile compile

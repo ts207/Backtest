@@ -9,6 +9,11 @@ sys.path.insert(0, str(ROOT / "project"))
 from pipelines import run_all
 
 
+def test_shared_data_root_fixture_isolation(backtest_data_root: Path) -> None:
+    assert backtest_data_root.exists()
+    assert backtest_data_root.name == "data"
+
+
 def test_run_stage_appends_log_path_only_when_supported(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path)
 
