@@ -11,6 +11,8 @@ sys.path.insert(0, str(ROOT / "project"))
 
 from pipelines.research import compile_strategy_blueprints
 
+ALLOW_NAIVE_ENTRY_FAIL_ARGS = ["--allow_naive_entry_fail", "1", "--strict_cost_fields", "0"]
+
 
 def _write_inputs(tmp_path: Path, run_id: str) -> None:
     edge_dir = tmp_path / "reports" / "edge_candidates" / run_id
@@ -44,7 +46,7 @@ def _write_inputs(tmp_path: Path, run_id: str) -> None:
                 "event_frequency": 0.2,
                 "capacity_proxy": 0.2,
                 "profit_density_score": 0.0006,
-                "n_events": 60,
+                "n_events": 120,
                 "source_path": str(tmp_path / "reports" / "phase2" / run_id / "liquidity_absence_window" / "phase2_candidates.csv"),
             },
         ]
@@ -79,7 +81,7 @@ def _write_inputs(tmp_path: Path, run_id: str) -> None:
                 "candidate_id": "all__no_action",
                 "condition": "session_eu",
                 "action": "no_action",
-                "sample_size": 60,
+                "sample_size": 120,
                 "gate_oos_validation_test": False,
                 "gate_multiplicity": False,
                 "gate_c_regime_stable": True,
@@ -122,7 +124,8 @@ def test_compiler_emits_per_event_blueprints_with_required_fields(monkeypatch, t
             "2",
             "--ignore_checklist",
             "1",
-        ],
+        ]
+        + ALLOW_NAIVE_ENTRY_FAIL_ARGS,
     )
     assert compile_strategy_blueprints.main() == 0
 
@@ -164,7 +167,7 @@ def test_compiler_is_deterministic_under_rerun(monkeypatch, tmp_path: Path) -> N
         "BTCUSDT,ETHUSDT",
         "--ignore_checklist",
         "1",
-    ]
+    ] + ALLOW_NAIVE_ENTRY_FAIL_ARGS
 
     monkeypatch.setattr(sys, "argv", argv)
     assert compile_strategy_blueprints.main() == 0
@@ -247,7 +250,8 @@ def test_compiler_quality_floor_prefers_high_quality_promoted(monkeypatch, tmp_p
             "2",
             "--ignore_checklist",
             "1",
-        ],
+        ]
+        + ALLOW_NAIVE_ENTRY_FAIL_ARGS,
     )
     assert compile_strategy_blueprints.main() == 0
 
@@ -316,7 +320,7 @@ def test_compiler_trims_zero_trade_blueprint_from_walkforward(monkeypatch, tmp_p
     wf = {
         "per_strategy_split_metrics": {
             "dsl_interpreter_v1__bp_dsl_compile_trim_wf_vol_shock_relaxation_all__delay_8_single_symbol": {
-                "test": {"total_trades": 0, "stressed_net_pnl": 0.0}
+                "validation": {"total_trades": 0, "stressed_net_pnl": 0.0}
             }
         }
     }
@@ -337,7 +341,8 @@ def test_compiler_trims_zero_trade_blueprint_from_walkforward(monkeypatch, tmp_p
             "2",
             "--ignore_checklist",
             "1",
-        ],
+        ]
+        + ALLOW_NAIVE_ENTRY_FAIL_ARGS,
     )
     assert compile_strategy_blueprints.main() == 0
 
@@ -346,6 +351,199 @@ def test_compiler_trims_zero_trade_blueprint_from_walkforward(monkeypatch, tmp_p
     ids = {row["candidate_id"] for row in rows}
     assert "all__delay_8" not in ids
     assert "all__delay_30" in ids
+
+
+def test_compiler_rejects_negative_after_cost_expectancy_under_strict_defaults(monkeypatch, tmp_path: Path) -> None:
+    run_id = "dsl_compile_strict_after_cost"
+    edge_dir = tmp_path / "reports" / "edge_candidates" / run_id
+    edge_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "run_id": run_id,
+                "event": "vol_shock_relaxation",
+                "candidate_id": "c_bad_cost",
+                "status": "PROMOTED",
+                "candidate_symbol": "BTCUSDT",
+                "expectancy_per_trade": 0.02,
+                "after_cost_expectancy_per_trade": -0.001,
+                "stressed_after_cost_expectancy_per_trade": -0.002,
+                "cost_ratio": 0.8,
+                "robustness_score": 0.9,
+                "event_frequency": 0.3,
+                "capacity_proxy": 1.0,
+                "profit_density_score": 0.01,
+                "n_events": 120,
+                "source_path": "x",
+            }
+        ]
+    ).to_csv(edge_dir / "edge_candidates_normalized.csv", index=False)
+
+    phase2_dir = tmp_path / "reports" / "phase2" / run_id / "vol_shock_relaxation"
+    phase2_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "candidate_id": "c_bad_cost",
+                "condition": "all",
+                "action": "delay_8",
+                "sample_size": 120,
+                "after_cost_expectancy_per_trade": -0.001,
+                "stressed_after_cost_expectancy_per_trade": -0.002,
+                "cost_ratio": 0.8,
+            }
+        ]
+    ).to_csv(phase2_dir / "phase2_candidates.csv", index=False)
+
+    report_dir = tmp_path / "reports" / "vol_shock_relaxation" / run_id
+    report_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"rv_decay_half_life": [12], "range_pct_96": [0.01], "forward_abs_return_h": [0.02]}).to_csv(
+        report_dir / "vol_shock_relaxation_events.csv", index=False
+    )
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(compile_strategy_blueprints, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "compile_strategy_blueprints.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT",
+            "--ignore_checklist",
+            "1",
+            "--allow_naive_entry_fail",
+            "1",
+        ],
+    )
+    assert compile_strategy_blueprints.main() == 1
+
+
+def test_compiler_walkforward_trim_uses_validation_split_only(monkeypatch, tmp_path: Path) -> None:
+    run_id = "dsl_compile_validation_trim_only"
+    edge_dir = tmp_path / "reports" / "edge_candidates" / run_id
+    edge_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "run_id": run_id,
+                "event": "vol_shock_relaxation",
+                "candidate_id": "c1",
+                "status": "PROMOTED",
+                "candidate_symbol": "BTCUSDT",
+                "expectancy_per_trade": 0.03,
+                "after_cost_expectancy_per_trade": 0.02,
+                "stressed_after_cost_expectancy_per_trade": 0.01,
+                "cost_ratio": 0.2,
+                "robustness_score": 0.9,
+                "event_frequency": 0.3,
+                "capacity_proxy": 0.8,
+                "profit_density_score": 0.01,
+                "n_events": 150,
+                "source_path": "x",
+            },
+            {
+                "run_id": run_id,
+                "event": "vol_shock_relaxation",
+                "candidate_id": "c2",
+                "status": "PROMOTED",
+                "candidate_symbol": "BTCUSDT",
+                "expectancy_per_trade": 0.03,
+                "after_cost_expectancy_per_trade": 0.02,
+                "stressed_after_cost_expectancy_per_trade": 0.01,
+                "cost_ratio": 0.2,
+                "robustness_score": 0.9,
+                "event_frequency": 0.3,
+                "capacity_proxy": 0.8,
+                "profit_density_score": 0.01,
+                "n_events": 150,
+                "source_path": "x",
+            },
+        ]
+    ).to_csv(edge_dir / "edge_candidates_normalized.csv", index=False)
+
+    phase2_dir = tmp_path / "reports" / "phase2" / run_id / "vol_shock_relaxation"
+    phase2_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {"candidate_id": "c1", "condition": "all", "action": "delay_8", "sample_size": 150},
+            {"candidate_id": "c2", "condition": "all", "action": "delay_12", "sample_size": 150},
+        ]
+    ).to_csv(phase2_dir / "phase2_candidates.csv", index=False)
+
+    report_dir = tmp_path / "reports" / "vol_shock_relaxation" / run_id
+    report_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"rv_decay_half_life": [12], "range_pct_96": [0.01], "forward_abs_return_h": [0.02]}).to_csv(
+        report_dir / "vol_shock_relaxation_events.csv", index=False
+    )
+
+    eval_dir = tmp_path / "reports" / "eval" / run_id
+    eval_dir.mkdir(parents=True, exist_ok=True)
+    wf = {
+        "per_strategy_split_metrics": {
+            "dsl_interpreter_v1__bp_dsl_compile_validation_trim_only_vol_shock_relaxation_c1_single_symbol": {
+                "validation": {"total_trades": 10, "stressed_net_pnl": -1.0},
+                "test": {"total_trades": 10, "stressed_net_pnl": 5.0},
+            },
+            "dsl_interpreter_v1__bp_dsl_compile_validation_trim_only_vol_shock_relaxation_c2_single_symbol": {
+                "validation": {"total_trades": 10, "stressed_net_pnl": 1.0},
+                "test": {"total_trades": 10, "stressed_net_pnl": -5.0},
+            },
+        }
+    }
+    (eval_dir / "walkforward_summary.json").write_text(json.dumps(wf), encoding="utf-8")
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(compile_strategy_blueprints, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "compile_strategy_blueprints.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT",
+            "--max_per_event",
+            "2",
+            "--ignore_checklist",
+            "1",
+            "--allow_naive_entry_fail",
+            "1",
+        ],
+    )
+    assert compile_strategy_blueprints.main() == 0
+    out_path = tmp_path / "reports" / "strategy_blueprints" / run_id / "blueprints.jsonl"
+    rows = [json.loads(line) for line in out_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    ids = {row["candidate_id"] for row in rows}
+    assert "c1" not in ids
+    assert "c2" in ids
+
+
+def test_compile_blueprint_lineage_source_path_is_run_scoped() -> None:
+    run_id = "run_scoped_lineage"
+    rows, _ = compile_strategy_blueprints._choose_event_rows(
+        run_id=run_id,
+        event_type="vol_shock_relaxation",
+        edge_rows=[
+            {
+                "candidate_id": "c1",
+                "status": "PROMOTED",
+                "expectancy_per_trade": 0.02,
+                "robustness_score": 0.9,
+                "n_events": 120,
+            }
+        ],
+        phase2_df=pd.DataFrame(),
+        max_per_event=1,
+        allow_fallback_blueprints=False,
+        strict_cost_fields=False,
+    )
+    assert rows
+    expected_suffix = f"/phase2/{run_id}/vol_shock_relaxation/phase2_candidates.csv"
+    assert str(rows[0]["source_path"]).endswith(expected_suffix)
 
 
 def test_compiler_requires_promote_checklist_by_default(monkeypatch, tmp_path: Path) -> None:
@@ -368,7 +566,8 @@ def test_compiler_requires_promote_checklist_by_default(monkeypatch, tmp_path: P
             "BTCUSDT,ETHUSDT",
             "--max_per_event",
             "2",
-        ],
+        ]
+        + ALLOW_NAIVE_ENTRY_FAIL_ARGS,
     )
     assert compile_strategy_blueprints.main() == 1
 
@@ -394,7 +593,8 @@ def test_compiler_fails_on_non_executable_symbolic_condition_by_default(monkeypa
             "BTCUSDT,ETHUSDT",
             "--ignore_checklist",
             "1",
-        ],
+        ]
+        + ALLOW_NAIVE_ENTRY_FAIL_ARGS,
     )
     assert compile_strategy_blueprints.main() == 1
 
@@ -498,7 +698,8 @@ def test_compiler_skips_non_executable_when_other_selected_candidate_is_valid(mo
             "1",
             "--max_per_event",
             "2",
-        ],
+        ]
+        + ALLOW_NAIVE_ENTRY_FAIL_ARGS,
     )
     assert compile_strategy_blueprints.main() == 0
     out_path = tmp_path / "reports" / "strategy_blueprints" / run_id / "blueprints.jsonl"
@@ -557,7 +758,8 @@ def test_compiler_does_not_emit_weak_promoted_fallback(monkeypatch, tmp_path: Pa
             "BTCUSDT",
             "--ignore_checklist",
             "1",
-        ],
+        ]
+        + ALLOW_NAIVE_ENTRY_FAIL_ARGS,
     )
     assert compile_strategy_blueprints.main() == 1
     out_path = tmp_path / "reports" / "strategy_blueprints" / run_id / "blueprints.jsonl"
@@ -623,10 +825,10 @@ def test_compiler_walkforward_trim_all_fails_closed(monkeypatch, tmp_path: Path)
     wf = {
         "per_strategy_split_metrics": {
             "dsl_interpreter_v1__bp_dsl_compile_trim_all_vol_shock_relaxation_c1_single_symbol": {
-                "test": {"total_trades": 0, "stressed_net_pnl": 0.0}
+                "validation": {"total_trades": 0, "stressed_net_pnl": 0.0}
             },
             "dsl_interpreter_v1__bp_dsl_compile_trim_all_vol_shock_relaxation_c2_single_symbol": {
-                "test": {"total_trades": 0, "stressed_net_pnl": 0.0}
+                "validation": {"total_trades": 0, "stressed_net_pnl": 0.0}
             },
         }
     }
@@ -647,6 +849,55 @@ def test_compiler_walkforward_trim_all_fails_closed(monkeypatch, tmp_path: Path)
             "2",
             "--ignore_checklist",
             "1",
+        ]
+        + ALLOW_NAIVE_ENTRY_FAIL_ARGS,
+    )
+    assert compile_strategy_blueprints.main() == 1
+
+
+def test_compiler_requires_naive_entry_validation_by_default(monkeypatch, tmp_path: Path) -> None:
+    run_id = "dsl_compile_requires_naive_validation"
+    _write_inputs(tmp_path=tmp_path, run_id=run_id)
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(compile_strategy_blueprints, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "compile_strategy_blueprints.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--ignore_checklist",
+            "1",
         ],
     )
     assert compile_strategy_blueprints.main() == 1
+    manifest_path = tmp_path / "runs" / run_id / "compile_strategy_blueprints.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "Missing naive-entry validation artifact" in str(payload.get("error", ""))
+
+
+def test_compiler_allows_naive_entry_fail_override(monkeypatch, tmp_path: Path) -> None:
+    run_id = "dsl_compile_naive_override"
+    _write_inputs(tmp_path=tmp_path, run_id=run_id)
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(compile_strategy_blueprints, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "compile_strategy_blueprints.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--ignore_checklist",
+            "1",
+        ]
+        + ALLOW_NAIVE_ENTRY_FAIL_ARGS,
+    )
+    assert compile_strategy_blueprints.main() == 0

@@ -6,6 +6,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 
+from events.registry import REGISTRY_BACKED_SIGNALS
 from strategy_dsl.schema import (
     Blueprint,
     ConditionNodeSpec,
@@ -38,6 +39,7 @@ KNOWN_ENTRY_SIGNALS = {
     "funding_normalization_pass",
     "breakout_confirmation",
 }
+REGISTRY_SIGNAL_COLUMNS = set(REGISTRY_BACKED_SIGNALS)
 
 MOMENTUM_BIAS_EVENTS = {
     "range_compression_breakout_window",
@@ -265,6 +267,12 @@ def _validate_signal_columns(merged: pd.DataFrame, signals: List[str], blueprint
 
     for signal in signals:
         missing: List[str] = []
+        if signal in REGISTRY_SIGNAL_COLUMNS:
+            if signal not in cols:
+                missing.append(signal)
+            if missing:
+                missing_by_signal[signal] = sorted(set(missing))
+            continue
         if signal in {"spread_guard_pass", "cross_venue_desync_event", "cross_venue_consensus_pass"} and not _has_numeric_values("spread_bps"):
             missing.append("spread_bps")
         if signal in {"funding_extreme_event", "funding_normalization_pass"} and not _has_numeric_values("funding_rate_scaled"):
@@ -388,48 +396,32 @@ def _signal_mask(signal: str, frame: pd.DataFrame, blueprint: Blueprint) -> pd.S
         return pd.Series(True, index=frame.index, dtype=bool)
     if signal == "oos_validation_pass":
         return pd.Series(True, index=frame.index, dtype=bool)
+    if signal in REGISTRY_SIGNAL_COLUMNS:
+        if signal not in frame.columns:
+            raise ValueError(f"Blueprint `{blueprint.id}` missing registry signal column: {signal}")
+        return frame[signal].fillna(False).astype(bool)
 
     if signal == "spread_guard_pass":
         max_spread = _first_overlay_param(blueprint, "spread_guard", "max_spread_bps", default=12.0)
         return (frame["spread_abs"] <= max_spread).fillna(False)
-    if signal == "cross_venue_desync_event":
-        return (frame["spread_abs"] >= frame["spread_q75"]).fillna(False)
     if signal == "cross_venue_consensus_pass":
         max_desync = _first_overlay_param(blueprint, "cross_venue_guard", "max_desync_bps", default=20.0)
         return (frame["spread_abs"] <= max_desync).fillna(False)
 
-    if signal == "funding_extreme_event":
-        max_funding = _first_overlay_param(blueprint, "funding_guard", "max_abs_funding_bps", default=15.0)
-        return (frame["funding_bps_abs"] >= max_funding).fillna(False)
     if signal == "funding_normalization_pass":
         max_funding = _first_overlay_param(blueprint, "funding_guard", "max_abs_funding_bps", default=15.0)
         return (frame["funding_bps_abs"] <= max_funding).fillna(False)
 
-    if signal == "liquidity_absence_event":
-        return (frame["volume_ratio"] <= 0.75).fillna(False)
-    if signal == "liquidity_refill_lag_event":
-        return ((frame["volume_ratio"].shift(1) <= 0.75) & (frame["volume_ratio"] >= 1.0)).fillna(False)
     if signal == "refill_persistence_pass":
         return (frame["volume_ratio"] >= 1.0).fillna(False)
-    if signal == "liquidity_vacuum_event":
-        return ((frame["volume_ratio"] <= 0.75) & (frame["abs_ret_1"] >= frame["abs_ret_q75"])).fillna(False)
     if signal == "vacuum_refill_confirmation":
         return (frame["volume_ratio"] >= 1.0).fillna(False)
 
-    if signal == "vol_aftershock_event":
-        return (frame["vol_z"] >= 1.0).fillna(False)
-    if signal == "vol_shock_relaxation_event":
-        return ((frame["vol_z"].shift(1) >= 1.0) & (frame["vol_z"] <= 0.5)).fillna(False)
     if signal == "regime_stability_pass":
         return (frame["vol_z"].abs() <= 1.0).fillna(False)
 
-    if signal == "range_compression_breakout_event":
-        return ((frame["range_ratio"].shift(1) <= frame["range_ratio_q25"]) & (frame["abs_ret_1"] >= frame["abs_ret_q75"])).fillna(False)
     if signal == "breakout_confirmation":
         return (frame["abs_ret_1"] >= frame["abs_ret_q75"]).fillna(False)
-
-    if signal == "forced_flow_exhaustion_event":
-        return (frame["abs_ret_4"] >= frame["abs_ret4_q90"]).fillna(False)
 
     raise ValueError(f"Unknown entry signal `{signal}`")
 

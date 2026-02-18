@@ -32,7 +32,7 @@ def _blueprint_row(run_id: str, blueprint_id: str = "bp_one") -> dict:
         "evaluation": {
             "min_trades": 20,
             "cost_model": {"fees_bps": 3.0, "slippage_bps": 1.0, "funding_included": True},
-            "robustness_flags": {"oos_required": True, "multiplicity_required": True, "regime_stability_required": False},
+            "robustness_flags": {"oos_required": True, "multiplicity_required": True, "regime_stability_required": True},
         },
         "lineage": {"source_path": "x", "compiler_version": "v1", "generated_at_utc": "1970-01-01T00:00:00Z"},
     }
@@ -70,10 +70,51 @@ def _write_returns(path: Path) -> None:
     pd.DataFrame(records).to_csv(path, index=False)
 
 
-def _write_walkforward_summary(tmp_path: Path, run_id: str, per_strategy: dict) -> None:
+def _write_walkforward_summary(
+    tmp_path: Path,
+    run_id: str,
+    per_strategy: dict,
+    per_strategy_regime: dict | None = None,
+    per_strategy_drawdown: dict | None = None,
+) -> None:
     eval_dir = tmp_path / "reports" / "eval" / run_id
     eval_dir.mkdir(parents=True, exist_ok=True)
-    payload = {"run_id": run_id, "per_strategy_split_metrics": per_strategy}
+    if per_strategy_regime is None:
+        per_strategy_regime = {
+            strategy_id: {
+                "train": {"max_regime_share": 0.6, "regime_consistent": True},
+                "validation": {"max_regime_share": 0.65, "regime_consistent": True},
+                "test": {"max_regime_share": 0.7, "regime_consistent": True},
+            }
+            for strategy_id in per_strategy.keys()
+        }
+    if per_strategy_drawdown is None:
+        per_strategy_drawdown = {
+            strategy_id: {
+                "train": {
+                    "max_loss_cluster_len": 12,
+                    "cluster_loss_concentration": 0.30,
+                    "tail_conditional_drawdown_95": -0.08,
+                },
+                "validation": {
+                    "max_loss_cluster_len": 10,
+                    "cluster_loss_concentration": 0.28,
+                    "tail_conditional_drawdown_95": -0.07,
+                },
+                "test": {
+                    "max_loss_cluster_len": 14,
+                    "cluster_loss_concentration": 0.35,
+                    "tail_conditional_drawdown_95": -0.10,
+                },
+            }
+            for strategy_id in per_strategy.keys()
+        }
+    payload = {
+        "run_id": run_id,
+        "per_strategy_split_metrics": per_strategy,
+        "per_strategy_regime_metrics": per_strategy_regime,
+        "per_strategy_drawdown_cluster_metrics": per_strategy_drawdown,
+    }
     (eval_dir / "walkforward_summary.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
@@ -123,6 +164,8 @@ def test_promote_blueprints_emits_non_empty_survivors_and_report_counts(monkeypa
     assert report["survivors_count"] >= 1
     assert isinstance(report["tested"][0].get("fail_reasons", []), list)
     assert report["tested"][0].get("evidence_mode") == "walkforward_strategy"
+    assert report["tested"][0].get("regime_evidence_source") == "walkforward_strategy"
+    assert report["tested"][0].get("drawdown_evidence_source") == "walkforward_strategy"
     assert report["integrity_checks"]["artifacts_validated"] is True
     assert report["integrity_checks"]["walkforward_strategy_evidence_required"] is True
 
@@ -256,3 +299,101 @@ def test_promote_blueprints_supports_fallback_override(monkeypatch, tmp_path: Pa
     assert report["tested_count"] == 1
     assert report["tested"][0]["evidence_mode"] == "fallback"
     assert report["integrity_checks"]["walkforward_strategy_evidence_required"] is False
+
+
+def test_promote_blueprints_fails_regime_gate_when_walkforward_regime_inconsistent(monkeypatch, tmp_path: Path) -> None:
+    run_id = "promote_bp_regime_fail"
+    bp_dir = tmp_path / "reports" / "strategy_blueprints" / run_id
+    bp_dir.mkdir(parents=True, exist_ok=True)
+    bp_path = bp_dir / "blueprints.jsonl"
+    _write_blueprint(bp_path, run_id=run_id)
+
+    engine_dir = tmp_path / "runs" / run_id / "engine"
+    engine_dir.mkdir(parents=True, exist_ok=True)
+    _write_returns(engine_dir / "strategy_returns_dsl_interpreter_v1__bp_one.csv")
+
+    _write_walkforward_summary(
+        tmp_path,
+        run_id,
+        {
+            "dsl_interpreter_v1__bp_one": {
+                "train": {"total_trades": 120, "net_pnl": 1.0, "stressed_net_pnl": 0.8},
+                "validation": {"total_trades": 110, "net_pnl": 0.7, "stressed_net_pnl": 0.5},
+                "test": {"total_trades": 90, "net_pnl": 0.6, "stressed_net_pnl": 0.4},
+            }
+        },
+        per_strategy_regime={
+            "dsl_interpreter_v1__bp_one": {
+                "train": {"max_regime_share": 0.95, "regime_consistent": False},
+                "validation": {"max_regime_share": 0.91, "regime_consistent": False},
+                "test": {"max_regime_share": 0.80, "regime_consistent": True},
+            }
+        },
+    )
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(promote_blueprints, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["promote_blueprints.py", "--run_id", run_id, "--regime_max_share", "0.80"])
+    assert promote_blueprints.main() == 0
+
+    report = json.loads((tmp_path / "reports" / "promotions" / run_id / "promotion_report.json").read_text(encoding="utf-8"))
+    assert report["tested_count"] == 1
+    tested = report["tested"][0]
+    assert tested["gates"]["regime_stability"] is False
+    assert tested["regime_evidence_source"] == "walkforward_strategy"
+    assert tested["promoted"] is False
+
+
+def test_promote_blueprints_fails_drawdown_cluster_gates(monkeypatch, tmp_path: Path) -> None:
+    run_id = "promote_bp_drawdown_fail"
+    bp_dir = tmp_path / "reports" / "strategy_blueprints" / run_id
+    bp_dir.mkdir(parents=True, exist_ok=True)
+    bp_path = bp_dir / "blueprints.jsonl"
+    _write_blueprint(bp_path, run_id=run_id)
+
+    engine_dir = tmp_path / "runs" / run_id / "engine"
+    engine_dir.mkdir(parents=True, exist_ok=True)
+    _write_returns(engine_dir / "strategy_returns_dsl_interpreter_v1__bp_one.csv")
+    _write_walkforward_summary(
+        tmp_path,
+        run_id,
+        {
+            "dsl_interpreter_v1__bp_one": {
+                "train": {"total_trades": 150, "net_pnl": 1.0, "stressed_net_pnl": 0.8},
+                "validation": {"total_trades": 120, "net_pnl": 0.8, "stressed_net_pnl": 0.6},
+                "test": {"total_trades": 90, "net_pnl": 0.4, "stressed_net_pnl": 0.2},
+            }
+        },
+        per_strategy_drawdown={
+            "dsl_interpreter_v1__bp_one": {
+                "train": {
+                    "max_loss_cluster_len": 120,
+                    "cluster_loss_concentration": 0.8,
+                    "tail_conditional_drawdown_95": -0.6,
+                },
+                "validation": {
+                    "max_loss_cluster_len": 110,
+                    "cluster_loss_concentration": 0.7,
+                    "tail_conditional_drawdown_95": -0.5,
+                },
+                "test": {
+                    "max_loss_cluster_len": 90,
+                    "cluster_loss_concentration": 0.6,
+                    "tail_conditional_drawdown_95": -0.4,
+                },
+            }
+        },
+    )
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(promote_blueprints, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["promote_blueprints.py", "--run_id", run_id])
+    assert promote_blueprints.main() == 0
+
+    report = json.loads((tmp_path / "reports" / "promotions" / run_id / "promotion_report.json").read_text(encoding="utf-8"))
+    tested = report["tested"][0]
+    assert tested["drawdown_evidence_source"] == "walkforward_strategy"
+    assert tested["gates"]["drawdown_cluster_len"] is False
+    assert tested["gates"]["drawdown_cluster_concentration"] is False
+    assert tested["gates"]["tail_conditional_drawdown"] is False
+    assert tested["promoted"] is False

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import List, Tuple
@@ -105,6 +107,87 @@ def _default_blueprints_path(run_id: str) -> Path:
     return DATA_ROOT / "reports" / "strategy_blueprints" / run_id / "blueprints.jsonl"
 
 
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _git_commit(project_root: Path) -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(project_root), "rev-parse", "HEAD"],
+            text=True,
+        ).strip()
+    except Exception:
+        return "unknown"
+
+
+def _config_digest(config_paths: List[str]) -> str:
+    chunks: List[str] = []
+    for raw_path in config_paths:
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = PROJECT_ROOT / raw_path
+        if path.exists():
+            try:
+                payload = path.read_text(encoding="utf-8")
+            except Exception:
+                payload = ""
+            chunks.append(f"{path}:{payload}")
+        else:
+            chunks.append(f"{path}:<missing>")
+    return _sha256_text("\n".join(chunks))
+
+
+def _feature_schema_metadata() -> tuple[str, str]:
+    schema_path = PROJECT_ROOT / "schemas" / "feature_schema_v1.json"
+    if not schema_path.exists():
+        return "unknown", _sha256_text("")
+    try:
+        payload = json.loads(schema_path.read_text(encoding="utf-8"))
+        version = str(payload.get("version", "feature_schema_v1"))
+    except Exception:
+        version = "feature_schema_v1"
+    schema_hash = hashlib.sha256(schema_path.read_bytes()).hexdigest()
+    return version, schema_hash
+
+
+def _data_hash(symbols: List[str]) -> str:
+    roots: List[Path] = []
+    for symbol in symbols:
+        roots.append(DATA_ROOT / "lake" / "raw" / "binance" / "perp" / symbol)
+        roots.append(DATA_ROOT / "lake" / "raw" / "binance" / "spot" / symbol)
+
+    entries: List[str] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in sorted([p for p in root.rglob("*") if p.is_file()]):
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            entries.append(
+                "|".join(
+                    [
+                        str(path.relative_to(DATA_ROOT)),
+                        str(int(stat.st_size)),
+                        str(int(stat.st_mtime_ns)),
+                    ]
+                )
+            )
+    return _sha256_text("\n".join(entries))
+
+
+def _write_run_manifest(run_id: str, payload: dict) -> None:
+    out_dir = DATA_ROOT / "runs" / run_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "run_manifest.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -151,13 +234,25 @@ def main() -> int:
     parser.add_argument("--phase2_max_actions", type=int, default=9)
     parser.add_argument("--phase2_min_regime_stable_splits", type=int, default=2)
     parser.add_argument("--phase2_require_phase1_pass", type=int, default=1)
+    parser.add_argument("--phase2_min_ess", type=float, default=150.0)
+    parser.add_argument("--phase2_ess_max_lag", type=int, default=24)
+    parser.add_argument("--phase2_multiplicity_k", type=float, default=1.0)
+    parser.add_argument("--phase2_parameter_curvature_max_penalty", type=float, default=0.50)
+    parser.add_argument("--phase2_delay_grid_bars", default="0,4,8,16,30")
+    parser.add_argument("--phase2_min_delay_positive_ratio", type=float, default=0.60)
+    parser.add_argument("--phase2_min_delay_robustness_score", type=float, default=0.60)
 
     parser.add_argument("--run_edge_candidate_universe", type=int, default=0)
+    parser.add_argument("--run_naive_entry_eval", type=int, default=1)
+    parser.add_argument("--naive_min_trades", type=int, default=100)
+    parser.add_argument("--naive_min_expectancy_after_cost", type=float, default=0.0)
+    parser.add_argument("--naive_max_drawdown", type=float, default=-0.25)
     parser.add_argument("--run_strategy_blueprint_compiler", type=int, default=1)
     parser.add_argument("--strategy_blueprint_max_per_event", type=int, default=2)
     parser.add_argument("--strategy_blueprint_ignore_checklist", type=int, default=0)
     parser.add_argument("--strategy_blueprint_allow_fallback", type=int, default=0)
     parser.add_argument("--strategy_blueprint_allow_non_executable_conditions", type=int, default=0)
+    parser.add_argument("--strategy_blueprint_allow_naive_entry_fail", type=int, default=0)
     parser.add_argument("--run_strategy_builder", type=int, default=1)
     parser.add_argument("--strategy_builder_top_k_per_event", type=int, default=2)
     parser.add_argument("--strategy_builder_max_candidates", type=int, default=20)
@@ -171,12 +266,21 @@ def main() -> int:
     parser.add_argument("--strict_recommendations_checklist", type=int, default=0)
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--run_backtest", type=int, default=0)
+    parser.add_argument("--clean_engine_artifacts", type=int, default=1)
     parser.add_argument("--run_blueprint_promotion", type=int, default=1)
     parser.add_argument("--promotion_allow_fallback_evidence", type=int, default=0)
     parser.add_argument("--run_walkforward_eval", type=int, default=0)
+    parser.add_argument("--walkforward_allow_unexpected_strategy_files", type=int, default=0)
     parser.add_argument("--walkforward_embargo_days", type=int, default=0)
     parser.add_argument("--walkforward_train_frac", type=float, default=0.6)
     parser.add_argument("--walkforward_validation_frac", type=float, default=0.2)
+    parser.add_argument("--walkforward_regime_max_share", type=float, default=0.80)
+    parser.add_argument("--walkforward_drawdown_cluster_top_frac", type=float, default=0.10)
+    parser.add_argument("--walkforward_drawdown_tail_q", type=float, default=0.05)
+    parser.add_argument("--promotion_regime_max_share", type=float, default=0.80)
+    parser.add_argument("--promotion_max_loss_cluster_len", type=int, default=64)
+    parser.add_argument("--promotion_max_cluster_loss_concentration", type=float, default=0.50)
+    parser.add_argument("--promotion_min_tail_conditional_drawdown_95", type=float, default=-0.20)
     parser.add_argument("--report_allow_backtest_artifact_fallback", type=int, default=0)
     parser.add_argument("--run_make_report", type=int, default=0)
     parser.add_argument("--fees_bps", type=float, default=None)
@@ -505,6 +609,27 @@ def main() -> int:
                     phase1_args,
                 )
             )
+            registry_stage_name = (
+                "build_event_registry"
+                if len(selected_chain) == 1
+                else f"build_event_registry_{event_type}"
+            )
+            stages.append(
+                (
+                    registry_stage_name,
+                    PROJECT_ROOT / "pipelines" / "research" / "build_event_registry.py",
+                    [
+                        "--run_id",
+                        run_id,
+                        "--symbols",
+                        symbols,
+                        "--event_type",
+                        event_type,
+                        "--timeframe",
+                        "15m",
+                    ],
+                )
+            )
             phase2_stage_name = (
                 "phase2_conditional_hypotheses"
                 if len(selected_chain) == 1
@@ -529,6 +654,20 @@ def main() -> int:
                         str(int(args.phase2_min_regime_stable_splits)),
                         "--require_phase1_pass",
                         _as_flag(args.phase2_require_phase1_pass),
+                        "--min_ess",
+                        str(float(args.phase2_min_ess)),
+                        "--ess_max_lag",
+                        str(int(args.phase2_ess_max_lag)),
+                        "--multiplicity_k",
+                        str(float(args.phase2_multiplicity_k)),
+                        "--parameter_curvature_max_penalty",
+                        str(float(args.phase2_parameter_curvature_max_penalty)),
+                        "--delay_grid_bars",
+                        str(args.phase2_delay_grid_bars),
+                        "--min_delay_positive_ratio",
+                        str(float(args.phase2_min_delay_positive_ratio)),
+                        "--min_delay_robustness_score",
+                        str(float(args.phase2_min_delay_robustness_score)),
                         "--seed",
                         str(int(args.seed)),
                     ],
@@ -553,6 +692,32 @@ def main() -> int:
                     str(args.hypothesis_datasets),
                     "--hypothesis_max_fused",
                     str(int(args.hypothesis_max_fused)),
+                ],
+            )
+        )
+
+    if int(args.run_naive_entry_eval) and int(args.run_strategy_blueprint_compiler):
+        stages.append(
+            (
+                "evaluate_naive_entry",
+                PROJECT_ROOT / "pipelines" / "research" / "evaluate_naive_entry.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--fees_bps",
+                    str(float(args.fees_bps if args.fees_bps is not None else 0.0)),
+                    "--slippage_bps",
+                    str(float(args.slippage_bps if args.slippage_bps is not None else 0.0)),
+                    "--cost_bps",
+                    str(float(args.cost_bps if args.cost_bps is not None else 0.0)),
+                    "--min_trades",
+                    str(int(args.naive_min_trades)),
+                    "--min_expectancy_after_cost",
+                    str(float(args.naive_min_expectancy_after_cost)),
+                    "--max_drawdown",
+                    str(float(args.naive_max_drawdown)),
                 ],
             )
         )
@@ -612,6 +777,8 @@ def main() -> int:
                     str(int(args.strategy_blueprint_allow_fallback)),
                     "--allow_non_executable_conditions",
                     str(int(args.strategy_blueprint_allow_non_executable_conditions)),
+                    "--allow_naive_entry_fail",
+                    str(int(args.strategy_blueprint_allow_naive_entry_fail)),
                 ],
             )
         )
@@ -654,6 +821,8 @@ def main() -> int:
                     symbols,
                     "--force",
                     force_flag,
+                    "--clean_engine_artifacts",
+                    str(int(args.clean_engine_artifacts)),
                 ],
             )
         )
@@ -678,6 +847,16 @@ def main() -> int:
                     str(float(args.walkforward_train_frac)),
                     "--validation_frac",
                     str(float(args.walkforward_validation_frac)),
+                    "--regime_max_share",
+                    str(float(args.walkforward_regime_max_share)),
+                    "--drawdown_cluster_top_frac",
+                    str(float(args.walkforward_drawdown_cluster_top_frac)),
+                    "--drawdown_tail_q",
+                    str(float(args.walkforward_drawdown_tail_q)),
+                    "--allow_unexpected_strategy_files",
+                    str(int(args.walkforward_allow_unexpected_strategy_files)),
+                    "--clean_engine_artifacts",
+                    str(int(args.clean_engine_artifacts)),
                     "--force",
                     force_flag,
                 ],
@@ -694,6 +873,14 @@ def main() -> int:
                     run_id,
                     "--allow_fallback_evidence",
                     str(int(args.promotion_allow_fallback_evidence)),
+                    "--regime_max_share",
+                    str(float(args.promotion_regime_max_share)),
+                    "--max_loss_cluster_len",
+                    str(int(args.promotion_max_loss_cluster_len)),
+                    "--max_cluster_loss_concentration",
+                    str(float(args.promotion_max_cluster_loss_concentration)),
+                    "--min_tail_conditional_drawdown_95",
+                    str(float(args.promotion_min_tail_conditional_drawdown_95)),
                 ],
             )
         )
@@ -722,7 +909,7 @@ def main() -> int:
         "make_report",
     }
     for stage_name, _, base_args in stages:
-        if stage_name in stages_with_config:
+        if stage_name in stages_with_config or stage_name == "compile_strategy_blueprints" or stage_name.startswith("phase2_conditional_hypotheses"):
             for config_path in args.config:
                 base_args.extend(["--config", config_path])
         if stage_name == "backtest_strategies":
@@ -740,6 +927,13 @@ def main() -> int:
                 base_args.extend(["--blueprints_path", str(effective_blueprints_path)])
                 base_args.extend(["--blueprints_top_k", str(int(args.blueprints_top_k))])
                 base_args.extend(["--blueprints_filter_event_type", str(args.blueprints_filter_event_type)])
+        if stage_name.startswith("phase2_conditional_hypotheses") or stage_name == "compile_strategy_blueprints":
+            if args.fees_bps is not None:
+                base_args.extend(["--fees_bps", str(args.fees_bps)])
+            if args.slippage_bps is not None:
+                base_args.extend(["--slippage_bps", str(args.slippage_bps)])
+            if args.cost_bps is not None:
+                base_args.extend(["--cost_bps", str(args.cost_bps)])
         if stage_name == "run_walkforward":
             if args.fees_bps is not None:
                 base_args.extend(["--fees_bps", str(args.fees_bps)])
@@ -757,6 +951,26 @@ def main() -> int:
                 base_args.extend(["--blueprints_filter_event_type", str(args.blueprints_filter_event_type)])
 
     stage_timings: List[Tuple[str, float]] = []
+    feature_schema_version, feature_schema_hash = _feature_schema_metadata()
+    run_manifest = {
+        "run_id": run_id,
+        "started_at": _utc_now_iso(),
+        "finished_at": None,
+        "status": "running",
+        "symbols": parsed_symbols,
+        "start": start,
+        "end": end,
+        "git_commit": _git_commit(PROJECT_ROOT),
+        "data_hash": _data_hash(parsed_symbols),
+        "feature_schema_version": feature_schema_version,
+        "feature_schema_hash": feature_schema_hash,
+        "config_digest": _config_digest([str(x) for x in args.config]),
+        "planned_stages": [stage for stage, _, _ in stages],
+        "stage_timings_sec": {},
+        "failed_stage": None,
+    }
+    _write_run_manifest(run_id, run_manifest)
+
     print(f"Planned stages: {len(stages)}")
     for idx, (stage, script, base_args) in enumerate(stages, start=1):
         print(f"[{idx}/{len(stages)}] Starting stage: {stage}")
@@ -766,6 +980,11 @@ def main() -> int:
         stage_timings.append((stage, elapsed_sec))
         print(f"[{idx}/{len(stages)}] Finished stage: {stage} ({elapsed_sec:.1f}s)")
         if not ok:
+            run_manifest["finished_at"] = _utc_now_iso()
+            run_manifest["status"] = "failed"
+            run_manifest["failed_stage"] = stage
+            run_manifest["stage_timings_sec"] = {name: round(duration, 3) for name, duration in stage_timings}
+            _write_run_manifest(run_id, run_manifest)
             print("Slow-stage summary before failure:")
             for stage_name, duration in sorted(stage_timings, key=lambda x: x[1], reverse=True):
                 print(f"  - {stage_name}: {duration:.1f}s")
@@ -777,6 +996,10 @@ def main() -> int:
 
     print(f"Pipeline run completed: {run_id}")
     _print_artifact_summary(run_id)
+    run_manifest["finished_at"] = _utc_now_iso()
+    run_manifest["status"] = "success"
+    run_manifest["stage_timings_sec"] = {name: round(duration, 3) for name, duration in stage_timings}
+    _write_run_manifest(run_id, run_manifest)
     return 0
 
 

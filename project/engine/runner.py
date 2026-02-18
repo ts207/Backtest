@@ -13,6 +13,7 @@ import pandas as pd
 
 from engine.pnl import compute_pnl_components, compute_returns
 from engine.execution_model import estimate_transaction_cost_bps
+from events.registry import load_registry_flags
 from engine.risk_allocator import RiskLimits, allocate_position_scales
 from pipelines._lib.io_utils import (
     choose_partition_dir,
@@ -129,6 +130,22 @@ def _join_context_features(features: pd.DataFrame, context: pd.DataFrame) -> pd.
     return _apply_context_defaults(joined)
 
 
+def _merge_event_flags(features: pd.DataFrame, event_flags: pd.DataFrame) -> pd.DataFrame:
+    if event_flags.empty:
+        return features
+    out = features.copy()
+    flags = event_flags.copy()
+    flags["timestamp"] = pd.to_datetime(flags["timestamp"], utc=True, errors="coerce")
+    flags = flags.dropna(subset=["timestamp"]).drop_duplicates(subset=["timestamp"], keep="last")
+    flag_cols = [col for col in flags.columns if col not in {"timestamp", "symbol"}]
+    if not flag_cols:
+        return out
+    merged = out.merge(flags[["timestamp", *flag_cols]], on="timestamp", how="left")
+    for col in flag_cols:
+        merged[col] = merged[col].fillna(False).astype(bool)
+    return merged
+
+
 def _load_universe_snapshots(data_root: Path, run_id: str) -> pd.DataFrame:
     candidates = [
         data_root / "lake" / "runs" / run_id / "metadata" / "universe_snapshots",
@@ -186,6 +203,7 @@ def _load_symbol_data(
     run_id: str,
     start_ts: pd.Timestamp | None = None,
     end_ts: pd.Timestamp | None = None,
+    event_flags: pd.DataFrame | None = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     feature_candidates = [
         run_scoped_lake_path(data_root, run_id, "features", "perp", symbol, "15m", "features_v1"),
@@ -226,6 +244,13 @@ def _load_symbol_data(
     if end_ts is not None:
         context = context[context["timestamp"] <= end_ts].copy()
     features = _join_context_features(features, context)
+    if isinstance(event_flags, pd.DataFrame):
+        flags = event_flags.copy()
+        if start_ts is not None:
+            flags = flags[flags["timestamp"] >= start_ts].copy()
+        if end_ts is not None:
+            flags = flags[flags["timestamp"] <= end_ts].copy()
+        features = _merge_event_flags(features, flags)
     return bars, features
 
 
@@ -645,6 +670,7 @@ def run_engine(
     strategy_frames: Dict[str, pd.DataFrame] = {}
     strategy_traces: Dict[str, pd.DataFrame] = {}
     metrics: Dict[str, object] = {"strategies": {}}
+    event_flags_cache: Dict[Tuple[str, str], pd.DataFrame] = {}
 
     overlays = [str(o).strip() for o in params.get("overlays", []) if str(o).strip()]
     universe_snapshots = _load_universe_snapshots(data_root, run_id)
@@ -652,14 +678,30 @@ def run_engine(
     for strategy_name in strategies:
         symbol_results: List[StrategyResult] = []
         for symbol in symbols:
+            strategy_params = params_by_strategy.get(strategy_name, params) if params_by_strategy else params
+            event_flags = pd.DataFrame()
+            if strategy_name.startswith("dsl_interpreter_v1"):
+                blueprint_run_id = str(
+                    strategy_params.get("dsl_blueprint", {}).get("run_id", run_id)
+                    if isinstance(strategy_params.get("dsl_blueprint", {}), dict)
+                    else run_id
+                )
+                cache_key = (blueprint_run_id, str(symbol).upper())
+                if cache_key not in event_flags_cache:
+                    event_flags_cache[cache_key] = load_registry_flags(
+                        data_root=data_root,
+                        run_id=blueprint_run_id,
+                        symbol=symbol,
+                    )
+                event_flags = event_flags_cache[cache_key]
             bars, features = _load_symbol_data(
                 data_root,
                 symbol,
                 run_id=run_id,
                 start_ts=start_ts,
                 end_ts=end_ts,
+                event_flags=event_flags,
             )
-            strategy_params = params_by_strategy.get(strategy_name, params) if params_by_strategy else params
             eligibility_mask = _symbol_eligibility_mask(bars["timestamp"], symbol, universe_snapshots)
             result = _strategy_returns(
                 symbol,

@@ -18,8 +18,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from pipelines._lib.config import load_configs
 from pipelines._lib.io_utils import ensure_dir
+from pipelines._lib.execution_costs import resolve_execution_costs
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.validation import strategy_family_allowed_keys, validate_strategy_family_params
 from engine.pnl import compute_pnl
@@ -664,6 +664,31 @@ def _aggregate_cost_components(
     return totals
 
 
+def _purge_engine_artifacts(run_id: str, data_root: Path = DATA_ROOT) -> Dict[str, object]:
+    engine_dir = data_root / "runs" / run_id / "engine"
+    patterns = [
+        "strategy_returns_*.csv",
+        "strategy_trace_*.csv",
+        "portfolio_returns.csv",
+        "metrics.json",
+    ]
+    removed_files: List[str] = []
+    if engine_dir.exists():
+        for pattern in patterns:
+            for path in sorted(engine_dir.glob(pattern)):
+                if not path.is_file():
+                    continue
+                path.unlink()
+                removed_files.append(path.name)
+    return {
+        "enabled": True,
+        "engine_dir": str(engine_dir),
+        "patterns": patterns,
+        "removed_file_count": int(len(removed_files)),
+        "removed_files": removed_files,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Backtest registered strategies")
     parser.add_argument("--run_id", required=True)
@@ -679,6 +704,7 @@ def main() -> int:
     parser.add_argument("--blueprints_filter_event_type", default="all")
     parser.add_argument("--overlays", default="")
     parser.add_argument("--force", type=int, default=0)
+    parser.add_argument("--clean_engine_artifacts", type=int, default=1)
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
@@ -692,16 +718,18 @@ def main() -> int:
         log_handlers.append(logging.FileHandler(args.log_path))
     logging.basicConfig(level=logging.INFO, handlers=log_handlers, format="%(asctime)s %(levelname)s %(message)s")
 
-    config_paths = [str(PROJECT_ROOT / "configs" / "pipeline.yaml"), str(PROJECT_ROOT / "configs" / "fees.yaml")]
-    config_paths.extend(args.config)
-    config = load_configs(config_paths)
-
-    fee_bps = float(args.fees_bps) if args.fees_bps is not None else float(config.get("fee_bps_per_side", 4))
-    slippage_bps = (
-        float(args.slippage_bps) if args.slippage_bps is not None else float(config.get("slippage_bps_per_fill", 2))
+    resolved_costs = resolve_execution_costs(
+        project_root=PROJECT_ROOT,
+        config_paths=args.config,
+        fees_bps=args.fees_bps,
+        slippage_bps=args.slippage_bps,
+        cost_bps=args.cost_bps,
     )
+    config = resolved_costs.config
+    fee_bps = float(resolved_costs.fee_bps_per_side)
+    slippage_bps = float(resolved_costs.slippage_bps_per_fill)
     trade_day_timezone = str(config.get("trade_day_timezone", "UTC"))
-    cost_bps = float(args.cost_bps) if args.cost_bps is not None else float(fee_bps + slippage_bps)
+    cost_bps = float(resolved_costs.cost_bps)
     strategy_mode = bool(args.strategies and str(args.strategies).strip())
     blueprint_mode = bool(args.blueprints_path and str(args.blueprints_path).strip())
     if strategy_mode and blueprint_mode:
@@ -729,6 +757,7 @@ def main() -> int:
         "end": str(args.end) if args.end is not None else "",
         "symbols": symbols,
         "force": int(args.force),
+        "clean_engine_artifacts": int(args.clean_engine_artifacts),
         "cost_bps": cost_bps,
         "strategies": strategies,
         "overlays": overlays,
@@ -771,6 +800,22 @@ def main() -> int:
             finalize_manifest(manifest, "success", stats={"skipped": True})
             return 0
 
+        if int(args.force) and bool(int(args.clean_engine_artifacts)):
+            stats["engine_artifact_cleanup"] = _purge_engine_artifacts(run_id=run_id, data_root=DATA_ROOT)
+        else:
+            stats["engine_artifact_cleanup"] = {
+                "enabled": False,
+                "engine_dir": str(DATA_ROOT / "runs" / run_id / "engine"),
+                "patterns": [
+                    "strategy_returns_*.csv",
+                    "strategy_trace_*.csv",
+                    "portfolio_returns.csv",
+                    "metrics.json",
+                ],
+                "removed_file_count": 0,
+                "removed_files": [],
+            }
+
         if strategy_mode:
             base_strategy_params, strategy_params_by_name = _build_strategy_params_by_name(
                 strategies=strategies,
@@ -778,8 +823,15 @@ def main() -> int:
                 trade_day_timezone=trade_day_timezone,
                 overlays=overlays,
             )
+            base_strategy_params["execution_model"] = dict(resolved_costs.execution_model)
+            for strategy_name in list(strategy_params_by_name.keys()):
+                strategy_params_by_name[strategy_name] = {
+                    **strategy_params_by_name[strategy_name],
+                    "execution_model": dict(resolved_costs.execution_model),
+                }
         else:
             base_strategy_params = _build_base_strategy_params(config, trade_day_timezone)
+            base_strategy_params["execution_model"] = dict(resolved_costs.execution_model)
             strategy_params_by_name = {}
             bp_map = {f"dsl_interpreter_v1__{_sanitize_id(bp.id)}": bp for bp in selected_blueprints}
             strategy_weight = 1.0 / float(len(selected_blueprints))

@@ -21,6 +21,12 @@
 
 - Treat `run_id` as immutable join key.
 - Persist stage manifests in `data/runs/<run_id>/*.json`.
+- Persist run-level provenance in `data/runs/<run_id>/run_manifest.json`:
+  - `git_commit`
+  - `data_hash`
+  - `feature_schema_version`
+  - `feature_schema_hash`
+  - `config_digest`
 - Record the exact command and env (`BACKTEST_DATA_ROOT`, flags, symbols, dates).
 
 ## Retention Recommendation

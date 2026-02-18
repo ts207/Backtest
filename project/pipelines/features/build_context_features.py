@@ -22,7 +22,14 @@ from pipelines._lib.io_utils import (
     run_scoped_lake_path,
     write_parquet,
 )
-from pipelines._lib.run_manifest import finalize_manifest, schema_hash_from_columns, start_manifest, validate_input_provenance
+from pipelines._lib.run_manifest import (
+    feature_schema_identity,
+    finalize_manifest,
+    schema_hash_from_columns,
+    start_manifest,
+    validate_feature_schema_columns,
+    validate_input_provenance,
+)
 
 
 def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
@@ -91,6 +98,9 @@ def main() -> int:
     stats: Dict[str, object] = {"symbols": {}}
 
     try:
+        feature_schema_version, feature_schema_hash = feature_schema_identity()
+        stats["feature_schema_version"] = feature_schema_version
+        stats["feature_schema_hash"] = feature_schema_hash
         def _skip_existing(existing_df: pd.DataFrame, expected: pd.DataFrame) -> bool:
             if existing_df.empty or len(existing_df) != len(expected):
                 return False
@@ -184,6 +194,10 @@ def main() -> int:
                         }
                     )
             fp = build_funding_persistence_state(bars, symbol=symbol, config=DEFAULT_FP_CONFIG)
+            validate_feature_schema_columns(
+                dataset_key="context_funding_persistence_v1",
+                columns=fp.columns.tolist(),
+            )
 
             out_path = output_root / symbol / f"{args.timeframe}.parquet"
             if out_path.exists() and not args.force:
@@ -200,6 +214,8 @@ def main() -> int:
                 "active_bars": int(fp["fp_active"].sum()),
                 "event_count": int(fp["fp_event_id"].dropna().nunique()),
                 "fp_def_version": DEFAULT_FP_CONFIG.def_version,
+                "feature_schema_version": feature_schema_version,
+                "feature_schema_hash": feature_schema_hash,
                 "bars_duplicate_rows_dropped": int(bars_dupes),
                 "funding_duplicate_rows_dropped": int(funding_dupes),
             }

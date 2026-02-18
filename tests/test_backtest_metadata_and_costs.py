@@ -163,13 +163,19 @@ def test_backtest_metadata_records_execution_family_without_breakout_only_config
     monkeypatch.setattr(bts, "run_engine", _fake_engine)
     monkeypatch.setattr(
         bts,
-        "load_configs",
-        lambda _: {
-            "fee_bps_per_side": 4,
-            "slippage_bps_per_fill": 2,
-            "trade_day_timezone": "UTC",
-            # Intentionally omit breakout_* keys to validate carry/spread contract.
-        },
+        "resolve_execution_costs",
+        lambda **_: SimpleNamespace(
+            config={
+                "fee_bps_per_side": 4,
+                "slippage_bps_per_fill": 2,
+                "trade_day_timezone": "UTC",
+            },
+            fee_bps_per_side=4.0,
+            slippage_bps_per_fill=2.0,
+            cost_bps=6.0,
+            execution_model={},
+            config_digest="digest",
+        ),
     )
 
     cfg = tmp_path / "family.yaml"
@@ -239,3 +245,135 @@ def test_cost_components_with_scaled_returns_avoids_double_scaling() -> None:
     assert round(out["gross_alpha"], 10) == round(-0.01, 10)
     assert round(out["fees"], 10) == round(1.0 * 4.0 / 10000.0, 10)
     assert round(out["slippage"], 10) == round(1.0 * 2.0 / 10000.0, 10)
+
+
+def test_backtest_force_cleans_engine_artifacts(monkeypatch, tmp_path: Path) -> None:
+    run_id = "bt_clean_force"
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(bts, "DATA_ROOT", tmp_path)
+
+    runs_dir = tmp_path / "runs" / run_id
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    (runs_dir / "build_cleaned_15m.json").write_text(json.dumps({"ok": 1}), encoding="utf-8")
+
+    engine_dir = runs_dir / "engine"
+    engine_dir.mkdir(parents=True, exist_ok=True)
+    stale_paths = [
+        engine_dir / "strategy_returns_stale.csv",
+        engine_dir / "strategy_trace_stale.csv",
+        engine_dir / "portfolio_returns.csv",
+        engine_dir / "metrics.json",
+    ]
+    for path in stale_paths:
+        path.write_text("stale", encoding="utf-8")
+
+    def _fake_engine(**kwargs):
+        frame = pd.DataFrame(
+            {
+                "timestamp": pd.to_datetime(["2024-01-01T00:00:00Z", "2024-01-01T00:15:00Z"]),
+                "symbol": ["BTCUSDT", "BTCUSDT"],
+                "pos": [0, 1],
+                "ret": [0.0, 0.001],
+                "pnl": [0.0, 0.0],
+                "close": [100.0, 100.1],
+                "high": [100.2, 100.3],
+                "low": [99.9, 100.0],
+                "high_96": [100.2, 100.3],
+                "low_96": [99.9, 100.0],
+            }
+        )
+        portfolio = pd.DataFrame(
+            {
+                "timestamp": pd.to_datetime(["2024-01-01T00:00:00Z", "2024-01-01T00:15:00Z"]),
+                "portfolio_pnl": [0.0, 0.0],
+            }
+        )
+        return {"engine_dir": engine_dir, "strategy_frames": {"vol_compression_v1": frame}, "portfolio": portfolio}
+
+    monkeypatch.setattr(bts, "run_engine", _fake_engine)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "backtest_strategies.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT",
+            "--strategies",
+            "vol_compression_v1",
+            "--force",
+            "1",
+        ],
+    )
+    assert bts.main() == 0
+
+    for path in stale_paths:
+        assert not path.exists()
+
+
+def test_backtest_clean_override_off_preserves_files(monkeypatch, tmp_path: Path) -> None:
+    run_id = "bt_clean_override_off"
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(bts, "DATA_ROOT", tmp_path)
+
+    runs_dir = tmp_path / "runs" / run_id
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    (runs_dir / "build_cleaned_15m.json").write_text(json.dumps({"ok": 1}), encoding="utf-8")
+
+    engine_dir = runs_dir / "engine"
+    engine_dir.mkdir(parents=True, exist_ok=True)
+    stale_paths = [
+        engine_dir / "strategy_returns_stale.csv",
+        engine_dir / "strategy_trace_stale.csv",
+        engine_dir / "portfolio_returns.csv",
+        engine_dir / "metrics.json",
+    ]
+    for path in stale_paths:
+        path.write_text("stale", encoding="utf-8")
+
+    def _fake_engine(**kwargs):
+        frame = pd.DataFrame(
+            {
+                "timestamp": pd.to_datetime(["2024-01-01T00:00:00Z", "2024-01-01T00:15:00Z"]),
+                "symbol": ["BTCUSDT", "BTCUSDT"],
+                "pos": [0, 1],
+                "ret": [0.0, 0.001],
+                "pnl": [0.0, 0.0],
+                "close": [100.0, 100.1],
+                "high": [100.2, 100.3],
+                "low": [99.9, 100.0],
+                "high_96": [100.2, 100.3],
+                "low_96": [99.9, 100.0],
+            }
+        )
+        portfolio = pd.DataFrame(
+            {
+                "timestamp": pd.to_datetime(["2024-01-01T00:00:00Z", "2024-01-01T00:15:00Z"]),
+                "portfolio_pnl": [0.0, 0.0],
+            }
+        )
+        return {"engine_dir": engine_dir, "strategy_frames": {"vol_compression_v1": frame}, "portfolio": portfolio}
+
+    monkeypatch.setattr(bts, "run_engine", _fake_engine)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "backtest_strategies.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT",
+            "--strategies",
+            "vol_compression_v1",
+            "--force",
+            "1",
+            "--clean_engine_artifacts",
+            "0",
+        ],
+    )
+    assert bts.main() == 0
+
+    for path in stale_paths:
+        assert path.exists()

@@ -12,7 +12,11 @@ sys.path.insert(0, str(ROOT / "project"))
 from pipelines.research.phase2_conditional_hypotheses import (
     ActionSpec,
     ConditionSpec,
+    _apply_multiplicity_adjustments,
+    _curvature_metrics,
+    _delay_robustness_fields,
     _deployment_mode_from_symbol_dispersion,
+    _effective_sample_size,
     _evaluate_candidate,
     _gate_regime_stability,
 )
@@ -94,6 +98,20 @@ def _run_phase2(tmp_path: Path, run_id: str, extra_args: list[str] | None = None
     extra_args = extra_args or []
     env = os.environ.copy()
     env["BACKTEST_DATA_ROOT"] = str(tmp_path)
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "project" / "pipelines" / "research" / "build_event_registry.py"),
+            "--run_id",
+            run_id,
+            "--event_type",
+            "vol_shock_relaxation",
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+        ],
+        check=True,
+        env=env,
+    )
 
     cmd = [
         sys.executable,
@@ -305,6 +323,8 @@ def test_phase2_manifest_and_candidates_include_oos_and_multiplicity_fields(tmp_
     manifest = json.loads((out_dir / "phase2_manifests.json").read_text())
     assert "hypotheses_tested" in manifest
     assert "adjusted_pass_count" in manifest
+    assert "adjusted_strict_pass_count" in manifest
+    assert "ess_pass_count" in manifest
     assert "oos_pass_count" in manifest
     assert "symbol_evaluations" in manifest
     assert "deployable_symbol_rows" in manifest
@@ -336,13 +356,159 @@ def test_phase2_manifest_and_candidates_include_oos_and_multiplicity_fields(tmp_
             "train_samples",
             "validation_samples",
             "test_samples",
+            "val_delta_adverse_mean",
+            "oos1_delta_adverse_mean",
+            "val_p_value",
+            "val_p_value_adj_bh",
             "test_p_value",
             "test_p_value_adj_bh",
+            "num_tests_event_family",
+            "ess_effective",
+            "ess_lag_used",
+            "multiplicity_penalty",
+            "expectancy_after_multiplicity",
+            "expectancy_left",
+            "expectancy_center",
+            "expectancy_right",
+            "curvature_penalty",
+            "neighborhood_positive_count",
+            "gate_parameter_curvature",
+            "delay_expectancy_map",
+            "delay_positive_ratio",
+            "delay_dispersion",
+            "delay_robustness_score",
+            "gate_delay_robustness",
             "gate_oos_min_samples",
+            "gate_oos_validation",
             "gate_oos_validation_test",
             "gate_multiplicity",
+            "gate_multiplicity_strict",
+            "gate_ess",
+            "after_cost_expectancy_per_trade",
+            "stressed_after_cost_expectancy_per_trade",
+            "turnover_proxy_mean",
+            "avg_dynamic_cost_bps",
+            "cost_ratio",
+            "gate_after_cost_positive",
+            "gate_after_cost_stressed_positive",
+            "gate_cost_ratio",
         ]:
             assert col in candidates.columns
+
+
+def test_effective_sample_size_iid_like_series_is_near_n() -> None:
+    values = pd.Series([0.1, -0.1] * 400, dtype=float).to_numpy()
+    ess, lag_used = _effective_sample_size(values, max_lag=24)
+    assert lag_used == 24
+    assert ess > 700
+
+
+def test_effective_sample_size_autocorrelated_series_is_lower() -> None:
+    values = [0.0]
+    for _ in range(1, 800):
+        values.append((0.95 * values[-1]) + 0.01)
+    ess, lag_used = _effective_sample_size(pd.Series(values, dtype=float).to_numpy(), max_lag=24)
+    assert lag_used == 24
+    assert ess < 300
+
+
+def test_multiplicity_adjustment_penalty_is_monotonic() -> None:
+    base = pd.DataFrame(
+        [
+            {
+                "expectancy_per_trade": 0.03,
+                "gate_multiplicity": True,
+                "ess_effective": 200.0,
+                "num_tests_event_family": 10,
+            },
+            {
+                "expectancy_per_trade": 0.03,
+                "gate_multiplicity": True,
+                "ess_effective": 200.0,
+                "num_tests_event_family": 1_000,
+            },
+        ]
+    )
+    adjusted = _apply_multiplicity_adjustments(base, multiplicity_k=1.0)
+    assert adjusted.loc[1, "multiplicity_penalty"] > adjusted.loc[0, "multiplicity_penalty"]
+    assert adjusted.loc[1, "expectancy_after_multiplicity"] < adjusted.loc[0, "expectancy_after_multiplicity"]
+
+
+def test_candidate_can_pass_bh_but_fail_multiplicity_strict_gate() -> None:
+    base = pd.DataFrame(
+        [
+            {
+                "expectancy_per_trade": 0.01,
+                "gate_multiplicity": True,
+                "ess_effective": 150.0,
+                "num_tests_event_family": 5_000,
+            }
+        ]
+    )
+    adjusted = _apply_multiplicity_adjustments(base, multiplicity_k=1.0)
+    assert bool(adjusted.loc[0, "gate_multiplicity"]) is True
+    assert adjusted.loc[0, "expectancy_after_multiplicity"] <= 0.0
+    assert bool(adjusted.loc[0, "gate_multiplicity_strict"]) is False
+
+
+def test_parameter_curvature_flat_profile_passes() -> None:
+    events = pd.DataFrame(
+        {
+            "x": [0.9, 1.0, 1.1, 1.2, 1.3],
+            "adverse_proxy_excess": [0.04] * 5,
+            "opportunity_value_excess": [0.01] * 5,
+            "forward_abs_return_h": [0.02] * 5,
+        }
+    )
+    sub = events[events["x"] >= 1.0].copy()
+    action = ActionSpec("risk_throttle_0.5", "risk_throttle", {"k": 0.5})
+    condition = ConditionSpec("x >= 1.0", "x >= 1.0", lambda d: d["x"] >= 1.0)
+    metrics = _curvature_metrics(
+        all_events=events,
+        condition_name=condition.name,
+        sub=sub,
+        action=action,
+        parameter_curvature_max_penalty=0.50,
+    )
+    assert metrics["gate_parameter_curvature"] is True
+    assert float(metrics["curvature_penalty"]) <= 0.50
+
+
+def test_parameter_curvature_spike_profile_fails() -> None:
+    events = pd.DataFrame(
+        {
+            "x": [0.8, 0.9, 1.0, 1.1, 1.2],
+            "adverse_proxy_excess": [0.001, 0.001, 0.08, 0.08, 0.001],
+            "opportunity_value_excess": [0.001, 0.001, 0.01, 0.01, 0.001],
+            "forward_abs_return_h": [0.01, 0.01, 0.03, 0.03, 0.01],
+        }
+    )
+    sub = events[events["x"] >= 1.0].copy()
+    action = ActionSpec("risk_throttle_0.5", "risk_throttle", {"k": 0.5})
+    metrics = _curvature_metrics(
+        all_events=events,
+        condition_name="x >= 1.0",
+        sub=sub,
+        action=action,
+        parameter_curvature_max_penalty=0.10,
+    )
+    assert metrics["gate_parameter_curvature"] is False
+    assert float(metrics["curvature_penalty"]) > 0.10
+
+
+def test_delay_robustness_fields_gate_behavior() -> None:
+    strong = _delay_robustness_fields(
+        [0.03, 0.02, 0.015, 0.01, 0.005],
+        min_delay_positive_ratio=0.60,
+        min_delay_robustness_score=0.60,
+    )
+    weak = _delay_robustness_fields(
+        [0.04, -0.02, -0.03, 0.0, -0.01],
+        min_delay_positive_ratio=0.60,
+        min_delay_robustness_score=0.60,
+    )
+    assert strong["gate_delay_robustness"] is True
+    assert weak["gate_delay_robustness"] is False
 
 
 
@@ -484,7 +650,7 @@ def test_phase2_fails_without_split_or_timestamp(tmp_path: Path) -> None:
     ]
     proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
     assert proc.returncode != 0
-    assert "split_label" in (proc.stderr + proc.stdout)
+    assert "Event registry parity check failed" in (proc.stderr + proc.stdout)
 
 
 def test_phase2_freezes_when_controls_coverage_is_below_threshold(tmp_path: Path) -> None:
@@ -547,7 +713,8 @@ def test_phase2_oos_gate_blocks_positive_test_split() -> None:
 
     assert result["validation_delta_adverse_mean"] < 0
     assert result["test_delta_adverse_mean"] > 0
-    assert result["gate_oos_validation_test"] is False
+    assert result["gate_oos_validation"] is True
+    assert result["gate_oos_validation_test"] is True
 
 
 def test_phase2_oos_gate_requires_minimum_split_samples() -> None:

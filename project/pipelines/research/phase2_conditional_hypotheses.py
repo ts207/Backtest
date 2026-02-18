@@ -5,6 +5,7 @@ import ast
 import json
 import logging
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from engine.execution_model import estimate_transaction_cost_bps
+from events.registry import EVENT_REGISTRY_SPECS, load_registry_events, normalize_phase1_events
+from pipelines._lib.execution_costs import resolve_execution_costs
 from pipelines._lib.io_utils import (
     choose_partition_dir,
     ensure_dir,
@@ -24,6 +28,7 @@ from pipelines._lib.io_utils import (
     read_parquet,
     run_scoped_lake_path,
 )
+from pipelines._lib.selection_log import append_selection_log
 from pipelines.research.analyze_conditional_expectancy import (
     _bh_adjust,
     _two_sided_p_from_t,
@@ -71,12 +76,46 @@ PRIMARY_OUTPUT_COLUMNS = [
     "gate_e_simplicity",
     "validation_delta_adverse_mean",
     "test_delta_adverse_mean",
+    "val_delta_adverse_mean",
+    "oos1_delta_adverse_mean",
+    "val_t_stat",
+    "val_p_value",
+    "val_p_value_adj_bh",
+    "oos1_t_stat",
+    "oos1_p_value",
     "test_t_stat",
     "test_p_value",
     "test_p_value_adj_bh",
+    "num_tests_event_family",
+    "ess_effective",
+    "ess_lag_used",
+    "multiplicity_penalty",
+    "expectancy_after_multiplicity",
+    "expectancy_left",
+    "expectancy_center",
+    "expectancy_right",
+    "curvature_penalty",
+    "neighborhood_positive_count",
+    "gate_parameter_curvature",
+    "delay_expectancy_map",
+    "delay_positive_ratio",
+    "delay_dispersion",
+    "delay_robustness_score",
+    "gate_delay_robustness",
     "gate_oos_min_samples",
+    "gate_oos_validation",
     "gate_oos_validation_test",
     "gate_multiplicity",
+    "gate_multiplicity_strict",
+    "gate_ess",
+    "after_cost_expectancy_per_trade",
+    "stressed_after_cost_expectancy_per_trade",
+    "turnover_proxy_mean",
+    "avg_dynamic_cost_bps",
+    "cost_ratio",
+    "gate_after_cost_positive",
+    "gate_after_cost_stressed_positive",
+    "gate_cost_ratio",
     "gate_pass",
     "gate_all",
     "supporting_hypothesis_count",
@@ -111,6 +150,7 @@ REJECTION_LOW_SAMPLE = "LOW_SAMPLE"
 DEPLOYMENT_MODE_CONCENTRATE = "concentrate"
 DEPLOYMENT_MODE_DIVERSIFY = "diversify"
 HYPOTHESIS_QUEUE_DIR = "hypothesis_generator"
+NUMERIC_CONDITION_PATTERN = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(>=|<=|==|>|<)\s*(-?\d+(?:\.\d+)?)\s*$")
 
 
 @dataclass(frozen=True)
@@ -212,6 +252,16 @@ def _numeric_any(df: pd.DataFrame, col: str | None, n: int, default: float = np.
     if len(out) != n:
         return pd.Series(default, index=df.index)
     return out
+
+
+def _as_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
 
 
 def _normalize_phase1_frames(events: pd.DataFrame, controls: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -332,12 +382,14 @@ def _write_freeze_outputs(
 ) -> None:
     ensure_dir(out_dir)
     cand_path = out_dir / "phase2_candidates.csv"
+    costed_path = out_dir / "candidates_costed.jsonl"
     prom_path = out_dir / "promoted_candidates.json"
     symbol_eval_path = out_dir / "phase2_symbol_evaluation.csv"
     manifest_path = out_dir / "phase2_manifests.json"
     summary_path = out_dir / "phase2_summary.md"
 
     pd.DataFrame(columns=PRIMARY_OUTPUT_COLUMNS).to_csv(cand_path, index=False)
+    costed_path.write_text("", encoding="utf-8")
     pd.DataFrame(columns=SYMBOL_OUTPUT_COLUMNS).to_csv(symbol_eval_path, index=False)
 
     prom_payload: Dict[str, object] = {
@@ -368,6 +420,12 @@ def _write_freeze_outputs(
         "phase1_hypothesis_queue_exists": bool(queue_exists),
         "matched_hypothesis_count": int(len(matched_hypothesis_ids)),
         "matched_hypothesis_ids": matched_hypothesis_ids,
+        "selection_split_policy": {
+            "canonical_labels": ["train", "val", "oos1"],
+            "legacy_labels_retained": ["train", "validation", "test"],
+            "selection_split": "validation",
+            "test_usage": "read_only",
+        },
     }
     if isinstance(extra_promoted_fields, dict):
         prom_payload.update(extra_promoted_fields)
@@ -405,6 +463,12 @@ def _write_freeze_outputs(
         "deployment_mode": DEPLOYMENT_MODE_DIVERSIFY,
         "deployment_mode_rationale": reason_message,
         "freeze_reason": str(reason),
+        "selection_split_policy": {
+            "canonical_labels": ["train", "val", "oos1"],
+            "legacy_labels_retained": ["train", "validation", "test"],
+            "selection_split": "validation",
+            "test_usage": "read_only",
+        },
     }
     if isinstance(extra_manifest_fields, dict):
         manifest_payload.update(extra_manifest_fields)
@@ -455,6 +519,47 @@ def _parse_string_list(value: object) -> List[str]:
     if "|" in text:
         return [x.strip() for x in text.split("|") if x.strip()]
     return [text]
+
+
+def _safe_float(value: object, default: float = 0.0) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    if not np.isfinite(out):
+        return float(default)
+    return out
+
+
+def _parse_delay_grid(value: str) -> List[int]:
+    parts = [part.strip() for part in str(value).split(",") if part.strip()]
+    delays: List[int] = []
+    seen = set()
+    for part in parts:
+        try:
+            delay = int(part)
+        except ValueError as exc:
+            raise ValueError(f"Invalid delay grid entry: `{part}`") from exc
+        if delay < 0:
+            raise ValueError("Delay grid entries must be >= 0")
+        if delay not in seen:
+            delays.append(delay)
+            seen.add(delay)
+    if not delays:
+        raise ValueError("Delay grid must include at least one integer entry")
+    return sorted(delays)
+
+
+def _parse_numeric_condition_expr(condition: str) -> Tuple[str, str, float] | None:
+    match = NUMERIC_CONDITION_PATTERN.match(str(condition or "").strip())
+    if not match:
+        return None
+    feature, operator, raw_value = match.groups()
+    try:
+        value = float(raw_value)
+    except ValueError:
+        return None
+    return feature, operator, value
 
 
 def _load_phase1_hypothesis_queue(run_id: str) -> Tuple[bool, pd.DataFrame]:
@@ -774,6 +879,186 @@ def _attach_forward_opportunity(
     return out_events, out_controls
 
 
+def _attach_event_market_features(
+    events: pd.DataFrame,
+    run_id: str,
+    symbols: List[str],
+    timeframe: str = "15m",
+) -> pd.DataFrame:
+    if events.empty:
+        return events
+
+    out = events.copy()
+    out["enter_ts"] = pd.to_datetime(out.get("enter_ts"), utc=True, errors="coerce")
+    if out["enter_ts"].isna().all():
+        return out
+
+    context_rows: List[pd.DataFrame] = []
+    for symbol in symbols:
+        features_candidates = [
+            run_scoped_lake_path(DATA_ROOT, run_id, "features", "perp", symbol, timeframe, "features_v1"),
+            DATA_ROOT / "lake" / "features" / "perp" / symbol / timeframe / "features_v1",
+        ]
+        bars_candidates = [
+            run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", "perp", symbol, f"bars_{timeframe}"),
+            DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / f"bars_{timeframe}",
+        ]
+
+        features_src = choose_partition_dir(features_candidates)
+        features = read_parquet(list_parquet_files(features_src)) if features_src else pd.DataFrame()
+        bars_src = choose_partition_dir(bars_candidates)
+        bars = read_parquet(list_parquet_files(bars_src)) if bars_src else pd.DataFrame()
+        if features.empty and bars.empty:
+            continue
+
+        if "timestamp" in features.columns:
+            features["timestamp"] = pd.to_datetime(features["timestamp"], utc=True, errors="coerce")
+        else:
+            features["timestamp"] = pd.NaT
+        if "timestamp" in bars.columns:
+            bars["timestamp"] = pd.to_datetime(bars["timestamp"], utc=True, errors="coerce")
+        else:
+            bars["timestamp"] = pd.NaT
+
+        feature_cols = ["timestamp", "spread_bps", "atr_14", "quote_volume", "funding_rate_scaled", "close", "high", "low"]
+        feat = features[[col for col in feature_cols if col in features.columns]].copy()
+        if feat.empty:
+            feat = pd.DataFrame({"timestamp": pd.Series(dtype="datetime64[ns, UTC]")})
+        if "timestamp" not in feat.columns:
+            feat["timestamp"] = pd.NaT
+
+        bar_cols = ["timestamp", "close", "high", "low", "quote_volume"]
+        bar_view = bars[[col for col in bar_cols if col in bars.columns]].copy()
+        if not bar_view.empty:
+            feat = feat.merge(bar_view, on="timestamp", how="outer", suffixes=("", "_bar"))
+            for col in ["close", "high", "low", "quote_volume"]:
+                bar_col = f"{col}_bar"
+                if bar_col in feat.columns:
+                    if col not in feat.columns:
+                        feat[col] = feat[bar_col]
+                    else:
+                        feat[col] = feat[col].where(feat[col].notna(), feat[bar_col])
+                    feat = feat.drop(columns=[bar_col])
+
+        feat["symbol"] = str(symbol).upper()
+        feat["enter_ts"] = pd.to_datetime(feat["timestamp"], utc=True, errors="coerce")
+        feat = feat.dropna(subset=["enter_ts"]).drop_duplicates(subset=["symbol", "enter_ts"], keep="last")
+        keep_cols = [
+            "symbol",
+            "enter_ts",
+            "spread_bps",
+            "atr_14",
+            "quote_volume",
+            "funding_rate_scaled",
+            "close",
+            "high",
+            "low",
+        ]
+        feat = feat[[col for col in keep_cols if col in feat.columns]]
+        context_rows.append(feat)
+
+    if not context_rows:
+        return out
+
+    context = pd.concat(context_rows, ignore_index=True).drop_duplicates(subset=["symbol", "enter_ts"], keep="last")
+    merged = out.merge(context, on=["symbol", "enter_ts"], how="left", suffixes=("", "_ctx"))
+    for col in ["spread_bps", "atr_14", "quote_volume", "funding_rate_scaled", "close", "high", "low"]:
+        ctx_col = f"{col}_ctx"
+        if ctx_col in merged.columns:
+            if col not in merged.columns:
+                merged[col] = merged[ctx_col]
+            else:
+                merged[col] = merged[col].where(merged[col].notna(), merged[ctx_col])
+            merged = merged.drop(columns=[ctx_col])
+    return merged
+
+
+def _turnover_proxy_for_action(action: ActionSpec, n: int) -> np.ndarray:
+    if n <= 0:
+        return np.array([], dtype=float)
+    if action.family in {"entry_gating", "risk_throttle"}:
+        k = float(action.params.get("k", 1.0))
+        return np.full(n, max(0.0, min(1.0, k)), dtype=float)
+    if action.name.startswith("delay_") or action.name == "reenable_at_half_life":
+        return np.full(n, 1.0, dtype=float)
+    if action.name == "no_action":
+        return np.full(n, 1.0, dtype=float)
+    return np.full(n, 1.0, dtype=float)
+
+
+def _candidate_cost_fields(
+    *,
+    sub: pd.DataFrame,
+    action: ActionSpec,
+    expectancy_per_trade: float,
+    execution_cost_config: Dict[str, float],
+    stressed_cost_multiplier: float,
+) -> Dict[str, float | bool]:
+    n = int(len(sub))
+    turnover = _turnover_proxy_for_action(action=action, n=n)
+    if n <= 0 or turnover.size == 0:
+        return {
+            "after_cost_expectancy_per_trade": float(expectancy_per_trade),
+            "stressed_after_cost_expectancy_per_trade": float(expectancy_per_trade),
+            "turnover_proxy_mean": 0.0,
+            "avg_dynamic_cost_bps": 0.0,
+            "cost_ratio": 0.0,
+            "gate_after_cost_positive": bool(expectancy_per_trade > 0.0),
+            "gate_after_cost_stressed_positive": bool(expectancy_per_trade > 0.0),
+            "gate_cost_ratio": True,
+        }
+
+    idx = sub.index
+    frame = pd.DataFrame(
+        {
+            "spread_bps": pd.to_numeric(sub.get("spread_bps", pd.Series(0.0, index=idx)), errors="coerce").fillna(0.0),
+            "atr_14": pd.to_numeric(sub.get("atr_14", pd.Series(np.nan, index=idx)), errors="coerce"),
+            "quote_volume": pd.to_numeric(sub.get("quote_volume", pd.Series(np.nan, index=idx)), errors="coerce"),
+            "close": pd.to_numeric(sub.get("close", pd.Series(np.nan, index=idx)), errors="coerce"),
+            "high": pd.to_numeric(sub.get("high", pd.Series(np.nan, index=idx)), errors="coerce"),
+            "low": pd.to_numeric(sub.get("low", pd.Series(np.nan, index=idx)), errors="coerce"),
+        },
+        index=idx,
+    )
+    cost_bps_series = estimate_transaction_cost_bps(
+        frame=frame,
+        turnover=pd.Series(turnover, index=idx, dtype=float),
+        config=dict(execution_cost_config),
+    )
+    cost_per_trade = float(np.nanmean((cost_bps_series.to_numpy(dtype=float) * turnover) / 10_000.0))
+    cost_per_trade = max(0.0, cost_per_trade)
+    after_cost = float(expectancy_per_trade - cost_per_trade)
+    stressed_after_cost = float(expectancy_per_trade - (float(stressed_cost_multiplier) * cost_per_trade))
+    gross_proxy = max(1e-9, abs(float(expectancy_per_trade)) + cost_per_trade)
+    cost_ratio = float(min(2.0, max(0.0, cost_per_trade / gross_proxy)))
+    return {
+        "after_cost_expectancy_per_trade": after_cost,
+        "stressed_after_cost_expectancy_per_trade": stressed_after_cost,
+        "turnover_proxy_mean": float(np.nanmean(turnover)),
+        "avg_dynamic_cost_bps": float(np.nanmean(cost_bps_series.to_numpy(dtype=float))),
+        "cost_ratio": cost_ratio,
+        "gate_after_cost_positive": bool(after_cost > 0.0),
+        "gate_after_cost_stressed_positive": bool(stressed_after_cost > 0.0),
+        "gate_cost_ratio": bool(cost_ratio < 0.60),
+    }
+
+
+def _assert_registry_event_count_parity(run_id: str, event_type: str, symbols: List[str], events: pd.DataFrame) -> None:
+    spec = EVENT_REGISTRY_SPECS.get(str(event_type))
+    if spec is not None:
+        phase1_count = int(len(normalize_phase1_events(events=events, spec=spec, run_id=run_id)))
+    else:
+        phase1_count = int(len(events))
+    registry = load_registry_events(data_root=DATA_ROOT, run_id=run_id, event_type=event_type, symbols=symbols)
+    registry_count = int(len(registry))
+    if phase1_count != registry_count:
+        raise ValueError(
+            f"Event registry parity check failed for event_type={event_type}: "
+            f"phase1_count={phase1_count} registry_count={registry_count}. "
+            "Rebuild registry before running phase2."
+        )
+
+
 def _prepare_baseline(events: pd.DataFrame, controls: pd.DataFrame) -> pd.DataFrame:
     out = events.copy()
     out["baseline_mode"] = "event_proxy_only"
@@ -933,6 +1218,140 @@ def _apply_action_proxy(sub: pd.DataFrame, action: ActionSpec) -> Tuple[np.ndarr
     raise ValueError(f"Unsupported action: {action.name}")
 
 
+def _expectancy_from_effect_vectors(adverse_delta_vec: np.ndarray, opp_delta_vec: np.ndarray) -> float:
+    mean_adv = float(np.nanmean(adverse_delta_vec)) if len(adverse_delta_vec) else np.nan
+    mean_opp = float(np.nanmean(opp_delta_vec)) if len(opp_delta_vec) else np.nan
+    if not np.isfinite(mean_adv):
+        return 0.0
+    risk_reduction = float(-mean_adv)
+    opportunity_cost = float(max(0.0, -mean_opp)) if np.isfinite(mean_opp) else 0.0
+    net_benefit = float(risk_reduction - opportunity_cost)
+    return float(net_benefit) if np.isfinite(net_benefit) else 0.0
+
+
+def _expectancy_for_action(sub: pd.DataFrame, action: ActionSpec) -> float:
+    if sub.empty:
+        return 0.0
+    adverse_delta_vec, opp_delta_vec, _ = _apply_action_proxy(sub, action)
+    return _expectancy_from_effect_vectors(adverse_delta_vec, opp_delta_vec)
+
+
+def _combine_with_delay_override(sub: pd.DataFrame, action: ActionSpec, delay_bars: int) -> float:
+    if sub.empty:
+        return 0.0
+    base_adv, base_opp, _ = _apply_action_proxy(sub, action)
+    if int(delay_bars) <= 0:
+        return _expectancy_from_effect_vectors(base_adv, base_opp)
+    delay_action = ActionSpec(
+        name=f"delay_{int(delay_bars)}",
+        family="timing",
+        params={"delay_bars": int(delay_bars)},
+    )
+    delay_adv, delay_opp, _ = _apply_action_proxy(sub, delay_action)
+    return _expectancy_from_effect_vectors(base_adv + delay_adv, base_opp + delay_opp)
+
+
+def _condition_mask_for_numeric_expr(frame: pd.DataFrame, feature: str, operator: str, threshold: float) -> pd.Series:
+    values = pd.to_numeric(frame.get(feature), errors="coerce")
+    if operator == ">=":
+        return values >= threshold
+    if operator == "<=":
+        return values <= threshold
+    if operator == ">":
+        return values > threshold
+    if operator == "<":
+        return values < threshold
+    if operator == "==":
+        return values == threshold
+    return pd.Series(False, index=frame.index)
+
+
+def _curvature_metrics(
+    *,
+    all_events: pd.DataFrame,
+    condition_name: str,
+    sub: pd.DataFrame,
+    action: ActionSpec,
+    parameter_curvature_max_penalty: float,
+) -> Dict[str, object]:
+    parsed = _parse_numeric_condition_expr(condition_name)
+    center = _expectancy_for_action(sub, action)
+    if parsed is None:
+        return {
+            "expectancy_left": center,
+            "expectancy_center": center,
+            "expectancy_right": center,
+            "curvature_penalty": 0.0,
+            "neighborhood_positive_count": 3,
+            "gate_parameter_curvature": True,
+        }
+
+    feature, operator, threshold = parsed
+    if feature not in all_events.columns:
+        return {
+            "expectancy_left": center,
+            "expectancy_center": center,
+            "expectancy_right": center,
+            "curvature_penalty": 0.0,
+            "neighborhood_positive_count": 3,
+            "gate_parameter_curvature": True,
+        }
+
+    delta = max(abs(float(threshold)) * 0.10, 1e-6)
+    left_mask = _condition_mask_for_numeric_expr(all_events, feature, operator, float(threshold - delta))
+    right_mask = _condition_mask_for_numeric_expr(all_events, feature, operator, float(threshold + delta))
+    left = _expectancy_for_action(all_events[left_mask.fillna(False)].copy(), action)
+    right = _expectancy_for_action(all_events[right_mask.fillna(False)].copy(), action)
+
+    denom = max(abs(center), 1e-9)
+    curvature_penalty = float(max(0.0, center - min(left, right)) / denom)
+    neighborhood_positive_count = int(sum(1 for x in [left, center, right] if x > 0.0))
+    gate_parameter_curvature = bool(
+        neighborhood_positive_count >= 2 and curvature_penalty <= float(parameter_curvature_max_penalty)
+    )
+    return {
+        "expectancy_left": float(left),
+        "expectancy_center": float(center),
+        "expectancy_right": float(right),
+        "curvature_penalty": curvature_penalty,
+        "neighborhood_positive_count": neighborhood_positive_count,
+        "gate_parameter_curvature": gate_parameter_curvature,
+    }
+
+
+def _delay_robustness_fields(
+    delay_expectancies_adjusted: List[float],
+    *,
+    min_delay_positive_ratio: float,
+    min_delay_robustness_score: float,
+) -> Dict[str, object]:
+    if not delay_expectancies_adjusted:
+        return {
+            "delay_positive_ratio": 0.0,
+            "delay_dispersion": 0.0,
+            "delay_robustness_score": 0.0,
+            "gate_delay_robustness": False,
+        }
+    arr = np.asarray(delay_expectancies_adjusted, dtype=float)
+    delay_positive_ratio = float(np.mean(arr > 0.0))
+    delay_dispersion = float(np.std(arr))
+    mean_delay_expectancy = float(np.mean(arr))
+    stability_component = float(
+        max(0.0, 1.0 - (delay_dispersion / max(abs(mean_delay_expectancy), 1e-9)))
+    )
+    delay_robustness_score = float((0.7 * delay_positive_ratio) + (0.3 * stability_component))
+    gate_delay_robustness = bool(
+        delay_positive_ratio >= float(min_delay_positive_ratio)
+        and delay_robustness_score >= float(min_delay_robustness_score)
+    )
+    return {
+        "delay_positive_ratio": delay_positive_ratio,
+        "delay_dispersion": delay_dispersion,
+        "delay_robustness_score": delay_robustness_score,
+        "gate_delay_robustness": gate_delay_robustness,
+    }
+
+
 def _gate_year_stability(sub: pd.DataFrame, effect_col: str, min_ratio: float = 0.8) -> Tuple[bool, str]:
     if "year" not in sub.columns or sub.empty:
         return False, "insufficient_years"
@@ -1022,6 +1441,97 @@ def _capacity_proxy_from_frame(sub: pd.DataFrame) -> float:
     return np.nan
 
 
+def _effective_sample_size(values: np.ndarray, max_lag: int) -> Tuple[float, int]:
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    n = int(len(arr))
+    if n <= 1:
+        return float(n), 0
+
+    lag_cap = min(int(max_lag), n // 10)
+    if lag_cap <= 0:
+        return float(n), 0
+
+    series = pd.Series(arr)
+    rho_sum = 0.0
+    for lag in range(1, lag_cap + 1):
+        rho = series.autocorr(lag=lag)
+        if np.isfinite(rho):
+            rho_sum += float(rho)
+
+    denom = max(1e-6, 1.0 + (2.0 * rho_sum))
+    ess = float(n / denom)
+    ess = float(np.clip(ess, 0.0, float(n)))
+    return ess, lag_cap
+
+
+def _multiplicity_penalty(*, multiplicity_k: float, num_tests_event_family: int, ess_effective: float) -> float:
+    tests = max(2.0, float(num_tests_event_family))
+    eff_n = max(1.0, float(ess_effective))
+    return float(float(multiplicity_k) * np.sqrt(np.log(tests) / eff_n))
+
+
+def _apply_multiplicity_adjustments(
+    candidates: pd.DataFrame,
+    *,
+    multiplicity_k: float,
+    min_delay_positive_ratio: float = 0.60,
+    min_delay_robustness_score: float = 0.60,
+) -> pd.DataFrame:
+    if candidates.empty:
+        return candidates
+
+    out = candidates.copy()
+    out["expectancy_per_trade"] = pd.to_numeric(out.get("expectancy_per_trade"), errors="coerce").fillna(0.0)
+    out["ess_effective"] = pd.to_numeric(out.get("ess_effective"), errors="coerce").fillna(0.0)
+    out["num_tests_event_family"] = pd.to_numeric(out.get("num_tests_event_family"), errors="coerce").fillna(0).astype(int)
+    out["multiplicity_penalty"] = out.apply(
+        lambda row: _multiplicity_penalty(
+            multiplicity_k=float(multiplicity_k),
+            num_tests_event_family=int(row.get("num_tests_event_family", 0)),
+            ess_effective=float(row.get("ess_effective", 0.0)),
+        ),
+        axis=1,
+    )
+    out["expectancy_after_multiplicity"] = out["expectancy_per_trade"] - out["multiplicity_penalty"]
+    out["gate_multiplicity_strict"] = out["gate_multiplicity"].astype(bool) & (out["expectancy_after_multiplicity"] > 0.0)
+
+    delay_maps_adjusted: List[str] = []
+    delay_positive_ratio: List[float] = []
+    delay_dispersion: List[float] = []
+    delay_scores: List[float] = []
+    delay_gates: List[bool] = []
+    for _, row in out.iterrows():
+        raw_map_payload = row.get("delay_expectancy_map", "{}")
+        try:
+            raw_map = json.loads(str(raw_map_payload))
+        except Exception:
+            raw_map = {}
+        if not isinstance(raw_map, dict):
+            raw_map = {}
+        adjusted_map = {
+            str(key): float(_safe_float(val, 0.0) - _safe_float(row.get("multiplicity_penalty"), 0.0))
+            for key, val in raw_map.items()
+        }
+        fields = _delay_robustness_fields(
+            list(adjusted_map.values()),
+            min_delay_positive_ratio=float(min_delay_positive_ratio),
+            min_delay_robustness_score=float(min_delay_robustness_score),
+        )
+        delay_maps_adjusted.append(json.dumps(adjusted_map, sort_keys=True))
+        delay_positive_ratio.append(float(fields["delay_positive_ratio"]))
+        delay_dispersion.append(float(fields["delay_dispersion"]))
+        delay_scores.append(float(fields["delay_robustness_score"]))
+        delay_gates.append(bool(fields["gate_delay_robustness"]))
+
+    out["delay_expectancy_map"] = delay_maps_adjusted
+    out["delay_positive_ratio"] = delay_positive_ratio
+    out["delay_dispersion"] = delay_dispersion
+    out["delay_robustness_score"] = delay_scores
+    out["gate_delay_robustness"] = delay_gates
+    return out
+
+
 def _evaluate_candidate(
     sub: pd.DataFrame,
     condition: ConditionSpec,
@@ -1036,8 +1546,19 @@ def _evaluate_candidate(
     simplicity_gate: bool,
     min_regime_stable_splits: int = 2,
     min_oos_split_samples: int = 1,
+    min_ess: float = 150.0,
+    ess_max_lag: int = 24,
+    parameter_curvature_max_penalty: float = 0.50,
+    delay_grid_bars: List[int] | None = None,
+    min_delay_positive_ratio: float = 0.60,
+    min_delay_robustness_score: float = 0.60,
     total_event_count: int = 0,
+    all_events: pd.DataFrame | None = None,
+    execution_cost_config: Dict[str, float] | None = None,
+    stressed_cost_multiplier: float = 1.5,
 ) -> Dict[str, object]:
+    if all_events is None:
+        all_events = sub
     adverse_delta_vec, opp_delta_vec, exposure_delta_vec = _apply_action_proxy(sub, action)
 
     mean_adv, ci_low_adv, ci_high_adv = _bootstrap_ci(adverse_delta_vec, bootstrap_iters, seed + 1)
@@ -1078,6 +1599,13 @@ def _evaluate_candidate(
     opportunity_cost = float(max(0.0, -mean_opp)) if np.isfinite(mean_opp) else np.nan
     net_benefit = float(risk_reduction - opportunity_cost) if np.isfinite(risk_reduction) and np.isfinite(opportunity_cost) else np.nan
     expectancy_per_trade = float(net_benefit) if np.isfinite(net_benefit) else 0.0
+    cost_fields = _candidate_cost_fields(
+        sub=sub,
+        action=action,
+        expectancy_per_trade=expectancy_per_trade,
+        execution_cost_config=dict(execution_cost_config or {}),
+        stressed_cost_multiplier=float(stressed_cost_multiplier),
+    )
 
     opportunity_ci_tight_overlap = bool(
         np.isfinite(ci_low_opp)
@@ -1094,7 +1622,17 @@ def _evaluate_candidate(
     gate_g = bool(np.isfinite(net_benefit) and net_benefit >= net_benefit_floor)
     gate_e = bool(simplicity_gate)
 
-    gate_values = [gate_a, gate_b, gate_c, gate_d, gate_f, gate_g]
+    gate_values = [
+        gate_a,
+        gate_b,
+        gate_c,
+        gate_d,
+        gate_f,
+        gate_g,
+        bool(cost_fields["gate_after_cost_positive"]),
+        bool(cost_fields["gate_after_cost_stressed_positive"]),
+        bool(cost_fields["gate_cost_ratio"]),
+    ]
     robustness_score = float(np.mean([1.0 if g else 0.0 for g in gate_values]))
 
     train_samples = _split_count(sub, "train")
@@ -1103,25 +1641,35 @@ def _evaluate_candidate(
     test_samples = _split_count(sub, "test")
     validation_delta_adverse_mean = _split_mean(tmp, "validation", "adverse_effect")
     test_delta_adverse_mean = _split_mean(tmp, "test", "adverse_effect")
-    test_t_stat, test_p_value = _split_t_stat_and_p_value(tmp, "test", "adverse_effect")
-    gate_oos_min_samples = bool(
-        validation_samples >= int(min_oos_split_samples)
-        and test_samples >= int(min_oos_split_samples)
-    )
-    gate_oos = bool(
+    val_t_stat, val_p_value = _split_t_stat_and_p_value(tmp, "validation", "adverse_effect")
+    oos1_t_stat, oos1_p_value = _split_t_stat_and_p_value(tmp, "test", "adverse_effect")
+    gate_oos_min_samples = bool(validation_samples >= int(min_oos_split_samples))
+    gate_oos_validation = bool(
         gate_oos_min_samples
         and np.isfinite(validation_delta_adverse_mean)
-        and np.isfinite(test_delta_adverse_mean)
         and validation_delta_adverse_mean < 0.0
-        and test_delta_adverse_mean < 0.0
     )
-    if gate_oos:
+    if gate_oos_validation:
         robustness_score = min(1.0, robustness_score + 0.1)
 
     sample_size = int(len(sub))
     event_frequency = float(sample_size / total_event_count) if total_event_count > 0 else 0.0
     capacity_proxy = _capacity_proxy_from_frame(sub)
     profit_density_score = float(expectancy_per_trade * robustness_score * event_frequency)
+    ess_effective, ess_lag_used = _effective_sample_size(adverse_delta_vec, max_lag=int(ess_max_lag))
+    gate_ess = bool(ess_effective >= float(min_ess))
+    curvature_metrics = _curvature_metrics(
+        all_events=all_events,
+        condition_name=condition.name,
+        sub=sub,
+        action=action,
+        parameter_curvature_max_penalty=float(parameter_curvature_max_penalty),
+    )
+    delay_grid = [0, 4, 8, 16, 30] if delay_grid_bars is None else list(delay_grid_bars)
+    delay_expectancy_map_raw = {
+        str(int(delay)): _combine_with_delay_override(sub, action, int(delay))
+        for delay in delay_grid
+    }
 
     fail_reasons = []
     if not gate_a:
@@ -1140,8 +1688,18 @@ def _evaluate_candidate(
         fail_reasons.append("gate_e_simplicity")
     if not gate_oos_min_samples:
         fail_reasons.append("gate_oos_min_samples")
-    if not gate_oos:
-        fail_reasons.append("gate_oos_validation_test")
+    if not gate_oos_validation:
+        fail_reasons.append("gate_oos_validation")
+    if not gate_ess:
+        fail_reasons.append("gate_ess")
+    if not bool(cost_fields["gate_after_cost_positive"]):
+        fail_reasons.append("gate_after_cost_positive")
+    if not bool(cost_fields["gate_after_cost_stressed_positive"]):
+        fail_reasons.append("gate_after_cost_stressed_positive")
+    if not bool(cost_fields["gate_cost_ratio"]):
+        fail_reasons.append("gate_cost_ratio")
+    if not bool(curvature_metrics.get("gate_parameter_curvature", True)):
+        fail_reasons.append("gate_parameter_curvature")
 
     return {
         "candidate_id": f"{condition.name}__{action.name}",
@@ -1183,13 +1741,61 @@ def _evaluate_candidate(
         "gate_e_simplicity": gate_e,
         "validation_delta_adverse_mean": validation_delta_adverse_mean,
         "test_delta_adverse_mean": test_delta_adverse_mean,
-        "test_t_stat": test_t_stat,
-        "test_p_value": test_p_value,
+        "val_delta_adverse_mean": validation_delta_adverse_mean,
+        "oos1_delta_adverse_mean": test_delta_adverse_mean,
+        "val_t_stat": val_t_stat,
+        "val_p_value": val_p_value,
+        "val_p_value_adj_bh": np.nan,
+        "oos1_t_stat": oos1_t_stat,
+        "oos1_p_value": oos1_p_value,
+        "test_t_stat": oos1_t_stat,
+        "test_p_value": oos1_p_value,
         "test_p_value_adj_bh": np.nan,
+        "num_tests_event_family": 0,
+        "ess_effective": ess_effective,
+        "ess_lag_used": int(ess_lag_used),
+        "multiplicity_penalty": 0.0,
+        "expectancy_after_multiplicity": expectancy_per_trade,
+        "expectancy_left": float(curvature_metrics["expectancy_left"]),
+        "expectancy_center": float(curvature_metrics["expectancy_center"]),
+        "expectancy_right": float(curvature_metrics["expectancy_right"]),
+        "curvature_penalty": float(curvature_metrics["curvature_penalty"]),
+        "neighborhood_positive_count": int(curvature_metrics["neighborhood_positive_count"]),
+        "gate_parameter_curvature": bool(curvature_metrics["gate_parameter_curvature"]),
+        "delay_expectancy_map": json.dumps(delay_expectancy_map_raw, sort_keys=True),
+        "delay_positive_ratio": 0.0,
+        "delay_dispersion": 0.0,
+        "delay_robustness_score": 0.0,
+        "gate_delay_robustness": False,
         "gate_oos_min_samples": gate_oos_min_samples,
-        "gate_oos_validation_test": gate_oos,
+        "gate_oos_validation": gate_oos_validation,
+        "gate_oos_validation_test": gate_oos_validation,
         "gate_multiplicity": False,
-        "gate_pass": bool(gate_a and gate_b and gate_c and gate_d and gate_f and gate_g and gate_e and gate_oos),
+        "gate_multiplicity_strict": False,
+        "gate_ess": gate_ess,
+        "after_cost_expectancy_per_trade": float(cost_fields["after_cost_expectancy_per_trade"]),
+        "stressed_after_cost_expectancy_per_trade": float(cost_fields["stressed_after_cost_expectancy_per_trade"]),
+        "turnover_proxy_mean": float(cost_fields["turnover_proxy_mean"]),
+        "avg_dynamic_cost_bps": float(cost_fields["avg_dynamic_cost_bps"]),
+        "cost_ratio": float(cost_fields["cost_ratio"]),
+        "gate_after_cost_positive": bool(cost_fields["gate_after_cost_positive"]),
+        "gate_after_cost_stressed_positive": bool(cost_fields["gate_after_cost_stressed_positive"]),
+        "gate_cost_ratio": bool(cost_fields["gate_cost_ratio"]),
+        "gate_pass": bool(
+            gate_a
+            and gate_b
+            and gate_c
+            and gate_d
+            and gate_f
+            and gate_g
+            and gate_e
+            and gate_oos_validation
+            and gate_ess
+            and bool(cost_fields["gate_after_cost_positive"])
+            and bool(cost_fields["gate_after_cost_stressed_positive"])
+            and bool(cost_fields["gate_cost_ratio"])
+            and bool(curvature_metrics.get("gate_parameter_curvature", True))
+        ),
         "gate_all": False,
         "fail_reasons": ",".join(fail_reasons) if fail_reasons else "",
     }
@@ -1432,6 +2038,18 @@ def main() -> int:
     parser.add_argument("--net_benefit_floor", type=float, default=0.0)
     parser.add_argument("--min_regime_stable_splits", type=int, default=2)
     parser.add_argument("--min_oos_split_samples", type=int, default=10)
+    parser.add_argument("--min_ess", type=float, default=150.0)
+    parser.add_argument("--ess_max_lag", type=int, default=24)
+    parser.add_argument("--multiplicity_k", type=float, default=1.0)
+    parser.add_argument("--parameter_curvature_max_penalty", type=float, default=0.50)
+    parser.add_argument("--delay_grid_bars", default="0,4,8,16,30")
+    parser.add_argument("--min_delay_positive_ratio", type=float, default=0.60)
+    parser.add_argument("--min_delay_robustness_score", type=float, default=0.60)
+    parser.add_argument("--stressed_cost_multiplier", type=float, default=1.5)
+    parser.add_argument("--fees_bps", type=float, default=None)
+    parser.add_argument("--slippage_bps", type=float, default=None)
+    parser.add_argument("--cost_bps", type=float, default=None)
+    parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--require_controls", type=int, default=1)
     parser.add_argument("--min_control_coverage", type=float, default=0.8)
     parser.add_argument("--min_sample_size", type=int, default=20)
@@ -1453,6 +2071,23 @@ def main() -> int:
         raise ValueError("--min_oos_split_samples must be >= 1")
     if not (0.0 <= float(args.min_control_coverage) <= 1.0):
         raise ValueError("--min_control_coverage must be within [0, 1]")
+    if float(args.parameter_curvature_max_penalty) < 0.0:
+        raise ValueError("--parameter_curvature_max_penalty must be >= 0")
+    if not (0.0 <= float(args.min_delay_positive_ratio) <= 1.0):
+        raise ValueError("--min_delay_positive_ratio must be within [0, 1]")
+    if not (0.0 <= float(args.min_delay_robustness_score) <= 1.0):
+        raise ValueError("--min_delay_robustness_score must be within [0, 1]")
+    if float(args.stressed_cost_multiplier) < 1.0:
+        raise ValueError("--stressed_cost_multiplier must be >= 1.0")
+    delay_grid_bars = _parse_delay_grid(str(args.delay_grid_bars))
+    resolved_costs = resolve_execution_costs(
+        project_root=PROJECT_ROOT,
+        config_paths=args.config,
+        fees_bps=args.fees_bps,
+        slippage_bps=args.slippage_bps,
+        cost_bps=args.cost_bps,
+    )
+    execution_cost_config = dict(resolved_costs.execution_model)
 
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
     event_source = PHASE1_EVENT_SOURCES[args.event_type]
@@ -1493,6 +2128,14 @@ def main() -> int:
         if "symbol" in events.columns:
             events = events[events["symbol"].astype(str).isin(symbols)].copy()
 
+    if not events.empty:
+        _assert_registry_event_count_parity(
+            run_id=args.run_id,
+            event_type=args.event_type,
+            symbols=symbols,
+            events=events,
+        )
+
     if events.empty:
         out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "phase2" / args.run_id / args.event_type
         _write_freeze_outputs(
@@ -1512,6 +2155,18 @@ def main() -> int:
             opportunity_horizon_bars=int(args.opportunity_horizon_bars),
             opportunity_tight_eps=float(args.opportunity_tight_eps),
             min_regime_stable_splits=int(args.min_regime_stable_splits),
+        )
+        append_selection_log(
+            data_root=DATA_ROOT,
+            run_id=args.run_id,
+            stage="phase2_conditional_hypotheses",
+            details={
+                "event_type": args.event_type,
+                "selection_split": "validation",
+                "test_usage": "read_only",
+                "decision": "freeze",
+                "freeze_reason": "no_phase1_events",
+            },
         )
         logging.info("No Phase 1 events available; wrote frozen Phase 2 artifacts to %s", out_dir)
         return 0
@@ -1555,6 +2210,18 @@ def main() -> int:
                 "controls_events_matched": int(control_event_matched),
             },
         )
+        append_selection_log(
+            data_root=DATA_ROOT,
+            run_id=args.run_id,
+            stage="phase2_conditional_hypotheses",
+            details={
+                "event_type": args.event_type,
+                "selection_split": "validation",
+                "test_usage": "read_only",
+                "decision": "freeze",
+                "freeze_reason": "insufficient_controls_coverage",
+            },
+        )
         logging.warning(
             "Phase 2 froze %s due to controls coverage %.4f < %.4f (%s/%s events).",
             args.event_type,
@@ -1572,6 +2239,12 @@ def main() -> int:
         symbols=symbols,
         timeframe="15m",
         horizon_bars=args.opportunity_horizon_bars,
+    )
+    events = _attach_event_market_features(
+        events=events,
+        run_id=args.run_id,
+        symbols=symbols,
+        timeframe="15m",
     )
     events = _prepare_baseline(events, controls)
 
@@ -1603,6 +2276,7 @@ def main() -> int:
             for j, action in enumerate(actions):
                 res = _evaluate_candidate(
                     sub,
+                    all_events=events,
                     condition=cond,
                     action=action,
                     bootstrap_iters=args.bootstrap_iters,
@@ -1615,7 +2289,15 @@ def main() -> int:
                     simplicity_gate=simplicity_pass,
                     min_regime_stable_splits=args.min_regime_stable_splits,
                     min_oos_split_samples=args.min_oos_split_samples,
+                    min_ess=float(args.min_ess),
+                    ess_max_lag=int(args.ess_max_lag),
+                    parameter_curvature_max_penalty=float(args.parameter_curvature_max_penalty),
+                    delay_grid_bars=delay_grid_bars,
+                    min_delay_positive_ratio=float(args.min_delay_positive_ratio),
+                    min_delay_robustness_score=float(args.min_delay_robustness_score),
                     total_event_count=len(events),
+                    execution_cost_config=execution_cost_config,
+                    stressed_cost_multiplier=float(args.stressed_cost_multiplier),
                 )
                 rows.append(res)
 
@@ -1623,29 +2305,115 @@ def main() -> int:
     if candidates.empty:
         candidates = pd.DataFrame(columns=PRIMARY_OUTPUT_COLUMNS)
     else:
+        candidates["val_p_value"] = pd.to_numeric(
+            candidates.get("val_p_value", candidates.get("test_p_value")),
+            errors="coerce",
+        )
+        candidates["val_p_value_adj_bh"] = _bh_adjust(candidates["val_p_value"].fillna(1.0))
+        candidates["test_p_value_adj_bh"] = candidates["val_p_value_adj_bh"]
         candidates["test_p_value"] = pd.to_numeric(candidates.get("test_p_value"), errors="coerce")
-        candidates["test_p_value_adj_bh"] = _bh_adjust(candidates["test_p_value"].fillna(1.0))
-        candidates["gate_multiplicity"] = candidates["test_p_value_adj_bh"] <= 0.05
+        candidates["gate_multiplicity"] = candidates["val_p_value_adj_bh"] <= 0.05
+        candidates["num_tests_event_family"] = int(len(candidates))
+        candidates = _apply_multiplicity_adjustments(
+            candidates,
+            multiplicity_k=float(args.multiplicity_k),
+            min_delay_positive_ratio=float(args.min_delay_positive_ratio),
+            min_delay_robustness_score=float(args.min_delay_robustness_score),
+        )
         if "robustness_score" in candidates.columns:
             candidates["robustness_score"] = (
                 pd.to_numeric(candidates["robustness_score"], errors="coerce").fillna(0.0)
-                * np.where(candidates["gate_multiplicity"].astype(bool), 1.0, 0.75)
+                * np.where(candidates["gate_multiplicity_strict"].astype(bool), 1.0, 0.75)
             )
         candidates["expectancy_per_trade"] = pd.to_numeric(candidates.get("expectancy_per_trade"), errors="coerce").fillna(0.0)
+        candidates["after_cost_expectancy_per_trade"] = (
+            pd.to_numeric(candidates.get("after_cost_expectancy_per_trade"), errors="coerce")
+            .fillna(candidates["expectancy_per_trade"])
+        )
+        candidates["stressed_after_cost_expectancy_per_trade"] = (
+            pd.to_numeric(candidates.get("stressed_after_cost_expectancy_per_trade"), errors="coerce")
+            .fillna(candidates["after_cost_expectancy_per_trade"])
+        )
+        candidates["turnover_proxy_mean"] = pd.to_numeric(candidates.get("turnover_proxy_mean"), errors="coerce").fillna(0.0)
+        candidates["avg_dynamic_cost_bps"] = pd.to_numeric(candidates.get("avg_dynamic_cost_bps"), errors="coerce").fillna(0.0)
+        candidates["cost_ratio"] = pd.to_numeric(candidates.get("cost_ratio"), errors="coerce").fillna(2.0)
+        candidates["gate_after_cost_positive"] = candidates["after_cost_expectancy_per_trade"] > 0.0
+        candidates["gate_after_cost_stressed_positive"] = candidates["stressed_after_cost_expectancy_per_trade"] > 0.0
+        candidates["gate_cost_ratio"] = candidates["cost_ratio"] < 0.60
+        candidates["gate_ess"] = candidates["gate_ess"].astype(bool)
+        candidates["gate_parameter_curvature"] = candidates["gate_parameter_curvature"].astype(bool)
+        candidates["gate_delay_robustness"] = candidates["gate_delay_robustness"].astype(bool)
+        if "gate_oos_validation" in candidates.columns:
+            gate_oos_series = candidates["gate_oos_validation"]
+        elif "gate_oos_validation_test" in candidates.columns:
+            gate_oos_series = candidates["gate_oos_validation_test"]
+        else:
+            gate_oos_series = pd.Series(False, index=candidates.index)
+        candidates["gate_oos_validation"] = pd.Series(gate_oos_series, index=candidates.index).astype(bool)
+        candidates["gate_oos_validation_test"] = candidates["gate_oos_validation"]
+        candidates["val_delta_adverse_mean"] = pd.to_numeric(
+            candidates.get("val_delta_adverse_mean", candidates.get("validation_delta_adverse_mean")),
+            errors="coerce",
+        )
+        candidates["oos1_delta_adverse_mean"] = pd.to_numeric(
+            candidates.get("oos1_delta_adverse_mean", candidates.get("test_delta_adverse_mean")),
+            errors="coerce",
+        )
+        candidates["oos1_t_stat"] = pd.to_numeric(candidates.get("oos1_t_stat", candidates.get("test_t_stat")), errors="coerce")
+        candidates["oos1_p_value"] = pd.to_numeric(candidates.get("oos1_p_value", candidates.get("test_p_value")), errors="coerce")
+        candidates["test_t_stat"] = candidates["oos1_t_stat"]
+        candidates["test_p_value"] = candidates["oos1_p_value"]
+        candidates["gate_pass"] = (
+            candidates["gate_pass"].astype(bool)
+            & candidates["gate_parameter_curvature"].astype(bool)
+            & candidates["gate_delay_robustness"].astype(bool)
+            & candidates["gate_after_cost_positive"].astype(bool)
+            & candidates["gate_after_cost_stressed_positive"].astype(bool)
+            & candidates["gate_cost_ratio"].astype(bool)
+        )
         candidates["event_frequency"] = pd.to_numeric(candidates.get("event_frequency"), errors="coerce").fillna(0.0)
         candidates["profit_density_score"] = (
-            candidates["expectancy_per_trade"] * candidates["robustness_score"] * candidates["event_frequency"]
+            candidates["after_cost_expectancy_per_trade"] * candidates["robustness_score"] * candidates["event_frequency"]
         )
         candidates["gate_all"] = (
             candidates["gate_pass"].astype(bool)
-            & candidates["gate_oos_validation_test"].astype(bool)
-            & candidates["gate_multiplicity"].astype(bool)
+            & candidates["gate_oos_validation"].astype(bool)
+            & candidates["gate_multiplicity_strict"].astype(bool)
+            & candidates["gate_ess"].astype(bool)
+            & candidates["gate_parameter_curvature"].astype(bool)
+            & candidates["gate_delay_robustness"].astype(bool)
+            & candidates["gate_after_cost_positive"].astype(bool)
+            & candidates["gate_after_cost_stressed_positive"].astype(bool)
+            & candidates["gate_cost_ratio"].astype(bool)
         )
         for idx, row in candidates.iterrows():
             reasons = [x for x in str(row.get("fail_reasons", "")).split(",") if x]
-            if not bool(row.get("gate_multiplicity", False)):
-                reasons.append("gate_multiplicity")
+            if not bool(row.get("gate_multiplicity_strict", False)):
+                reasons.append("gate_multiplicity_strict")
+            if not bool(row.get("gate_ess", False)):
+                reasons.append("gate_ess")
+            if not bool(row.get("gate_parameter_curvature", False)):
+                reasons.append("gate_parameter_curvature")
+            if not bool(row.get("gate_delay_robustness", False)):
+                reasons.append("gate_delay_robustness")
+            if not bool(row.get("gate_after_cost_positive", False)):
+                reasons.append("gate_after_cost_positive")
+            if not bool(row.get("gate_after_cost_stressed_positive", False)):
+                reasons.append("gate_after_cost_stressed_positive")
+            if not bool(row.get("gate_cost_ratio", False)):
+                reasons.append("gate_cost_ratio")
             candidates.at[idx, "fail_reasons"] = ",".join(dict.fromkeys(reasons))
+    for col in PRIMARY_OUTPUT_COLUMNS:
+        if col in candidates.columns:
+            continue
+        if col.startswith("gate_"):
+            candidates[col] = False
+        elif col in {"fail_reasons", "supporting_hypothesis_ids", "delay_expectancy_map"}:
+            candidates[col] = ""
+        elif col in {"supporting_hypothesis_count", "num_tests_event_family", "sample_size", "train_samples", "validation_samples", "test_samples", "ess_lag_used"}:
+            candidates[col] = 0
+        else:
+            candidates[col] = np.nan
     if not candidates.empty:
         candidates["supporting_hypothesis_count"] = int(len(matched_hypothesis_ids))
         candidates["supporting_hypothesis_ids"] = "|".join(matched_hypothesis_ids)
@@ -1686,12 +2454,37 @@ def main() -> int:
     ensure_dir(out_dir)
 
     cand_path = out_dir / "phase2_candidates.csv"
+    costed_path = out_dir / "candidates_costed.jsonl"
     symbol_eval_path = out_dir / "phase2_symbol_evaluation.csv"
     prom_path = out_dir / "promoted_candidates.json"
     manifest_path = out_dir / "phase2_manifests.json"
     summary_path = out_dir / "phase2_summary.md"
 
+    ordered_candidate_cols = PRIMARY_OUTPUT_COLUMNS + [col for col in candidates.columns if col not in PRIMARY_OUTPUT_COLUMNS]
+    candidates = candidates[ordered_candidate_cols]
     candidates.to_csv(cand_path, index=False)
+    costed_records = []
+    if not candidates.empty:
+        for row in candidates.to_dict(orient="records"):
+            costed_records.append(
+                {
+                    "run_id": args.run_id,
+                    "event_type": args.event_type,
+                    "candidate_id": str(row.get("candidate_id", "")),
+                    "after_cost_expectancy_per_trade": _safe_float(row.get("after_cost_expectancy_per_trade"), 0.0),
+                    "stressed_after_cost_expectancy_per_trade": _safe_float(row.get("stressed_after_cost_expectancy_per_trade"), 0.0),
+                    "turnover_proxy_mean": _safe_float(row.get("turnover_proxy_mean"), 0.0),
+                    "avg_dynamic_cost_bps": _safe_float(row.get("avg_dynamic_cost_bps"), 0.0),
+                    "cost_ratio": _safe_float(row.get("cost_ratio"), 0.0),
+                    "gate_after_cost_positive": _as_bool(row.get("gate_after_cost_positive", False)),
+                    "gate_after_cost_stressed_positive": _as_bool(row.get("gate_after_cost_stressed_positive", False)),
+                    "gate_cost_ratio": _as_bool(row.get("gate_cost_ratio", False)),
+                    "execution_cost_config": execution_cost_config,
+                    "execution_cost_config_digest": resolved_costs.config_digest,
+                }
+            )
+    costed_text = "\n".join(json.dumps(rec, sort_keys=True) for rec in costed_records)
+    costed_path.write_text((costed_text + "\n") if costed_text else "", encoding="utf-8")
     symbol_eval.to_csv(symbol_eval_path, index=False)
     prom_payload = {
         "run_id": args.run_id,
@@ -1714,6 +2507,12 @@ def main() -> int:
         "controls_coverage_ratio": float(control_coverage_ratio),
         "controls_events_total": int(control_event_total),
         "controls_events_matched": int(control_event_matched),
+        "selection_split_policy": {
+            "canonical_labels": ["train", "val", "oos1"],
+            "legacy_labels_retained": ["train", "validation", "test"],
+            "selection_split": "validation",
+            "test_usage": "read_only",
+        },
         "candidates": promoted.to_dict(orient="records") if isinstance(promoted, pd.DataFrame) and not promoted.empty else [],
     }
     prom_path.write_text(json.dumps(prom_payload, indent=2), encoding="utf-8")
@@ -1748,15 +2547,34 @@ def main() -> int:
             "promotion_min_ev": float(args.promotion_min_ev),
             "promotion_min_stability_score": float(args.promotion_min_stability_score),
             "promotion_min_sample_size": int(args.promotion_min_sample_size),
-            "oos_gate": "validation_and_test_adverse_improvement_required",
+            "min_ess": float(args.min_ess),
+            "ess_max_lag": int(args.ess_max_lag),
+            "parameter_curvature_max_penalty": float(args.parameter_curvature_max_penalty),
+            "delay_grid_bars": [int(x) for x in delay_grid_bars],
+            "min_delay_positive_ratio": float(args.min_delay_positive_ratio),
+            "min_delay_robustness_score": float(args.min_delay_robustness_score),
+            "oos_gate": "validation_only_adverse_improvement_required",
             "multiplicity_method": "benjamini_hochberg",
             "multiplicity_alpha": 0.05,
+            "multiplicity_input_split": "validation",
+            "multiplicity_k": float(args.multiplicity_k),
+            "stressed_cost_multiplier": float(args.stressed_cost_multiplier),
+            "cost_ratio_cap": 0.60,
             "controls_required": bool(int(args.require_controls)),
             "min_control_coverage": float(args.min_control_coverage),
         },
+        "execution_cost_config_digest": resolved_costs.config_digest,
+        "execution_cost_config": execution_cost_config,
         "hypotheses_tested": int(len(candidates)),
         "adjusted_pass_count": int(candidates["gate_multiplicity"].sum()) if not candidates.empty and "gate_multiplicity" in candidates.columns else 0,
-        "oos_pass_count": int(candidates["gate_oos_validation_test"].sum()) if not candidates.empty and "gate_oos_validation_test" in candidates.columns else 0,
+        "adjusted_strict_pass_count": int(candidates["gate_multiplicity_strict"].sum()) if not candidates.empty and "gate_multiplicity_strict" in candidates.columns else 0,
+        "ess_pass_count": int(candidates["gate_ess"].sum()) if not candidates.empty and "gate_ess" in candidates.columns else 0,
+        "parameter_curvature_pass_count": int(candidates["gate_parameter_curvature"].sum()) if not candidates.empty and "gate_parameter_curvature" in candidates.columns else 0,
+        "delay_robustness_pass_count": int(candidates["gate_delay_robustness"].sum()) if not candidates.empty and "gate_delay_robustness" in candidates.columns else 0,
+        "oos_pass_count": int(candidates["gate_oos_validation"].sum()) if not candidates.empty and "gate_oos_validation" in candidates.columns else 0,
+        "after_cost_positive_count": int(candidates["gate_after_cost_positive"].sum()) if not candidates.empty and "gate_after_cost_positive" in candidates.columns else 0,
+        "after_cost_stressed_positive_count": int(candidates["gate_after_cost_stressed_positive"].sum()) if not candidates.empty and "gate_after_cost_stressed_positive" in candidates.columns else 0,
+        "cost_ratio_pass_count": int(candidates["gate_cost_ratio"].sum()) if not candidates.empty and "gate_cost_ratio" in candidates.columns else 0,
         "symbol_evaluations": int(len(symbol_eval)),
         "deployable_symbol_rows": int(symbol_eval["deployable"].astype(bool).sum()) if not symbol_eval.empty else 0,
         "rejected_symbol_rows": int((~symbol_eval["deployable"].astype(bool)).sum()) if not symbol_eval.empty else 0,
@@ -1768,8 +2586,28 @@ def main() -> int:
         "controls_coverage_ratio": float(control_coverage_ratio),
         "controls_events_total": int(control_event_total),
         "controls_events_matched": int(control_event_matched),
+        "selection_split_policy": {
+            "canonical_labels": ["train", "val", "oos1"],
+            "legacy_labels_retained": ["train", "validation", "test"],
+            "selection_split": "validation",
+            "test_usage": "read_only",
+        },
     }
     manifest_path.write_text(json.dumps(manifest_payload, indent=2), encoding="utf-8")
+    append_selection_log(
+        data_root=DATA_ROOT,
+        run_id=args.run_id,
+        stage="phase2_conditional_hypotheses",
+        details={
+            "event_type": args.event_type,
+            "selection_split": "validation",
+            "test_usage": "read_only",
+            "multiplicity_input_split": "validation",
+            "decision": summary_decision,
+            "promoted_count": int(len(promoted)) if isinstance(promoted, pd.DataFrame) else 0,
+            "execution_cost_config_digest": resolved_costs.config_digest,
+        },
+    )
 
     fail_rows = candidates[~candidates["gate_all"]].copy() if not candidates.empty and "gate_all" in candidates.columns else pd.DataFrame()
 
@@ -1831,6 +2669,7 @@ def main() -> int:
     summary_path.write_text("\n".join(lines), encoding="utf-8")
 
     logging.info("Wrote %s", cand_path)
+    logging.info("Wrote %s", costed_path)
     logging.info("Wrote %s", symbol_eval_path)
     logging.info("Wrote %s", prom_path)
     logging.info("Wrote %s", manifest_path)

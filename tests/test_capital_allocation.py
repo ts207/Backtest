@@ -144,7 +144,7 @@ def test_make_report_fails_without_trade_evidence(tmp_path: Path, monkeypatch) -
     (trades_dir / "metrics.json").write_text(
         json.dumps(
             {
-                "total_trades": 0,
+                "total_trades": 1,
                 "avg_r": 0.0,
                 "win_rate": 0.0,
                 "ending_equity": 100000.0,
@@ -195,3 +195,131 @@ def test_make_report_backtest_fallback_override(tmp_path: Path, monkeypatch) -> 
         ],
     )
     assert make_report.main() == 0
+
+
+def test_report_fails_on_metrics_trade_mismatch(tmp_path: Path, monkeypatch) -> None:
+    run_id = "report_trade_mismatch"
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(make_report, "DATA_ROOT", tmp_path)
+
+    trades_dir = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id
+    trades_dir.mkdir(parents=True, exist_ok=True)
+    (trades_dir / "metrics.json").write_text(
+        json.dumps(
+            {
+                "total_trades": 3,
+                "avg_r": 0.0,
+                "win_rate": 0.0,
+                "ending_equity": 100000.0,
+                "sharpe_annualized": 0.0,
+                "cost_decomposition": {"net_alpha": 0.0},
+                "metadata": {"strategy_ids": ["vol_compression_v1"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    pd.DataFrame(
+        [
+            {"symbol": "BTCUSDT", "r_multiple": 0.1},
+            {"symbol": "ETHUSDT", "r_multiple": -0.1},
+        ]
+    ).to_csv(trades_dir / "trades_001.csv", index=False)
+    pd.DataFrame([{"equity": 100000.0}, {"equity": 100100.0}]).to_csv(trades_dir / "equity_curve.csv", index=False)
+
+    monkeypatch.setattr(sys, "argv", ["make_report.py", "--run_id", run_id])
+    assert make_report.main() == 1
+
+
+def test_report_engine_fallback_filters_to_strategy_ids(tmp_path: Path, monkeypatch) -> None:
+    run_id = "report_engine_fallback_filter"
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(make_report, "DATA_ROOT", tmp_path)
+
+    trades_dir = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id
+    trades_dir.mkdir(parents=True, exist_ok=True)
+    (trades_dir / "metrics.json").write_text(
+        json.dumps(
+            {
+                "total_trades": 1,
+                "avg_r": 0.0,
+                "win_rate": 0.0,
+                "ending_equity": 100000.0,
+                "sharpe_annualized": 0.0,
+                "cost_decomposition": {"net_alpha": 0.0},
+                "metadata": {"strategy_ids": ["vol_compression_v1"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    pd.DataFrame([{"equity": 100000.0}, {"equity": 100050.0}]).to_csv(trades_dir / "equity_curve.csv", index=False)
+
+    engine_dir = tmp_path / "runs" / run_id / "engine"
+    engine_dir.mkdir(parents=True, exist_ok=True)
+    frame = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2024-01-01", periods=4, freq="15min", tz="UTC"),
+            "symbol": ["BTCUSDT"] * 4,
+            "pos": [0, 1, 1, 0],
+        }
+    )
+    frame.to_csv(engine_dir / "strategy_returns_vol_compression_v1.csv", index=False)
+    frame.to_csv(engine_dir / "strategy_returns_stale_strategy_v1.csv", index=False)
+
+    monkeypatch.setattr(sys, "argv", ["make_report.py", "--run_id", run_id])
+    assert make_report.main() == 0
+
+    summary = json.loads(
+        (tmp_path / "reports" / "vol_compression_expansion_v1" / run_id / "summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["trade_evidence_source"] == "engine_fallback"
+    assert summary["strategy_files_considered"] == ["strategy_returns_vol_compression_v1.csv"]
+    assert summary["unexpected_strategy_files_detected"] is True
+    assert summary["integrity_checks"]["unexpected_strategy_files_detected"] is True
+
+
+def test_report_uses_trades_csv_when_present(tmp_path: Path, monkeypatch) -> None:
+    run_id = "report_prefers_trades_csv"
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(make_report, "DATA_ROOT", tmp_path)
+
+    trades_dir = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id
+    trades_dir.mkdir(parents=True, exist_ok=True)
+    (trades_dir / "metrics.json").write_text(
+        json.dumps(
+            {
+                "total_trades": 2,
+                "avg_r": 0.0,
+                "win_rate": 0.0,
+                "ending_equity": 100000.0,
+                "sharpe_annualized": 0.0,
+                "cost_decomposition": {"net_alpha": 0.0},
+                "metadata": {"strategy_ids": ["vol_compression_v1"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    pd.DataFrame(
+        [
+            {"symbol": "BTCUSDT", "r_multiple": 0.2},
+            {"symbol": "ETHUSDT", "r_multiple": -0.2},
+        ]
+    ).to_csv(trades_dir / "trades_001.csv", index=False)
+    pd.DataFrame([{"equity": 100000.0}, {"equity": 100010.0}]).to_csv(trades_dir / "equity_curve.csv", index=False)
+
+    engine_dir = tmp_path / "runs" / run_id / "engine"
+    engine_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2024-01-01", periods=4, freq="15min", tz="UTC"),
+            "symbol": ["BTCUSDT"] * 4,
+            "pos": [0, 1, 1, 0],
+        }
+    ).to_csv(engine_dir / "strategy_returns_stale_strategy_v1.csv", index=False)
+
+    monkeypatch.setattr(sys, "argv", ["make_report.py", "--run_id", run_id])
+    assert make_report.main() == 0
+    summary = json.loads(
+        (tmp_path / "reports" / "vol_compression_expansion_v1" / run_id / "summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["trade_evidence_source"] == "trades_csv"
+    assert summary["integrity_checks"]["trade_files_found"] is True

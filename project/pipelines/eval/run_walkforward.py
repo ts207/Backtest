@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -31,6 +32,7 @@ REQUIRED_STRATEGY_RETURN_COLUMNS = [
     "funding_pnl",
     "borrow_cost",
 ]
+REGIME_LABELS = ("low", "mid", "high")
 
 
 def _to_float_strict(value: object, *, label: str) -> float:
@@ -85,6 +87,79 @@ def _strategy_id_from_path(path: Path) -> str:
         return ""
     strategy_id = name[len(prefix) : -len(suffix)].strip()
     return strategy_id
+
+
+def _sanitize_id(value: str) -> str:
+    return re.sub(r"[^a-z0-9_]+", "_", str(value).strip().lower()).strip("_")
+
+
+def _load_blueprints_raw(path: Path) -> List[Dict[str, object]]:
+    if not path.exists():
+        raise ValueError(f"Blueprint file not found: {path}")
+    text = path.read_text(encoding="utf-8")
+    rows: List[Dict[str, object]] = []
+    if path.suffix.lower() == ".json":
+        payload = json.loads(text)
+        if not isinstance(payload, list):
+            raise ValueError(f"Blueprint JSON must contain a list: {path}")
+        for idx, row in enumerate(payload, start=1):
+            if not isinstance(row, dict):
+                raise ValueError(f"Invalid blueprint object at index {idx} in {path}")
+            rows.append(dict(row))
+    else:
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                raise ValueError(f"Invalid blueprint object at line {line_no} in {path}")
+            rows.append(dict(row))
+    if not rows:
+        raise ValueError(f"No blueprint rows found in {path}")
+    return rows
+
+
+def _expected_blueprint_strategy_ids(
+    *,
+    blueprints_path: Path,
+    event_type: str,
+    top_k: int,
+    cli_symbols: List[str],
+) -> List[str]:
+    raw_rows = _load_blueprints_raw(blueprints_path)
+    cli_set = {str(symbol).strip().upper() for symbol in cli_symbols if str(symbol).strip()}
+    out: List[str] = []
+    seen = set()
+    for row in raw_rows:
+        row_event = str(row.get("event_type", "")).strip()
+        if str(event_type).strip() != "all" and row_event != str(event_type).strip():
+            continue
+        scope = row.get("symbol_scope", {})
+        scope_symbols: List[str] = []
+        if isinstance(scope, dict):
+            raw_scope_symbols = scope.get("symbols", [])
+            if isinstance(raw_scope_symbols, list):
+                scope_symbols = [str(s).strip().upper() for s in raw_scope_symbols if str(s).strip()]
+        if cli_set:
+            scope_symbols = [s for s in scope_symbols if s in cli_set]
+        if not scope_symbols:
+            continue
+        bp_id = str(row.get("id", "")).strip()
+        if not bp_id:
+            raise ValueError(f"Blueprint row missing id in {blueprints_path}")
+        strategy_id = f"dsl_interpreter_v1__{_sanitize_id(bp_id)}"
+        if strategy_id in seen:
+            continue
+        out.append(strategy_id)
+        seen.add(strategy_id)
+        if len(out) >= max(1, int(top_k)):
+            break
+    if not out:
+        raise ValueError(
+            "No blueprint strategies selected for walkforward. "
+            f"path={blueprints_path}, event_type={event_type}, top_k={int(top_k)}"
+        )
+    return out
 
 
 def _annualized_sharpe(pnl_series: pd.Series) -> float:
@@ -191,12 +266,147 @@ def _strategy_metrics_from_frame(frame: pd.DataFrame) -> Dict[str, object]:
     }
 
 
+def _regime_metrics_from_frame(frame: pd.DataFrame, *, regime_max_share: float) -> Dict[str, object]:
+    if frame.empty:
+        return {
+            "regime_pnl_share": {label: 0.0 for label in REGIME_LABELS},
+            "max_regime_share": 1.0,
+            "regime_consistent": False,
+            "regime_max_share": float(regime_max_share),
+        }
+
+    out = frame.copy()
+    out = out.sort_values("timestamp").reset_index(drop=True)
+    pnl = pd.to_numeric(out.get("pnl"), errors="coerce").fillna(0.0).astype(float)
+    gross = pd.to_numeric(out.get("gross_pnl"), errors="coerce").fillna(pnl).astype(float)
+    proxy = gross.abs().rolling(window=96, min_periods=8).mean()
+    if proxy.notna().sum() < 3:
+        proxy = pnl.abs()
+    proxy = proxy.ffill().fillna(0.0)
+    ranked = proxy.rank(method="first")
+    if int(ranked.notna().sum()) < 3:
+        regime = pd.Series(["mid"] * len(out), index=out.index, dtype="object")
+    else:
+        regime = pd.qcut(ranked, q=3, labels=list(REGIME_LABELS))
+
+    reg = pd.DataFrame(
+        {
+            "regime": regime.astype(str),
+            "pnl_abs": pnl.abs().astype(float),
+        }
+    )
+    by_regime = reg.groupby("regime", sort=True)["pnl_abs"].sum()
+    total = float(by_regime.sum())
+    if total <= 0.0:
+        shares = {label: 0.0 for label in REGIME_LABELS}
+        max_share = 1.0
+    else:
+        shares = {label: float(by_regime.get(label, 0.0) / total) for label in REGIME_LABELS}
+        max_share = float(max(shares.values()))
+    return {
+        "regime_pnl_share": shares,
+        "max_regime_share": max_share,
+        "regime_consistent": bool(max_share <= float(regime_max_share)),
+        "regime_max_share": float(regime_max_share),
+    }
+
+
+def _loss_cluster_lengths(pnl_ts: pd.Series) -> List[int]:
+    values = pd.to_numeric(pnl_ts, errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    runs: List[int] = []
+    run_len = 0
+    for value in values:
+        if value < 0.0:
+            run_len += 1
+        elif run_len > 0:
+            runs.append(run_len)
+            run_len = 0
+    if run_len > 0:
+        runs.append(run_len)
+    return runs
+
+
+def _drawdown_cluster_metrics_from_frame(
+    frame: pd.DataFrame,
+    *,
+    drawdown_cluster_top_frac: float,
+    drawdown_tail_q: float,
+) -> Dict[str, object]:
+    if frame.empty:
+        return {
+            "max_loss_cluster_len": 0,
+            "p95_loss_cluster_len": 0.0,
+            "loss_cluster_count": 0,
+            "cluster_loss_concentration": 0.0,
+            "tail_conditional_drawdown_95": 0.0,
+        }
+
+    out = frame.copy()
+    out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True, errors="coerce")
+    out = out.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+    if out.empty:
+        return {
+            "max_loss_cluster_len": 0,
+            "p95_loss_cluster_len": 0.0,
+            "loss_cluster_count": 0,
+            "cluster_loss_concentration": 0.0,
+            "tail_conditional_drawdown_95": 0.0,
+        }
+
+    pnl_ts = pd.to_numeric(out.get("pnl"), errors="coerce").fillna(0.0).groupby(out["timestamp"], sort=True).sum()
+    clusters = _loss_cluster_lengths(pnl_ts)
+    cluster_count = int(len(clusters))
+    max_len = int(max(clusters)) if clusters else 0
+    p95_len = float(np.percentile(clusters, 95)) if clusters else 0.0
+
+    values = pnl_ts.to_numpy(dtype=float)
+    loss_magnitudes: List[float] = []
+    start = None
+    for idx, value in enumerate(values):
+        if value < 0.0 and start is None:
+            start = idx
+        elif value >= 0.0 and start is not None:
+            loss_magnitudes.append(float(np.abs(values[start:idx].sum())))
+            start = None
+    if start is not None:
+        loss_magnitudes.append(float(np.abs(values[start:].sum())))
+
+    if not loss_magnitudes:
+        concentration = 0.0
+    else:
+        sorted_losses = sorted(loss_magnitudes, reverse=True)
+        k = max(1, int(np.ceil(len(sorted_losses) * float(drawdown_cluster_top_frac))))
+        concentration = float(sum(sorted_losses[:k]) / max(sum(sorted_losses), 1e-9))
+
+    equity = INITIAL_EQUITY * (1.0 + pnl_ts.cumsum())
+    peak = equity.cummax().replace(0.0, np.nan)
+    drawdown = ((equity - peak) / peak).replace([np.inf, -np.inf], np.nan).dropna()
+    if drawdown.empty:
+        tail_conditional_drawdown = 0.0
+    else:
+        threshold = float(drawdown.quantile(float(drawdown_tail_q)))
+        tail = drawdown[drawdown <= threshold]
+        tail_conditional_drawdown = float(tail.mean()) if not tail.empty else float(threshold)
+
+    return {
+        "max_loss_cluster_len": max_len,
+        "p95_loss_cluster_len": p95_len,
+        "loss_cluster_count": cluster_count,
+        "cluster_loss_concentration": concentration,
+        "tail_conditional_drawdown_95": tail_conditional_drawdown,
+    }
+
+
 def _load_per_strategy_split_metrics_strict(
     split_run_id: str,
     *,
     split_label: str,
     expected_strategy_ids: List[str] | None = None,
-) -> Dict[str, Dict[str, object]]:
+    allow_unexpected_strategy_files: bool = False,
+    regime_max_share: float = 0.80,
+    drawdown_cluster_top_frac: float = 0.10,
+    drawdown_tail_q: float = 0.05,
+) -> tuple[Dict[str, Dict[str, object]], Dict[str, object]]:
     engine_dir = DATA_ROOT / "runs" / split_run_id / "engine"
     if not engine_dir.exists():
         raise ValueError(f"Missing engine directory for split={split_label} run_id={split_run_id}: {engine_dir}")
@@ -207,10 +417,12 @@ def _load_per_strategy_split_metrics_strict(
         )
 
     out: Dict[str, Dict[str, object]] = {}
+    observed_strategy_ids: set[str] = set()
     for path in strategy_files:
         strategy_id = _strategy_id_from_path(path)
         if not strategy_id:
             raise ValueError(f"Invalid strategy return filename for split={split_label} run_id={split_run_id}: {path.name}")
+        observed_strategy_ids.add(strategy_id)
         try:
             frame = pd.read_csv(path)
         except Exception as exc:
@@ -221,15 +433,42 @@ def _load_per_strategy_split_metrics_strict(
                 f"Strategy return file missing required columns for split={split_label} run_id={split_run_id}: "
                 f"{path.name} missing {missing_cols}"
             )
-        out[strategy_id] = _strategy_metrics_from_frame(frame)
+        strategy_metrics = _strategy_metrics_from_frame(frame)
+        strategy_metrics.update(_regime_metrics_from_frame(frame, regime_max_share=float(regime_max_share)))
+        strategy_metrics.update(
+            _drawdown_cluster_metrics_from_frame(
+                frame,
+                drawdown_cluster_top_frac=float(drawdown_cluster_top_frac),
+                drawdown_tail_q=float(drawdown_tail_q),
+            )
+        )
+        out[strategy_id] = strategy_metrics
+    expected_count = 0
+    unexpected: List[str] = []
     if expected_strategy_ids is not None:
         expected = {str(x).strip() for x in expected_strategy_ids if str(x).strip()}
+        expected_count = int(len(expected))
         missing = sorted(expected - set(out.keys()))
         if missing:
             raise ValueError(
                 f"Missing expected strategy returns for split={split_label} run_id={split_run_id}: {missing}"
             )
-    return out
+        unexpected = sorted(set(out.keys()) - expected)
+        if unexpected and not bool(allow_unexpected_strategy_files):
+            raise ValueError(
+                f"Unexpected strategy returns for split={split_label} run_id={split_run_id}: {unexpected}"
+            )
+        if unexpected and bool(allow_unexpected_strategy_files):
+            out = {sid: metrics for sid, metrics in out.items() if sid in expected}
+    else:
+        expected_count = int(len(out))
+
+    diagnostics = {
+        "expected_strategy_count": int(expected_count),
+        "observed_strategy_count": int(len(observed_strategy_ids)),
+        "unexpected_strategy_ids": unexpected,
+    }
+    return out, diagnostics
 
 
 def _build_backtest_cmd(
@@ -247,6 +486,7 @@ def _build_backtest_cmd(
     blueprints_path: str | None,
     blueprints_top_k: int,
     blueprints_filter_event_type: str,
+    clean_engine_artifacts: int,
     config_paths: List[str],
 ) -> List[str]:
     cmd = [
@@ -262,6 +502,8 @@ def _build_backtest_cmd(
         end,
         "--force",
         str(int(force)),
+        "--clean_engine_artifacts",
+        str(int(clean_engine_artifacts)),
     ]
     if fees_bps is not None:
         cmd.extend(["--fees_bps", str(float(fees_bps))])
@@ -307,6 +549,11 @@ def main() -> int:
     parser.add_argument("--blueprints_path", default=None)
     parser.add_argument("--blueprints_top_k", type=int, default=10)
     parser.add_argument("--blueprints_filter_event_type", default="all")
+    parser.add_argument("--regime_max_share", type=float, default=0.80)
+    parser.add_argument("--drawdown_cluster_top_frac", type=float, default=0.10)
+    parser.add_argument("--drawdown_tail_q", type=float, default=0.05)
+    parser.add_argument("--allow_unexpected_strategy_files", type=int, default=0)
+    parser.add_argument("--clean_engine_artifacts", type=int, default=1)
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--out_dir", default=None)
     args = parser.parse_args()
@@ -318,6 +565,12 @@ def main() -> int:
         return 1
     if not strategy_mode and not blueprint_mode:
         print("run_walkforward: provide either --strategies or --blueprints_path.", file=sys.stderr)
+        return 1
+    if not (0.0 < float(args.drawdown_cluster_top_frac) <= 1.0):
+        print("run_walkforward: --drawdown_cluster_top_frac must be within (0,1].", file=sys.stderr)
+        return 1
+    if not (0.0 < float(args.drawdown_tail_q) < 1.0):
+        print("run_walkforward: --drawdown_tail_q must be within (0,1).", file=sys.stderr)
         return 1
 
     out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "eval" / args.run_id
@@ -334,6 +587,11 @@ def main() -> int:
         "validation_frac": float(args.validation_frac),
         "strategies": str(args.strategies or ""),
         "blueprints_path": str(args.blueprints_path or ""),
+        "regime_max_share": float(args.regime_max_share),
+        "drawdown_cluster_top_frac": float(args.drawdown_cluster_top_frac),
+        "drawdown_tail_q": float(args.drawdown_tail_q),
+        "allow_unexpected_strategy_files": int(args.allow_unexpected_strategy_files),
+        "clean_engine_artifacts": int(args.clean_engine_artifacts),
         "config": [str(path) for path in args.config],
     }
     inputs: List[Dict[str, object]] = []
@@ -361,7 +619,12 @@ def main() -> int:
         if strategy_mode:
             expected_strategy_ids = [s.strip() for s in str(args.strategies).split(",") if s.strip()]
         else:
-            expected_strategy_ids = None
+            expected_strategy_ids = _expected_blueprint_strategy_ids(
+                blueprints_path=Path(str(args.blueprints_path)),
+                event_type=str(args.blueprints_filter_event_type),
+                top_k=int(args.blueprints_top_k),
+                cli_symbols=[s.strip().upper() for s in str(args.symbols).split(",") if s.strip()],
+            )
 
         split_rows: List[Dict[str, object]] = []
         for split in windows:
@@ -380,6 +643,7 @@ def main() -> int:
                 blueprints_path=args.blueprints_path,
                 blueprints_top_k=int(args.blueprints_top_k),
                 blueprints_filter_event_type=str(args.blueprints_filter_event_type),
+                clean_engine_artifacts=int(args.clean_engine_artifacts),
                 config_paths=[str(path) for path in args.config],
             )
             rc = _run_split_backtest(cmd)
@@ -388,10 +652,14 @@ def main() -> int:
 
             metrics_path = DATA_ROOT / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / split_run_id / "metrics.json"
             metrics = _load_split_metrics_strict(metrics_path, split_label=split.label, split_run_id=split_run_id)
-            per_strategy_metrics = _load_per_strategy_split_metrics_strict(
+            per_strategy_metrics, strategy_set_diag = _load_per_strategy_split_metrics_strict(
                 split_run_id=split_run_id,
                 split_label=split.label,
                 expected_strategy_ids=expected_strategy_ids,
+                allow_unexpected_strategy_files=bool(int(args.allow_unexpected_strategy_files)),
+                regime_max_share=float(args.regime_max_share),
+                drawdown_cluster_top_frac=float(args.drawdown_cluster_top_frac),
+                drawdown_tail_q=float(args.drawdown_tail_q),
             )
             stressed_net_pnl = _to_float_strict(
                 metrics.get("cost_decomposition", {}).get("net_alpha"),
@@ -406,6 +674,7 @@ def main() -> int:
                     "metrics_path": str(metrics_path),
                     "metrics": metrics,
                     "per_strategy_metrics": per_strategy_metrics,
+                    "strategy_set_diagnostics": strategy_set_diag,
                     "stressed_net_pnl": stressed_net_pnl,
                 }
             )
@@ -434,22 +703,53 @@ def main() -> int:
             for row in split_rows
         }
         per_strategy_split_metrics: Dict[str, Dict[str, Dict[str, object]]] = {}
+        per_strategy_regime_metrics: Dict[str, Dict[str, Dict[str, object]]] = {}
+        per_strategy_drawdown_cluster_metrics: Dict[str, Dict[str, Dict[str, object]]] = {}
+        observed_strategy_ids: set[str] = set()
+        unexpected_strategy_ids: set[str] = set()
         for row in split_rows:
             split_label = str(row["label"])
             split_run_id = str(row["run_id"])
             split_start = str(row["start"])
             split_end = str(row["end"])
+            strategy_set_diagnostics = row.get("strategy_set_diagnostics", {})
             strategy_payload = row.get("per_strategy_metrics", {})
             if not isinstance(strategy_payload, dict):
                 continue
             for strategy_id, strategy_metrics in strategy_payload.items():
                 if not isinstance(strategy_metrics, dict):
                     continue
+                observed_strategy_ids.add(str(strategy_id))
                 metric_row = dict(strategy_metrics)
                 metric_row["run_id"] = split_run_id
                 metric_row["start"] = split_start
                 metric_row["end"] = split_end
                 per_strategy_split_metrics.setdefault(str(strategy_id), {})[split_label] = metric_row
+                per_strategy_regime_metrics.setdefault(str(strategy_id), {})[split_label] = {
+                    "run_id": split_run_id,
+                    "start": split_start,
+                    "end": split_end,
+                    "regime_pnl_share": dict(metric_row.get("regime_pnl_share", {})),
+                    "max_regime_share": float(metric_row.get("max_regime_share", 1.0)),
+                    "regime_consistent": bool(metric_row.get("regime_consistent", False)),
+                    "regime_max_share": float(metric_row.get("regime_max_share", float(args.regime_max_share))),
+                }
+                per_strategy_drawdown_cluster_metrics.setdefault(str(strategy_id), {})[split_label] = {
+                    "run_id": split_run_id,
+                    "start": split_start,
+                    "end": split_end,
+                    "max_loss_cluster_len": int(metric_row.get("max_loss_cluster_len", 0)),
+                    "p95_loss_cluster_len": float(metric_row.get("p95_loss_cluster_len", 0.0)),
+                    "loss_cluster_count": int(metric_row.get("loss_cluster_count", 0)),
+                    "cluster_loss_concentration": float(metric_row.get("cluster_loss_concentration", 0.0)),
+                    "tail_conditional_drawdown_95": float(metric_row.get("tail_conditional_drawdown_95", 0.0)),
+                }
+            if isinstance(strategy_set_diagnostics, dict):
+                unexpected_strategy_ids.update(
+                    str(x).strip()
+                    for x in strategy_set_diagnostics.get("unexpected_strategy_ids", [])
+                    if str(x).strip()
+                )
 
         per_strategy_split_metrics = {
             strategy_id: {
@@ -457,6 +757,20 @@ def main() -> int:
                 for split_label in sorted(split_metrics.keys())
             }
             for strategy_id, split_metrics in sorted(per_strategy_split_metrics.items())
+        }
+        per_strategy_regime_metrics = {
+            strategy_id: {
+                split_label: split_metrics[split_label]
+                for split_label in sorted(split_metrics.keys())
+            }
+            for strategy_id, split_metrics in sorted(per_strategy_regime_metrics.items())
+        }
+        per_strategy_drawdown_cluster_metrics = {
+            strategy_id: {
+                split_label: split_metrics[split_label]
+                for split_label in sorted(split_metrics.keys())
+            }
+            for strategy_id, split_metrics in sorted(per_strategy_drawdown_cluster_metrics.items())
         }
         test_row = next((row for row in split_rows if row["label"] == "test"), None)
         if test_row is None:
@@ -468,14 +782,20 @@ def main() -> int:
             "artifacts_validated": True,
             "required_test_present": True,
             "config_passthrough_count": int(len(args.config)),
+            "allow_unexpected_strategy_files": bool(int(args.allow_unexpected_strategy_files)),
         }
         summary = {
             "run_id": args.run_id,
             "splits": [w.to_dict() for w in windows],
             "per_split_metrics": per_split_metrics,
             "per_strategy_split_metrics": per_strategy_split_metrics,
+            "per_strategy_regime_metrics": per_strategy_regime_metrics,
+            "per_strategy_drawdown_cluster_metrics": per_strategy_drawdown_cluster_metrics,
             "final_test_metrics": final_test_metrics,
             "tested_splits": len(split_rows),
+            "expected_strategy_count": int(len(expected_strategy_ids or [])),
+            "observed_strategy_count": int(len(observed_strategy_ids)),
+            "unexpected_strategy_ids": sorted(unexpected_strategy_ids),
             "integrity_checks": integrity_checks,
         }
         summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")

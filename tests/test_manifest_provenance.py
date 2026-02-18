@@ -120,3 +120,39 @@ def test_validate_input_provenance_raises_on_missing_block() -> None:
         assert "missing provenance block" in str(exc)
     else:
         raise AssertionError("Expected ValueError for missing provenance")
+
+
+def test_run_all_writes_run_level_manifest_with_provenance(monkeypatch, tmp_path: Path) -> None:
+    sys.path.insert(0, str(ROOT / "project"))
+    from pipelines import run_all
+
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(run_all, "_run_stage", lambda stage, script_path, base_args, run_id: True)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "manifest_run",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-02",
+        ],
+    )
+
+    assert run_all.main() == 0
+    payload = json.loads((tmp_path / "runs" / "manifest_run" / "run_manifest.json").read_text(encoding="utf-8"))
+    for key in [
+        "git_commit",
+        "data_hash",
+        "feature_schema_version",
+        "feature_schema_hash",
+        "config_digest",
+    ]:
+        assert key in payload
+        assert str(payload[key]).strip() != ""
+    assert payload["status"] == "success"

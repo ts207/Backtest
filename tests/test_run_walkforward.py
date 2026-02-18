@@ -97,6 +97,15 @@ def test_run_walkforward_writes_summary_with_per_split_and_test_metrics(monkeypa
     assert "vol_compression_v1" in summary["per_strategy_split_metrics"]
     assert "test" in summary["per_strategy_split_metrics"]["vol_compression_v1"]
     assert "net_pnl" in summary["per_strategy_split_metrics"]["vol_compression_v1"]["test"]
+    assert "per_strategy_regime_metrics" in summary
+    assert "vol_compression_v1" in summary["per_strategy_regime_metrics"]
+    assert "test" in summary["per_strategy_regime_metrics"]["vol_compression_v1"]
+    assert "regime_consistent" in summary["per_strategy_regime_metrics"]["vol_compression_v1"]["test"]
+    assert "per_strategy_drawdown_cluster_metrics" in summary
+    assert "vol_compression_v1" in summary["per_strategy_drawdown_cluster_metrics"]
+    assert "test" in summary["per_strategy_drawdown_cluster_metrics"]["vol_compression_v1"]
+    assert "max_loss_cluster_len" in summary["per_strategy_drawdown_cluster_metrics"]["vol_compression_v1"]["test"]
+    assert "tail_conditional_drawdown_95" in summary["per_strategy_drawdown_cluster_metrics"]["vol_compression_v1"]["test"]
     assert summary["integrity_checks"]["artifacts_validated"] is True
     assert summary["integrity_checks"]["required_test_present"] is True
     assert summary["integrity_checks"]["config_passthrough_count"] == 2
@@ -269,6 +278,107 @@ def test_run_walkforward_fails_when_declared_strategy_file_missing(monkeypatch, 
     assert run_walkforward.main() == 1
 
 
+def test_walkforward_blueprint_mode_enforces_expected_strategy_ids(monkeypatch, tmp_path: Path) -> None:
+    run_id = "wf_blueprint_unexpected"
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(run_walkforward, "DATA_ROOT", tmp_path)
+
+    blueprints_path = tmp_path / "reports" / "strategy_blueprints" / run_id / "blueprints.jsonl"
+    blueprints_path.parent.mkdir(parents=True, exist_ok=True)
+    blueprints_path.write_text(
+        json.dumps(
+            {
+                "id": "bp alpha",
+                "event_type": "vol_shock_relaxation",
+                "symbol_scope": {"symbols": ["BTCUSDT"]},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    expected_strategy_id = "dsl_interpreter_v1__bp_alpha"
+
+    def _fake_split_backtest(cmd: list[str]) -> int:
+        split_run_id = cmd[cmd.index("--run_id") + 1]
+        metrics_dir = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / split_run_id
+        metrics_dir.mkdir(parents=True, exist_ok=True)
+        _write_metrics(metrics_dir, trades=30)
+        engine_dir = tmp_path / "runs" / split_run_id / "engine"
+        engine_dir.mkdir(parents=True, exist_ok=True)
+        _write_strategy_returns(engine_dir, expected_strategy_id)
+        _write_strategy_returns(engine_dir, "stale_strategy_v1")
+        return 0
+
+    monkeypatch.setattr(run_walkforward, "_run_split_backtest", _fake_split_backtest)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_walkforward.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-03-31",
+            "--blueprints_path",
+            str(blueprints_path),
+            "--blueprints_top_k",
+            "1",
+            "--blueprints_filter_event_type",
+            "all",
+        ],
+    )
+    assert run_walkforward.main() == 1
+
+
+def test_walkforward_allows_unexpected_when_override_enabled(monkeypatch, tmp_path: Path) -> None:
+    run_id = "wf_allow_unexpected"
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(run_walkforward, "DATA_ROOT", tmp_path)
+
+    def _fake_split_backtest(cmd: list[str]) -> int:
+        split_run_id = cmd[cmd.index("--run_id") + 1]
+        metrics_dir = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / split_run_id
+        metrics_dir.mkdir(parents=True, exist_ok=True)
+        _write_metrics(metrics_dir, trades=30)
+        engine_dir = tmp_path / "runs" / split_run_id / "engine"
+        engine_dir.mkdir(parents=True, exist_ok=True)
+        _write_strategy_returns(engine_dir, "vol_compression_v1")
+        _write_strategy_returns(engine_dir, "stale_strategy_v1")
+        return 0
+
+    monkeypatch.setattr(run_walkforward, "_run_split_backtest", _fake_split_backtest)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_walkforward.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-03-31",
+            "--strategies",
+            "vol_compression_v1",
+            "--allow_unexpected_strategy_files",
+            "1",
+        ],
+    )
+    assert run_walkforward.main() == 0
+    summary_path = tmp_path / "reports" / "eval" / run_id / "walkforward_summary.json"
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert payload["expected_strategy_count"] == 1
+    assert "stale_strategy_v1" in payload["unexpected_strategy_ids"]
+    assert payload["observed_strategy_count"] == 1
+
+
 def test_run_walkforward_requires_test_split(monkeypatch, tmp_path: Path) -> None:
     run_id = "wf_no_test_split"
     monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
@@ -314,3 +424,35 @@ def test_run_walkforward_requires_test_split(monkeypatch, tmp_path: Path) -> Non
     )
     assert run_walkforward.main() == 1
     assert called["count"] == 0
+
+
+def test_regime_metrics_fail_when_pnl_concentrates_in_single_regime() -> None:
+    frame = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2024-01-01", periods=300, freq="15min", tz="UTC"),
+            "pnl": [0.0] * 200 + [1.0] * 100,
+            "gross_pnl": [0.0] * 200 + [1.0] * 100,
+        }
+    )
+    metrics = run_walkforward._regime_metrics_from_frame(frame, regime_max_share=0.80)
+    assert metrics["max_regime_share"] > 0.80
+    assert metrics["regime_consistent"] is False
+
+
+def test_drawdown_cluster_metrics_present_and_numeric() -> None:
+    frame = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2024-01-01", periods=20, freq="15min", tz="UTC"),
+            "pnl": [0.01, -0.02, -0.01, 0.005, -0.03, -0.01, -0.005, 0.02, 0.01, -0.015] * 2,
+            "gross_pnl": [0.01, -0.02, -0.01, 0.005, -0.03, -0.01, -0.005, 0.02, 0.01, -0.015] * 2,
+        }
+    )
+    metrics = run_walkforward._drawdown_cluster_metrics_from_frame(
+        frame,
+        drawdown_cluster_top_frac=0.10,
+        drawdown_tail_q=0.05,
+    )
+    assert metrics["max_loss_cluster_len"] >= 1
+    assert metrics["loss_cluster_count"] >= 1
+    assert 0.0 <= metrics["cluster_loss_concentration"] <= 1.0
+    assert isinstance(metrics["tail_conditional_drawdown_95"], float)

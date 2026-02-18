@@ -21,6 +21,12 @@ from pipelines.research.analyze_conditional_expectancy import build_walk_forward
 
 REQUIRED_WF_SPLITS = ("train", "validation", "test")
 REQUIRED_WF_STRATEGY_KEYS = ("total_trades", "net_pnl", "stressed_net_pnl")
+REQUIRED_WF_REGIME_KEYS = ("max_regime_share", "regime_consistent")
+REQUIRED_WF_DRAWDOWN_CLUSTER_KEYS = (
+    "max_loss_cluster_len",
+    "cluster_loss_concentration",
+    "tail_conditional_drawdown_95",
+)
 REQUIRED_RETURNS_COLUMNS = (
     "timestamp",
     "symbol",
@@ -236,11 +242,129 @@ def _extract_strategy_wf_metrics(
     return out
 
 
+def _extract_strategy_wf_regime_metrics(
+    wf_per_strategy_regime: Dict[str, object],
+    *,
+    strategy_id: str,
+) -> Dict[str, Dict[str, float | bool]]:
+    strategy_wf = wf_per_strategy_regime.get(strategy_id, {})
+    if not isinstance(strategy_wf, dict):
+        raise ValueError(f"Invalid walkforward strategy regime payload for {strategy_id}")
+
+    out: Dict[str, Dict[str, float | bool]] = {}
+    for split_label in REQUIRED_WF_SPLITS:
+        split_row = strategy_wf.get(split_label, {})
+        if not isinstance(split_row, dict):
+            raise ValueError(f"Missing walkforward regime split '{split_label}' for {strategy_id}")
+        parsed: Dict[str, float | bool] = {}
+        for key in REQUIRED_WF_REGIME_KEYS:
+            if key == "regime_consistent":
+                parsed[key] = _as_bool(split_row.get(key))
+            else:
+                parsed[key] = _to_float_strict(
+                    split_row.get(key),
+                    field_name=f"{strategy_id}.{split_label}.{key}",
+                )
+        out[split_label] = parsed
+    return out
+
+
+def _extract_strategy_wf_drawdown_cluster_metrics(
+    wf_per_strategy_drawdown: Dict[str, object],
+    *,
+    strategy_id: str,
+) -> Dict[str, Dict[str, float]]:
+    strategy_wf = wf_per_strategy_drawdown.get(strategy_id, {})
+    if not isinstance(strategy_wf, dict):
+        raise ValueError(f"Invalid walkforward strategy drawdown payload for {strategy_id}")
+
+    out: Dict[str, Dict[str, float]] = {}
+    for split_label in REQUIRED_WF_SPLITS:
+        split_row = strategy_wf.get(split_label, {})
+        if not isinstance(split_row, dict):
+            raise ValueError(f"Missing walkforward drawdown split '{split_label}' for {strategy_id}")
+        parsed: Dict[str, float] = {}
+        for key in REQUIRED_WF_DRAWDOWN_CLUSTER_KEYS:
+            parsed[key] = _to_float_strict(
+                split_row.get(key),
+                field_name=f"{strategy_id}.{split_label}.{key}",
+            )
+        out[split_label] = parsed
+    return out
+
+
+def _loss_cluster_lengths(pnl_series: pd.Series) -> List[int]:
+    values = pd.to_numeric(pnl_series, errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    runs: List[int] = []
+    run_len = 0
+    for value in values:
+        if value < 0.0:
+            run_len += 1
+        elif run_len > 0:
+            runs.append(run_len)
+            run_len = 0
+    if run_len > 0:
+        runs.append(run_len)
+    return runs
+
+
+def _fallback_drawdown_cluster_metrics(frame: pd.DataFrame, split_label: str) -> Dict[str, float]:
+    sub = frame[frame["split_label"] == split_label].copy()
+    if sub.empty:
+        return {
+            "max_loss_cluster_len": 0.0,
+            "cluster_loss_concentration": 0.0,
+            "tail_conditional_drawdown_95": 0.0,
+        }
+    sub = sub.sort_values("timestamp")
+    pnl_ts = pd.to_numeric(sub.get("pnl"), errors="coerce").fillna(0.0).groupby(sub["timestamp"], sort=True).sum()
+    clusters = _loss_cluster_lengths(pnl_ts)
+    max_len = float(max(clusters)) if clusters else 0.0
+
+    values = pnl_ts.to_numpy(dtype=float)
+    loss_magnitudes: List[float] = []
+    start = None
+    for idx, value in enumerate(values):
+        if value < 0.0 and start is None:
+            start = idx
+        elif value >= 0.0 and start is not None:
+            loss_magnitudes.append(float(np.abs(values[start:idx].sum())))
+            start = None
+    if start is not None:
+        loss_magnitudes.append(float(np.abs(values[start:].sum())))
+    if not loss_magnitudes:
+        concentration = 0.0
+    else:
+        sorted_losses = sorted(loss_magnitudes, reverse=True)
+        k = max(1, int(np.ceil(len(sorted_losses) * 0.10)))
+        concentration = float(sum(sorted_losses[:k]) / max(sum(sorted_losses), 1e-9))
+
+    equity = (1.0 + pnl_ts.cumsum()).astype(float)
+    peak = equity.cummax().replace(0.0, np.nan)
+    drawdown = ((equity - peak) / peak).replace([np.inf, -np.inf], np.nan).dropna()
+    if drawdown.empty:
+        tail_dd = 0.0
+    else:
+        threshold = float(drawdown.quantile(0.05))
+        tail = drawdown[drawdown <= threshold]
+        tail_dd = float(tail.mean()) if not tail.empty else float(threshold)
+    return {
+        "max_loss_cluster_len": max_len,
+        "cluster_loss_concentration": concentration,
+        "tail_conditional_drawdown_95": tail_dd,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Promote strategy blueprints using backtest gating rules")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--min_trades", type=int, default=100)
     parser.add_argument("--min_cross_symbol_pass_rate", type=float, default=0.60)
+    parser.add_argument("--regime_max_share", type=float, default=0.80)
+    parser.add_argument("--max_loss_cluster_len", type=int, default=64)
+    parser.add_argument("--max_cluster_loss_concentration", type=float, default=0.50)
+    parser.add_argument("--min_tail_conditional_drawdown_95", type=float, default=-0.20)
+    # Backward-compatible alias; if provided, overrides regime_max_share.
     parser.add_argument("--max_regime_dominance_share", type=float, default=0.999)
     parser.add_argument("--blueprints_path", default=None)
     parser.add_argument("--out_dir", default=None)
@@ -261,6 +385,10 @@ def main() -> int:
         "run_id": args.run_id,
         "min_trades": int(args.min_trades),
         "min_cross_symbol_pass_rate": float(args.min_cross_symbol_pass_rate),
+        "regime_max_share": float(args.regime_max_share),
+        "max_loss_cluster_len": int(args.max_loss_cluster_len),
+        "max_cluster_loss_concentration": float(args.max_cluster_loss_concentration),
+        "min_tail_conditional_drawdown_95": float(args.min_tail_conditional_drawdown_95),
         "max_regime_dominance_share": float(args.max_regime_dominance_share),
         "blueprints_path": str(blueprints_path),
         "allow_fallback_evidence": int(args.allow_fallback_evidence),
@@ -280,8 +408,26 @@ def main() -> int:
             if isinstance(walkforward_summary.get("per_strategy_split_metrics", {}), dict)
             else {}
         )
+        wf_per_strategy_regime = (
+            walkforward_summary.get("per_strategy_regime_metrics", {})
+            if isinstance(walkforward_summary.get("per_strategy_regime_metrics", {}), dict)
+            else {}
+        )
+        wf_per_strategy_drawdown = (
+            walkforward_summary.get("per_strategy_drawdown_cluster_metrics", {})
+            if isinstance(walkforward_summary.get("per_strategy_drawdown_cluster_metrics", {}), dict)
+            else {}
+        )
         if require_wf and (not wf_per_strategy):
             raise ValueError("walkforward_summary.json missing non-empty per_strategy_split_metrics")
+        if require_wf and (not wf_per_strategy_regime):
+            raise ValueError("walkforward_summary.json missing non-empty per_strategy_regime_metrics")
+        if require_wf and (not wf_per_strategy_drawdown):
+            raise ValueError("walkforward_summary.json missing non-empty per_strategy_drawdown_cluster_metrics")
+
+        regime_threshold = float(args.regime_max_share)
+        if "--max_regime_dominance_share" in sys.argv:
+            regime_threshold = float(args.max_regime_dominance_share)
 
         engine_dir = DATA_ROOT / "runs" / args.run_id / "engine"
         tested_rows: List[Dict[str, object]] = []
@@ -302,6 +448,10 @@ def main() -> int:
             stressed_split_pnl = _stressed_pnl(frame)
             symbol_pass_rate = _symbol_pass_rate(frame)
             regime_dominance_share = _regime_dominance_share(frame)
+            regime_source = "fallback"
+            regime_wf: Dict[str, Dict[str, float | bool]] | None = None
+            drawdown_source = "fallback"
+            drawdown_wf: Dict[str, Dict[str, float]] | None = None
             strategy_wf = wf_per_strategy.get(strategy_id, {}) if isinstance(wf_per_strategy.get(strategy_id, {}), dict) else {}
             if strategy_wf:
                 evidence_mode = "walkforward_strategy"
@@ -309,6 +459,22 @@ def main() -> int:
                     wf_per_strategy,
                     strategy_id=strategy_id,
                 )
+                if isinstance(wf_per_strategy_regime.get(strategy_id), dict):
+                    regime_wf = _extract_strategy_wf_regime_metrics(
+                        wf_per_strategy_regime,
+                        strategy_id=strategy_id,
+                    )
+                    regime_source = "walkforward_strategy"
+                elif not fallback_enabled:
+                    raise ValueError(f"Missing walkforward regime evidence for {strategy_id}")
+                if isinstance(wf_per_strategy_drawdown.get(strategy_id), dict):
+                    drawdown_wf = _extract_strategy_wf_drawdown_cluster_metrics(
+                        wf_per_strategy_drawdown,
+                        strategy_id=strategy_id,
+                    )
+                    drawdown_source = "walkforward_strategy"
+                elif not fallback_enabled:
+                    raise ValueError(f"Missing walkforward drawdown-cluster evidence for {strategy_id}")
                 trades = int(sum(int(parsed_wf[s]["total_trades"]) for s in REQUIRED_WF_SPLITS))
                 for split_label in REQUIRED_WF_SPLITS:
                     split_pnl[split_label] = float(parsed_wf[split_label]["net_pnl"])
@@ -316,6 +482,12 @@ def main() -> int:
             elif not fallback_enabled:
                 raise ValueError(f"Missing walkforward strategy evidence for {strategy_id}")
             evidence_mode_counts[evidence_mode] += 1
+
+            if drawdown_wf is None:
+                drawdown_wf = {
+                    split_label: _fallback_drawdown_cluster_metrics(frame, split_label)
+                    for split_label in REQUIRED_WF_SPLITS
+                }
 
             eval_spec = bp.get("evaluation", {}) if isinstance(bp.get("evaluation"), dict) else {}
             robust_flags = eval_spec.get("robustness_flags", {}) if isinstance(eval_spec.get("robustness_flags"), dict) else {}
@@ -326,13 +498,41 @@ def main() -> int:
                 "parameter_neighborhood_stability": bool(_parameter_neighborhood_stability(bp, split_pnl)),
                 "cross_symbol_pass_rate": bool(symbol_pass_rate >= float(args.min_cross_symbol_pass_rate)),
                 "regime_stability": bool(
-                    (regime_dominance_share <= float(args.max_regime_dominance_share))
-                    if regime_required
-                    else True
+                    (
+                        bool(regime_wf["train"]["regime_consistent"])
+                        and bool(regime_wf["validation"]["regime_consistent"])
+                    )
+                    if (regime_required and regime_wf is not None)
+                    else (
+                        (regime_dominance_share <= float(regime_threshold))
+                        if regime_required
+                        else True
+                    )
                 ),
                 "cost_stress_train_validation_positive": bool(
                     (_to_float(stressed_split_pnl.get("train"), 0.0) > 0.0)
                     and (_to_float(stressed_split_pnl.get("validation"), 0.0) > 0.0)
+                ),
+                "drawdown_cluster_len": bool(
+                    max(
+                        _to_float(drawdown_wf["train"]["max_loss_cluster_len"]),
+                        _to_float(drawdown_wf["validation"]["max_loss_cluster_len"]),
+                    )
+                    <= float(args.max_loss_cluster_len)
+                ),
+                "drawdown_cluster_concentration": bool(
+                    max(
+                        _to_float(drawdown_wf["train"]["cluster_loss_concentration"]),
+                        _to_float(drawdown_wf["validation"]["cluster_loss_concentration"]),
+                    )
+                    <= float(args.max_cluster_loss_concentration)
+                ),
+                "tail_conditional_drawdown": bool(
+                    min(
+                        _to_float(drawdown_wf["train"]["tail_conditional_drawdown_95"]),
+                        _to_float(drawdown_wf["validation"]["tail_conditional_drawdown_95"]),
+                    )
+                    >= float(args.min_tail_conditional_drawdown_95)
                 ),
             }
             promote = all(gates.values())
@@ -348,6 +548,10 @@ def main() -> int:
                 "stressed_split_pnl": stressed_split_pnl,
                 "symbol_pass_rate": float(symbol_pass_rate),
                 "regime_dominance_share": float(regime_dominance_share),
+                "regime_split_metrics": regime_wf if regime_wf is not None else {},
+                "regime_evidence_source": regime_source,
+                "drawdown_cluster_metrics": drawdown_wf if drawdown_wf is not None else {},
+                "drawdown_evidence_source": drawdown_source,
                 "gates": gates,
                 "fail_reasons": fail_reasons,
                 "evidence_mode": evidence_mode,
@@ -376,7 +580,11 @@ def main() -> int:
             "thresholds": {
                 "min_trades": int(args.min_trades),
                 "min_cross_symbol_pass_rate": float(args.min_cross_symbol_pass_rate),
-                "max_regime_dominance_share": float(args.max_regime_dominance_share),
+                "regime_max_share": float(regime_threshold),
+                "max_regime_dominance_share": float(regime_threshold),
+                "max_loss_cluster_len": int(args.max_loss_cluster_len),
+                "max_cluster_loss_concentration": float(args.max_cluster_loss_concentration),
+                "min_tail_conditional_drawdown_95": float(args.min_tail_conditional_drawdown_95),
                 "cost_stress_rule": "2x trading_cost on train+validation must stay positive",
             },
         }

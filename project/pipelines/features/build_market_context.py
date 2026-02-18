@@ -22,7 +22,14 @@ from pipelines._lib.io_utils import (
     run_scoped_lake_path,
     write_parquet,
 )
-from pipelines._lib.run_manifest import finalize_manifest, schema_hash_from_columns, start_manifest, validate_input_provenance
+from pipelines._lib.run_manifest import (
+    feature_schema_identity,
+    finalize_manifest,
+    schema_hash_from_columns,
+    start_manifest,
+    validate_feature_schema_columns,
+    validate_input_provenance,
+)
 
 
 def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
@@ -150,6 +157,9 @@ def main() -> int:
     stats: Dict[str, object] = {"symbols": {}}
 
     try:
+        feature_schema_version, feature_schema_hash = feature_schema_identity()
+        stats["feature_schema_version"] = feature_schema_version
+        stats["feature_schema_hash"] = feature_schema_hash
         for symbol in symbols:
             feature_candidates = [
                 run_scoped_lake_path(DATA_ROOT, args.run_id, "features", "perp", symbol, args.timeframe, "features_v1"),
@@ -182,6 +192,10 @@ def main() -> int:
                 }
             )
             context = _build_market_context(symbol=symbol, features=features)
+            validate_feature_schema_columns(
+                dataset_key="market_context_v1",
+                columns=context.columns.tolist(),
+            )
 
             out_path = output_root / symbol / f"{args.timeframe}.parquet"
             if out_path.exists() and not int(args.force):
@@ -201,6 +215,8 @@ def main() -> int:
                 "rows": int(len(context)),
                 "vol_regime_counts": context["vol_regime"].value_counts(dropna=False).to_dict(),
                 "funding_regime_counts": context["funding_regime"].value_counts(dropna=False).to_dict(),
+                "feature_schema_version": feature_schema_version,
+                "feature_schema_hash": feature_schema_hash,
                 "features_duplicate_rows_dropped": int(dropped_dupes),
             }
 

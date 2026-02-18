@@ -5,7 +5,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def _utc_now_iso() -> str:
@@ -45,6 +45,49 @@ def validate_input_provenance(inputs: List[Dict[str, Any]]) -> None:
         if missing:
             path = item.get("path", f"input[{idx}]")
             raise ValueError(f"Input {path} missing required provenance keys: {missing}")
+
+
+def feature_schema_registry_path() -> Path:
+    project_root = Path(__file__).resolve().parents[2]
+    return project_root / "schemas" / "feature_schema_v1.json"
+
+
+def load_feature_schema_registry() -> Dict[str, Any]:
+    schema_path = feature_schema_registry_path()
+    if not schema_path.exists():
+        raise ValueError(f"Feature schema registry missing: {schema_path}")
+    try:
+        payload = json.loads(schema_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Feature schema registry is invalid JSON: {schema_path}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"Feature schema registry must be a JSON object: {schema_path}")
+    return payload
+
+
+def feature_schema_identity() -> Tuple[str, str]:
+    schema_path = feature_schema_registry_path()
+    payload = load_feature_schema_registry()
+    version = str(payload.get("version", "feature_schema_v1"))
+    schema_hash = hashlib.sha256(schema_path.read_bytes()).hexdigest()
+    return version, schema_hash
+
+
+def validate_feature_schema_columns(*, dataset_key: str, columns: List[str]) -> Tuple[str, str]:
+    registry = load_feature_schema_registry()
+    datasets = registry.get("datasets", {})
+    if not isinstance(datasets, dict):
+        raise ValueError("Feature schema registry missing `datasets` object")
+    contract = datasets.get(dataset_key, {})
+    if not isinstance(contract, dict):
+        raise ValueError(f"Feature schema registry missing dataset contract: {dataset_key}")
+    required_columns = contract.get("required_columns", [])
+    if not isinstance(required_columns, list):
+        raise ValueError(f"Feature schema required_columns must be a list for dataset: {dataset_key}")
+    missing = [col for col in required_columns if col not in columns]
+    if missing:
+        raise ValueError(f"Feature schema contract violated for {dataset_key}; missing columns: {missing}")
+    return feature_schema_identity()
 
 
 def start_manifest(

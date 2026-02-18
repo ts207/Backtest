@@ -188,7 +188,7 @@ def test_interpreter_rejects_irrecoverable_missing_signal_inputs() -> None:
     features = _features().drop(columns=["funding_rate_scaled"])
     with pytest.raises(
         ValueError,
-        match=r"Blueprint `bp_interp` missing required columns for entry signals -> funding_extreme_event: funding_rate_scaled",
+        match=r"Blueprint `bp_interp` missing required columns for entry signals -> funding_extreme_event: funding_extreme_event",
     ):
         strat.generate_positions(_bars(), features, {"dsl_blueprint": bp, "strategy_symbol": "BTCUSDT"})
 

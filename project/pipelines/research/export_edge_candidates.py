@@ -103,7 +103,18 @@ def _phase2_row_to_candidate(
     opp_delta = _safe_float(row.get("delta_opportunity_mean"), 0.0)
     edge_score = _safe_float(row.get("edge_score"), risk_reduction + max(0.0, opp_delta))
     expected_return_proxy = _safe_float(row.get("expected_return_proxy"), opp_delta)
-    expectancy_per_trade = _safe_float(row.get("expectancy_per_trade"), expected_return_proxy)
+    expectancy_per_trade = _safe_float(
+        row.get(
+            "after_cost_expectancy_per_trade",
+            row.get("expectancy_after_multiplicity", row.get("expectancy_per_trade")),
+        ),
+        expected_return_proxy,
+    )
+    after_cost_expectancy = _safe_float(row.get("after_cost_expectancy_per_trade"), expectancy_per_trade)
+    stressed_after_cost_expectancy = _safe_float(row.get("stressed_after_cost_expectancy_per_trade"), after_cost_expectancy)
+    cost_ratio = _safe_float(row.get("cost_ratio"), 0.0)
+    turnover_proxy_mean = _safe_float(row.get("turnover_proxy_mean"), 0.0)
+    avg_dynamic_cost_bps = _safe_float(row.get("avg_dynamic_cost_bps"), 0.0)
 
     gate_cols = [
         "gate_a_ci_separated",
@@ -141,6 +152,11 @@ def _phase2_row_to_candidate(
         "edge_score": edge_score,
         "expected_return_proxy": expected_return_proxy,
         "expectancy_per_trade": expectancy_per_trade,
+        "after_cost_expectancy_per_trade": after_cost_expectancy,
+        "stressed_after_cost_expectancy_per_trade": stressed_after_cost_expectancy,
+        "cost_ratio": cost_ratio,
+        "turnover_proxy_mean": turnover_proxy_mean,
+        "avg_dynamic_cost_bps": avg_dynamic_cost_bps,
         "variance": _safe_float(row.get("variance"), 0.0),
         "stability_proxy": stability_proxy,
         "robustness_score": robustness_score,
@@ -250,6 +266,7 @@ def _run_research_chain(
             logging.warning("Missing hypothesis generator script (skipping): %s", hypothesis_script)
 
     phase2_script_path = PROJECT_ROOT / "pipelines" / "research" / "phase2_conditional_hypotheses.py"
+    registry_script_path = PROJECT_ROOT / "pipelines" / "research" / "build_event_registry.py"
     for event_type, script, extra_args in PHASE2_EVENT_CHAIN:
         script_path = PROJECT_ROOT / "pipelines" / "research" / script
         if not script_path.exists():
@@ -264,6 +281,26 @@ def _run_research_chain(
 
         if not phase2_script_path.exists():
             logging.warning("Missing phase2 script (skipping): %s", phase2_script_path)
+            continue
+        if registry_script_path.exists():
+            registry_cmd = [
+                sys.executable,
+                str(registry_script_path),
+                "--run_id",
+                run_id,
+                "--symbols",
+                symbols,
+                "--event_type",
+                event_type,
+                "--timeframe",
+                "15m",
+            ]
+            registry_result = subprocess.run(registry_cmd)
+            if registry_result.returncode != 0:
+                logging.warning("Event registry stage failed (non-blocking): %s", event_type)
+                continue
+        else:
+            logging.warning("Missing event-registry script (skipping): %s", registry_script_path)
             continue
 
         phase2_cmd = [

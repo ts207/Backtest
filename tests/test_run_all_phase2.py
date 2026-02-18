@@ -87,9 +87,12 @@ def test_run_all_includes_phase2_chain_when_enabled(monkeypatch) -> None:
 
     stage_names = [x[0] for x in captured]
     assert "analyze_vol_shock_relaxation" in stage_names
+    assert "build_event_registry" in stage_names
     assert "phase2_conditional_hypotheses" in stage_names
     assert stage_names.index("build_features_v1") < stage_names.index("analyze_vol_shock_relaxation")
     assert stage_names.index("analyze_vol_shock_relaxation") < stage_names.index("phase2_conditional_hypotheses")
+    assert stage_names.index("analyze_vol_shock_relaxation") < stage_names.index("build_event_registry")
+    assert stage_names.index("build_event_registry") < stage_names.index("phase2_conditional_hypotheses")
     assert stage_names.index("phase2_conditional_hypotheses") < stage_names.index("generate_recommendations_checklist")
     assert stage_names.index("generate_recommendations_checklist") < stage_names.index("compile_strategy_blueprints")
     assert stage_names.index("compile_strategy_blueprints") < stage_names.index("build_strategy_candidates")
@@ -99,6 +102,13 @@ def test_run_all_includes_phase2_chain_when_enabled(monkeypatch) -> None:
     assert "--max_conditions" in phase2_args
     assert "--max_actions" in phase2_args
     assert "--require_phase1_pass" in phase2_args
+    assert "--min_ess" in phase2_args
+    assert "--ess_max_lag" in phase2_args
+    assert "--multiplicity_k" in phase2_args
+    assert "--parameter_curvature_max_penalty" in phase2_args
+    assert "--delay_grid_bars" in phase2_args
+    assert "--min_delay_positive_ratio" in phase2_args
+    assert "--min_delay_robustness_score" in phase2_args
 
 
 def test_run_all_passes_seed_to_seeded_research_stages(monkeypatch) -> None:
@@ -136,6 +146,52 @@ def test_run_all_passes_seed_to_seeded_research_stages(monkeypatch) -> None:
     phase2_args = next(base_args for stage, _, base_args, _ in captured if stage == "phase2_conditional_hypotheses")
     assert "--seed" in phase1_args and "99" in phase1_args
     assert "--seed" in phase2_args and "99" in phase2_args
+
+
+def test_run_all_passes_cost_args_to_phase2_and_compiler(monkeypatch) -> None:
+    captured: list[tuple[str, list[str]]] = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_cost_passthrough",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_phase2_conditional",
+            "1",
+            "--phase2_event_type",
+            "vol_shock_relaxation",
+            "--fees_bps",
+            "3",
+            "--slippage_bps",
+            "1",
+            "--cost_bps",
+            "4",
+        ],
+    )
+
+    assert run_all.main() == 0
+    phase2_args = next(base_args for stage, base_args in captured if stage == "phase2_conditional_hypotheses")
+    assert "--fees_bps" in phase2_args and "3.0" in phase2_args
+    assert "--slippage_bps" in phase2_args and "1.0" in phase2_args
+    assert "--cost_bps" in phase2_args and "4.0" in phase2_args
+
+    compiler_args = next(base_args for stage, base_args in captured if stage == "compile_strategy_blueprints")
+    assert "--fees_bps" in compiler_args and "3.0" in compiler_args
+    assert "--slippage_bps" in compiler_args and "1.0" in compiler_args
+    assert "--cost_bps" in compiler_args and "4.0" in compiler_args
 
 
 def test_run_all_includes_recommendations_checklist_by_default(monkeypatch) -> None:
@@ -258,6 +314,109 @@ def test_run_all_can_disable_strategy_blueprint_compiler(monkeypatch) -> None:
 
     assert run_all.main() == 0
     assert "compile_strategy_blueprints" not in captured
+    assert "evaluate_naive_entry" not in captured
+
+
+def test_run_all_includes_naive_entry_stage_before_compiler_by_default(monkeypatch) -> None:
+    captured: list[str] = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append(stage)
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_naive_stage_default",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+        ],
+    )
+
+    assert run_all.main() == 0
+    assert "evaluate_naive_entry" in captured
+    assert "compile_strategy_blueprints" in captured
+    assert captured.index("evaluate_naive_entry") < captured.index("compile_strategy_blueprints")
+
+
+def test_run_all_can_disable_naive_entry_stage(monkeypatch) -> None:
+    captured: list[str] = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append(stage)
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_no_naive_stage",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_naive_entry_eval",
+            "0",
+        ],
+    )
+
+    assert run_all.main() == 0
+    assert "evaluate_naive_entry" not in captured
+
+
+def test_run_all_passes_naive_entry_flags_to_naive_and_compiler(monkeypatch) -> None:
+    captured: list[tuple[str, list[str]]] = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_naive_flags",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--naive_min_trades",
+            "150",
+            "--naive_min_expectancy_after_cost",
+            "0.002",
+            "--naive_max_drawdown",
+            "-0.15",
+            "--strategy_blueprint_allow_naive_entry_fail",
+            "1",
+        ],
+    )
+
+    assert run_all.main() == 0
+    naive_args = next(base_args for stage, base_args in captured if stage == "evaluate_naive_entry")
+    assert "--min_trades" in naive_args and "150" in naive_args
+    assert "--min_expectancy_after_cost" in naive_args and "0.002" in naive_args
+    assert "--max_drawdown" in naive_args and "-0.15" in naive_args
+    compiler_args = next(base_args for stage, base_args in captured if stage == "compile_strategy_blueprints")
+    assert "--allow_naive_entry_fail" in compiler_args
+    assert compiler_args[compiler_args.index("--allow_naive_entry_fail") + 1] == "1"
 
 
 def test_run_all_includes_backtest_and_report_when_enabled(monkeypatch) -> None:
@@ -531,6 +690,47 @@ def test_run_all_includes_walkforward_stage_when_enabled(monkeypatch) -> None:
     assert "--validation_frac" in wf_args and "0.2" in wf_args
 
 
+def test_run_all_propagates_strict_artifact_hygiene_flags(monkeypatch) -> None:
+    captured: list[tuple[str, list[str]]] = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_strict_hygiene_flags",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_backtest",
+            "1",
+            "--run_walkforward_eval",
+            "1",
+            "--strategies",
+            "vol_compression_v1",
+        ],
+    )
+
+    assert run_all.main() == 0
+    backtest_args = next(base_args for stage, base_args in captured if stage == "backtest_strategies")
+    assert "--clean_engine_artifacts" in backtest_args
+    assert backtest_args[backtest_args.index("--clean_engine_artifacts") + 1] == "1"
+    walkforward_args = next(base_args for stage, base_args in captured if stage == "run_walkforward")
+    assert "--allow_unexpected_strategy_files" in walkforward_args
+    assert walkforward_args[walkforward_args.index("--allow_unexpected_strategy_files") + 1] == "0"
+    assert "--clean_engine_artifacts" in walkforward_args
+    assert walkforward_args[walkforward_args.index("--clean_engine_artifacts") + 1] == "1"
+
+
 def test_run_all_passes_config_to_walkforward(monkeypatch) -> None:
     captured = []
 
@@ -642,6 +842,64 @@ def test_run_all_passes_promotion_fallback_flag(monkeypatch) -> None:
     promote_args = next(base_args for stage, base_args in captured if stage == "promote_blueprints")
     assert "--allow_fallback_evidence" in promote_args
     assert promote_args[promote_args.index("--allow_fallback_evidence") + 1] == "1"
+
+
+def test_run_all_passes_regime_thresholds_to_walkforward_and_promotion(monkeypatch) -> None:
+    captured: list[tuple[str, list[str]]] = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_regime_threshold_flags",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_backtest",
+            "1",
+            "--run_walkforward_eval",
+            "1",
+            "--run_blueprint_promotion",
+            "1",
+            "--strategies",
+            "vol_compression_v1",
+            "--walkforward_regime_max_share",
+            "0.77",
+            "--walkforward_drawdown_cluster_top_frac",
+            "0.12",
+            "--walkforward_drawdown_tail_q",
+            "0.07",
+            "--promotion_regime_max_share",
+            "0.78",
+            "--promotion_max_loss_cluster_len",
+            "48",
+            "--promotion_max_cluster_loss_concentration",
+            "0.45",
+            "--promotion_min_tail_conditional_drawdown_95",
+            "-0.18",
+        ],
+    )
+
+    assert run_all.main() == 0
+    wf_args = next(base_args for stage, base_args in captured if stage == "run_walkforward")
+    promote_args = next(base_args for stage, base_args in captured if stage == "promote_blueprints")
+    assert "--regime_max_share" in wf_args and "0.77" in wf_args
+    assert "--regime_max_share" in promote_args and "0.78" in promote_args
+    assert "--drawdown_cluster_top_frac" in wf_args and "0.12" in wf_args
+    assert "--drawdown_tail_q" in wf_args and "0.07" in wf_args
+    assert "--max_loss_cluster_len" in promote_args and "48" in promote_args
+    assert "--max_cluster_loss_concentration" in promote_args and "0.45" in promote_args
+    assert "--min_tail_conditional_drawdown_95" in promote_args and "-0.18" in promote_args
 
 
 def test_run_all_passes_report_fallback_flag(monkeypatch) -> None:

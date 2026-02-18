@@ -1,4 +1,5 @@
 import os
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -82,6 +83,10 @@ def test_build_features_includes_oi_liquidation_and_revision_lag(tmp_path: Path)
         assert col in frame.columns
     assert int(frame["revision_lag_bars"].iloc[-1]) == 3
     assert int(frame["revision_lag_minutes"].iloc[-1]) == 45
+    manifest = json.loads((tmp_path / "runs" / run_id / "build_features_v1.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "success"
+    assert "feature_schema_version" in manifest["stats"]
+    assert "feature_schema_hash" in manifest["stats"]
 
 
 def test_build_features_prefers_run_scoped_cleaned_input(tmp_path: Path) -> None:

@@ -17,9 +17,11 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from pipelines._lib.config import load_configs
 from pipelines._lib.io_utils import choose_partition_dir, ensure_dir, list_parquet_files, read_parquet, run_scoped_lake_path, write_parquet
 from pipelines._lib.run_manifest import (
+    feature_schema_identity,
     finalize_manifest,
     schema_hash_from_columns,
     start_manifest,
+    validate_feature_schema_columns,
     validate_input_provenance,
 )
 from pipelines._lib.validation import ensure_utc_timestamp, validate_columns
@@ -256,6 +258,9 @@ def main() -> int:
     stats: Dict[str, object] = {"symbols": {}}
 
     try:
+        feature_schema_version, feature_schema_hash = feature_schema_identity()
+        stats["feature_schema_version"] = feature_schema_version
+        stats["feature_schema_hash"] = feature_schema_hash
         for symbol in symbols:
             cleaned_candidates = [
                 run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", market, symbol, "bars_15m"),
@@ -363,6 +368,10 @@ def main() -> int:
 
             features["year"] = features["timestamp"].dt.year
             features["month"] = features["timestamp"].dt.month
+            validate_feature_schema_columns(
+                dataset_key="features_v1_15m_v1",
+                columns=features.columns.drop(["year", "month"]).tolist(),
+            )
             out_dir = run_scoped_lake_path(DATA_ROOT, run_id, "features", market, symbol, "15m", "features_v1")
             out_dir_compat = DATA_ROOT / "lake" / "features" / market / symbol / "15m" / "features_v1"
 
@@ -391,6 +400,8 @@ def main() -> int:
                 "revision_lag_bars": int(args.revision_lag_bars),
                 "oi_non_null_rows": int(features["oi_notional"].notna().sum()),
                 "liquidation_non_zero_rows": int((features["liquidation_notional"] > 0).sum()),
+                "feature_schema_version": feature_schema_version,
+                "feature_schema_hash": feature_schema_hash,
                 "partitions_written": partitions_written,
                 "partitions_skipped": partitions_skipped,
             }

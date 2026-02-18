@@ -57,24 +57,42 @@ def _to_float_strict(value: object, *, field_name: str) -> float:
     return out
 
 
-def _load_trades(trades_dir: Path) -> pd.DataFrame:
+def _load_trades(trades_dir: Path) -> tuple[pd.DataFrame, List[Path]]:
     trade_files = sorted(trades_dir.glob("trades_*.csv"))
     if not trade_files:
-        return pd.DataFrame()
+        return pd.DataFrame(), []
     frames = [pd.read_csv(path) for path in trade_files]
     missing_cols = [col for col in REQUIRED_TRADE_COLUMNS if any(col not in frame.columns for frame in frames)]
     if missing_cols:
         raise ValueError(f"Trade files missing required columns {missing_cols} under {trades_dir}")
-    return pd.concat(frames, ignore_index=True)
+    return pd.concat(frames, ignore_index=True), trade_files
 
 
-def _load_engine_entries(engine_dir: Path) -> pd.DataFrame:
+def _load_engine_entries(engine_dir: Path, expected_strategy_ids: List[str]) -> tuple[pd.DataFrame, Dict[str, object]]:
+    expected = [str(x).strip() for x in expected_strategy_ids if str(x).strip()]
+    if not expected:
+        raise ValueError("Engine fallback requires non-empty metrics.metadata.strategy_ids")
+    expected_set = set(expected)
     strategy_files = sorted(engine_dir.glob("strategy_returns_*.csv"))
-    if not strategy_files:
-        return pd.DataFrame()
+    strategy_by_id: Dict[str, Path] = {}
+    for path in strategy_files:
+        name = path.name
+        if not name.startswith("strategy_returns_") or not name.endswith(".csv"):
+            continue
+        strategy_id = name[len("strategy_returns_") : -len(".csv")].strip()
+        if strategy_id:
+            strategy_by_id[strategy_id] = path
+
+    missing_expected = sorted(expected_set - set(strategy_by_id.keys()))
+    if missing_expected:
+        raise ValueError(
+            f"Engine fallback missing required strategy return files for ids={missing_expected} under {engine_dir}"
+        )
+    unexpected = sorted(set(strategy_by_id.keys()) - expected_set)
+    considered_paths = [strategy_by_id[strategy_id] for strategy_id in expected if strategy_id in strategy_by_id]
 
     per_symbol: Dict[str, int] = {}
-    for path in strategy_files:
+    for path in considered_paths:
         try:
             df = pd.read_csv(path, usecols=list(REQUIRED_ENGINE_FALLBACK_COLUMNS))
         except ValueError as exc:
@@ -91,9 +109,20 @@ def _load_engine_entries(engine_dir: Path) -> pd.DataFrame:
             per_symbol[symbol] = per_symbol.get(symbol, 0) + entries
 
     if not per_symbol:
-        return pd.DataFrame()
-    return pd.DataFrame(
-        [{"symbol": symbol, "total_trades": count, "avg_r": 0.0} for symbol, count in per_symbol.items()]
+        return pd.DataFrame(), {
+            "strategy_files_considered": [p.name for p in considered_paths],
+            "unexpected_strategy_files_detected": bool(unexpected),
+            "unexpected_strategy_ids": unexpected,
+        }
+    return (
+        pd.DataFrame(
+            [{"symbol": symbol, "total_trades": count, "avg_r": 0.0} for symbol, count in per_symbol.items()]
+        ),
+        {
+            "strategy_files_considered": [p.name for p in considered_paths],
+            "unexpected_strategy_files_detected": bool(unexpected),
+            "unexpected_strategy_ids": unexpected,
+        },
     )
 
 
@@ -246,16 +275,54 @@ def main() -> int:
         if not isinstance(cost_decomposition_raw, dict):
             raise ValueError(f"Missing/invalid metrics.cost_decomposition in {metrics_path}")
         _to_float_strict(cost_decomposition_raw.get("net_alpha"), field_name="metrics.cost_decomposition.net_alpha")
+        metrics_total_trades = int(_to_float_strict(metrics.get("total_trades"), field_name="metrics.total_trades"))
+        metrics_avg_r = _to_float_strict(metrics.get("avg_r"), field_name="metrics.avg_r")
+        metrics_win_rate = _to_float_strict(metrics.get("win_rate"), field_name="metrics.win_rate")
+        ending_equity = _to_float_strict(metrics.get("ending_equity"), field_name="metrics.ending_equity")
+        metrics_sharpe = _to_float_strict(metrics.get("sharpe_annualized"), field_name="metrics.sharpe_annualized")
+        cost_decomposition = cost_decomposition_raw
+        reproducibility_meta = metrics.get("reproducibility", {}) if isinstance(metrics, dict) else {}
         logging.info("Using backtest artifacts from %s", trades_dir)
         fee_sensitivity = _read_json(fee_path) if fee_path.exists() else {}
-        trades = _load_trades(trades_dir)
+        trades, trade_files = _load_trades(trades_dir)
         engine_dir = DATA_ROOT / "runs" / run_id / "engine"
-        fallback_per_symbol = _load_engine_entries(engine_dir) if trades.empty else pd.DataFrame()
-        if trades.empty and fallback_per_symbol.empty:
-            raise ValueError(
-                f"No trade evidence found for run_id={run_id}; expected trades_*.csv under {trades_dir} "
-                f"or strategy_returns_*.csv under {engine_dir}"
+        trade_evidence_source = "trades_csv"
+        fallback_per_symbol = pd.DataFrame()
+        strategy_files_considered: List[str] = []
+        unexpected_strategy_files_detected = False
+        unexpected_strategy_ids: List[str] = []
+        if trade_files:
+            if int(len(trades)) != int(metrics_total_trades):
+                raise ValueError(
+                    "Trade evidence mismatch: trades_*.csv row count must equal metrics.total_trades "
+                    f"(trade_rows={len(trades)}, metrics.total_trades={metrics_total_trades}, trades_dir={trades_dir})"
+                )
+        else:
+            trade_evidence_source = "engine_fallback"
+            metadata = metrics.get("metadata", {}) if isinstance(metrics, dict) else {}
+            if not isinstance(metadata, dict):
+                raise ValueError("metrics.metadata must be an object when using engine fallback trade evidence.")
+            strategy_ids = metadata.get("strategy_ids", [])
+            if not isinstance(strategy_ids, list):
+                raise ValueError("metrics.metadata.strategy_ids must be a list when using engine fallback trade evidence.")
+            fallback_per_symbol, fallback_diag = _load_engine_entries(
+                engine_dir=engine_dir,
+                expected_strategy_ids=[str(x) for x in strategy_ids],
             )
+            strategy_files_considered = [str(x) for x in fallback_diag.get("strategy_files_considered", [])]
+            unexpected_strategy_files_detected = bool(fallback_diag.get("unexpected_strategy_files_detected", False))
+            unexpected_strategy_ids = [str(x) for x in fallback_diag.get("unexpected_strategy_ids", [])]
+            fallback_total_trades = int(fallback_per_symbol["total_trades"].sum()) if not fallback_per_symbol.empty else 0
+            if int(fallback_total_trades) != int(metrics_total_trades):
+                raise ValueError(
+                    "Engine fallback trade mismatch: fallback-derived trades must equal metrics.total_trades "
+                    f"(fallback_total_trades={fallback_total_trades}, metrics.total_trades={metrics_total_trades}, run_id={run_id})"
+                )
+            if fallback_per_symbol.empty and metrics_total_trades > 0:
+                raise ValueError(
+                    "No engine fallback trade entries found while metrics.total_trades > 0 "
+                    f"(run_id={run_id}, engine_dir={engine_dir})"
+                )
         context_by_active, context_by_age = _load_context_segments(engine_dir)
         equity_curve = pd.read_csv(equity_curve_path) if equity_curve_path.exists() else pd.DataFrame()
         if equity_curve.empty:
@@ -297,17 +364,13 @@ def main() -> int:
             allocation_meta = allocation_metadata(allocation_config, allocation_df)
             inputs.append({"path": str(allocation_input_path), "rows": int(len(candidate_df)), "start_ts": None, "end_ts": None})
 
-        metrics_total_trades = int(_to_float_strict(metrics.get("total_trades"), field_name="metrics.total_trades"))
-        metrics_avg_r = _to_float_strict(metrics.get("avg_r"), field_name="metrics.avg_r")
-        metrics_win_rate = _to_float_strict(metrics.get("win_rate"), field_name="metrics.win_rate")
-        ending_equity = _to_float_strict(metrics.get("ending_equity"), field_name="metrics.ending_equity")
-        metrics_sharpe = _to_float_strict(metrics.get("sharpe_annualized"), field_name="metrics.sharpe_annualized")
-        cost_decomposition = cost_decomposition_raw
-        reproducibility_meta = metrics.get("reproducibility", {}) if isinstance(metrics, dict) else {}
-
-        if trades.empty and not fallback_per_symbol.empty:
-            per_symbol_trades = fallback_per_symbol
-            total_trades = int(fallback_per_symbol["total_trades"].sum())
+        if trade_evidence_source == "engine_fallback":
+            if fallback_per_symbol.empty:
+                per_symbol_trades = pd.DataFrame()
+                total_trades = int(metrics_total_trades)
+            else:
+                per_symbol_trades = fallback_per_symbol
+                total_trades = int(metrics_total_trades)
             avg_r_total = metrics_avg_r
         else:
             per_symbol_trades = (
@@ -315,8 +378,8 @@ def main() -> int:
                 if not trades.empty
                 else pd.DataFrame()
             )
-            total_trades = metrics_total_trades if metrics_total_trades else int(len(trades))
-            avg_r_total = metrics_avg_r if metrics_total_trades else (float(trades["r_multiple"].mean()) if not trades.empty else 0.0)
+            total_trades = int(metrics_total_trades)
+            avg_r_total = metrics_avg_r
         max_drawdown = 0.0
         if not equity_curve.empty:
             equity_series = equity_curve["equity"]
@@ -528,6 +591,9 @@ def main() -> int:
             "avg_r": avg_r_total,
             "ending_equity": ending_equity,
             "max_drawdown": max_drawdown,
+            "trade_evidence_source": trade_evidence_source,
+            "strategy_files_considered": strategy_files_considered,
+            "unexpected_strategy_files_detected": bool(unexpected_strategy_files_detected),
             "per_symbol": per_symbol_trades.reset_index().to_dict(orient="records") if not per_symbol_trades.empty else [],
             "fee_sensitivity": fee_table,
             "cost_decomposition": cost_decomposition,
@@ -547,8 +613,12 @@ def main() -> int:
             "integrity_checks": {
                 "artifacts_validated": True,
                 "used_backtest_dir_fallback": bool(used_backtest_fallback),
-                "used_engine_trade_fallback": bool(trades.empty and not fallback_per_symbol.empty),
-                "trade_files_found": bool(not trades.empty),
+                "trade_evidence_source": trade_evidence_source,
+                "used_engine_trade_fallback": bool(trade_evidence_source == "engine_fallback"),
+                "trade_files_found": bool(len(trade_files) > 0),
+                "strategy_files_considered": strategy_files_considered,
+                "unexpected_strategy_files_detected": bool(unexpected_strategy_files_detected),
+                "unexpected_strategy_ids": unexpected_strategy_ids,
                 "equity_curve_validated": True,
             },
         }
@@ -579,9 +649,13 @@ def main() -> int:
             {
                 "artifacts_validated": True,
                 "used_backtest_dir_fallback": bool(used_backtest_fallback),
-                "used_engine_trade_fallback": bool(trades.empty and not fallback_per_symbol.empty),
+                "trade_evidence_source": trade_evidence_source,
+                "used_engine_trade_fallback": bool(trade_evidence_source == "engine_fallback"),
                 "trade_rows": int(len(trades)),
                 "fallback_trade_rows": int(len(fallback_per_symbol)),
+                "strategy_files_considered": strategy_files_considered,
+                "unexpected_strategy_files_detected": bool(unexpected_strategy_files_detected),
+                "unexpected_strategy_ids": unexpected_strategy_ids,
             }
         )
         finalize_manifest(manifest, "success", stats=stats)
