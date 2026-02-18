@@ -12,7 +12,8 @@ High-level chain:
 5. phase-1 event analyzers
 6. canonical event registry build (`build_event_registry.py`)
 7. phase-2 conditional hypotheses
-8. edge/blueprint/strategy handoff artifacts
+8. bridge evaluation (tradability gates on executed after-cost metrics)
+9. edge/blueprint/strategy handoff artifacts
 
 ## Orchestrator
 
@@ -51,6 +52,7 @@ Market-scoped manifest naming:
 - phase-1 family analyzers (`analyze_*`)
 - canonical event registry (`build_event_registry.py`)
 - phase-2 per-family conditional hypotheses (`phase2_conditional_hypotheses.py`)
+- bridge tradability evaluation (`bridge_evaluate_phase2.py`)
 - naive-entry validation (`evaluate_naive_entry.py`)
 - checklist (`generate_recommendations_checklist.py`)
 
@@ -88,6 +90,19 @@ Phase-2 Tier-2 hardening adds:
   `expectancy_left|center|right`, `curvature_penalty`, `gate_parameter_curvature`
 - delay robustness (`--delay_grid_bars`, `--min_delay_positive_ratio`, `--min_delay_robustness_score`) with:
   `delay_expectancy_map`, `delay_positive_ratio`, `delay_robustness_score`, `gate_delay_robustness`
+
+Bridge-first tradability hardening adds:
+- strict candidate type split (`candidate_type`: `standalone` vs `overlay`) and `overlay_base_candidate_id`,
+- bridge outputs:
+  `bridge_train_after_cost_bps`, `bridge_validation_after_cost_bps`,
+  `bridge_validation_stressed_after_cost_bps`, `bridge_validation_trades`,
+  `bridge_effective_cost_bps_per_trade`, `bridge_gross_edge_bps_per_trade`,
+- bridge gates:
+  `gate_bridge_has_trades_validation`, `gate_bridge_after_cost_positive_validation`,
+  `gate_bridge_after_cost_stressed_positive_validation`, `gate_bridge_edge_cost_ratio`,
+  `gate_bridge_turnover_controls`, `gate_bridge_tradable`,
+- executed ranking signal:
+  `selection_score_executed` (used ahead of proxy quality score in downstream selection).
 
 ### C) Strategy preparation
 - blueprint compiler (`compile_strategy_blueprints.py`)

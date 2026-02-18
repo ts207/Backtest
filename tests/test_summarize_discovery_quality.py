@@ -48,6 +48,8 @@ def test_summarize_discovery_quality_writes_expected_schema(tmp_path: Path) -> N
 
     out_path = phase2_root / "discovery_quality_summary.json"
     assert out_path.exists()
+    funnel_path = tmp_path / "reports" / run_id / "funnel_summary.json"
+    assert funnel_path.exists()
 
     payload = json.loads(out_path.read_text(encoding="utf-8"))
     assert payload["run_id"] == run_id
@@ -61,3 +63,9 @@ def test_summarize_discovery_quality_writes_expected_schema(tmp_path: Path) -> N
     assert payload["by_event_family"]["vol_shock_relaxation"]["total_candidates"] == 3
     assert payload["by_event_family"]["liquidity_vacuum"]["total_candidates"] == 2
 
+    funnel = json.loads(funnel_path.read_text(encoding="utf-8"))
+    assert funnel["run_id"] == run_id
+    assert "families" in funnel
+    assert funnel["families"]["vol_shock_relaxation"]["phase2_candidates"] == 3
+    assert funnel["families"]["liquidity_vacuum"]["bridge_pass_val"] == 0
+    assert "top_failure_reasons" in funnel

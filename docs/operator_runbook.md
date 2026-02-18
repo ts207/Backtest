@@ -26,7 +26,11 @@ BACKTEST_DATA_ROOT=/home/tstuv/backtest/Backtest/data \
   --phase2_parameter_curvature_max_penalty 0.50 \
   --phase2_delay_grid_bars 0,4,8,16,30 \
   --phase2_min_delay_positive_ratio 0.60 \
-  --phase2_min_delay_robustness_score 0.60
+  --phase2_min_delay_robustness_score 0.60 \
+  --run_bridge_eval_phase2 1 \
+  --bridge_edge_cost_k 2.0 \
+  --bridge_stressed_cost_multiplier 1.5 \
+  --bridge_min_validation_trades 20
 ```
 
 Use this when you only want discovery/blueprint/builder artifacts.
@@ -42,6 +46,10 @@ BACKTEST_DATA_ROOT=/home/tstuv/backtest/Backtest/data \
   --end 2025-12-31 \
   --run_phase2_conditional 1 \
   --phase2_event_type all \
+  --run_bridge_eval_phase2 1 \
+  --bridge_edge_cost_k 2.0 \
+  --bridge_stressed_cost_multiplier 1.5 \
+  --bridge_min_validation_trades 20 \
   --run_edge_candidate_universe 1 \
   --run_backtest 1 \
   --run_walkforward_eval 1 \
@@ -106,7 +114,10 @@ BACKTEST_DATA_ROOT=/home/tstuv/backtest/Backtest/data \
 1. `data/runs/<run_id>/` has stage JSON manifests.
 2. If no `backtest_strategies.json`, downstream never ran.
 3. If strategy builder shows zero candidates, check edge export stage and checklist.
-4. If promotion is empty, inspect `promotion_report.json` gates and `walkforward_summary.json`.
+4. If bridge artifacts are missing or all candidates are non-tradable, inspect:
+   - `data/reports/bridge_eval/<run_id>/<event_type>/bridge_candidate_metrics.csv`
+   - `gate_bridge_*` columns in `data/reports/phase2/<run_id>/<event_type>/phase2_candidates.csv`
+5. If promotion is empty, inspect `promotion_report.json` gates and `walkforward_summary.json`.
 
 ## 6) Safety
 
@@ -241,8 +252,8 @@ BACKTEST_DATA_ROOT=/home/tstuv/backtest/Backtest/data \
 ./.venv/bin/python project/pipelines/run_all.py \
   --run_id RUN_2022_2023 \
   --symbols BTCUSDT,ETHUSDT \
-  --start 2020-01-01 \
-  --end 2025-12-31 \
+  --start 2021-01-01 \
+  --end 2022-12-31 \
   --run_phase2_conditional 1 \
   --phase2_event_type all \
   --run_backtest 1 \

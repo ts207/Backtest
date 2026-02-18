@@ -90,6 +90,15 @@ def _as_bool(value: object) -> bool:
     return text in {"1", "true", "t", "yes", "y"}
 
 
+def _candidate_type_from_action(action_name: str) -> str:
+    action = str(action_name or "").strip().lower()
+    if action == "entry_gate_skip" or action.startswith("risk_throttle_"):
+        return "overlay"
+    if action == "no_action" or action.startswith("delay_") or action == "reenable_at_half_life":
+        return "standalone"
+    return "standalone"
+
+
 def _phase2_row_to_candidate(
     run_id: str,
     event: str,
@@ -115,6 +124,10 @@ def _phase2_row_to_candidate(
     cost_ratio = _safe_float(row.get("cost_ratio"), 0.0)
     turnover_proxy_mean = _safe_float(row.get("turnover_proxy_mean"), 0.0)
     avg_dynamic_cost_bps = _safe_float(row.get("avg_dynamic_cost_bps"), 0.0)
+    selection_score_executed = _safe_float(
+        row.get("selection_score_executed"),
+        _safe_float(row.get("quality_score"), _safe_float(row.get("profit_density_score"), 0.0)),
+    )
 
     gate_cols = [
         "gate_a_ci_separated",
@@ -149,14 +162,31 @@ def _phase2_row_to_candidate(
         "event": event,
         "candidate_id": str(row.get("candidate_id", f"{event}_{idx}")),
         "status": str(row.get("status", default_status)),
+        "candidate_type": str(row.get("candidate_type", _candidate_type_from_action(str(row.get("action", ""))))),
+        "overlay_base_candidate_id": str(row.get("overlay_base_candidate_id", "")),
         "edge_score": edge_score,
         "expected_return_proxy": expected_return_proxy,
         "expectancy_per_trade": expectancy_per_trade,
         "after_cost_expectancy_per_trade": after_cost_expectancy,
         "stressed_after_cost_expectancy_per_trade": stressed_after_cost_expectancy,
+        "selection_score_executed": selection_score_executed,
         "cost_ratio": cost_ratio,
         "turnover_proxy_mean": turnover_proxy_mean,
         "avg_dynamic_cost_bps": avg_dynamic_cost_bps,
+        "bridge_eval_status": str(row.get("bridge_eval_status", "")),
+        "bridge_train_after_cost_bps": _safe_float(row.get("bridge_train_after_cost_bps"), 0.0),
+        "bridge_validation_after_cost_bps": _safe_float(row.get("bridge_validation_after_cost_bps"), 0.0),
+        "bridge_validation_stressed_after_cost_bps": _safe_float(row.get("bridge_validation_stressed_after_cost_bps"), 0.0),
+        "bridge_validation_trades": _safe_int(row.get("bridge_validation_trades"), 0),
+        "bridge_effective_cost_bps_per_trade": _safe_float(row.get("bridge_effective_cost_bps_per_trade"), 0.0),
+        "bridge_gross_edge_bps_per_trade": _safe_float(row.get("bridge_gross_edge_bps_per_trade"), 0.0),
+        "gate_bridge_has_trades_validation": _as_bool(row.get("gate_bridge_has_trades_validation", False)),
+        "gate_bridge_after_cost_positive_validation": _as_bool(row.get("gate_bridge_after_cost_positive_validation", False)),
+        "gate_bridge_after_cost_stressed_positive_validation": _as_bool(row.get("gate_bridge_after_cost_stressed_positive_validation", False)),
+        "gate_bridge_edge_cost_ratio": _as_bool(row.get("gate_bridge_edge_cost_ratio", False)),
+        "gate_bridge_turnover_controls": _as_bool(row.get("gate_bridge_turnover_controls", False)),
+        "gate_bridge_tradable": _as_bool(row.get("gate_bridge_tradable", False)),
+        "gate_all_research": _as_bool(row.get("gate_all_research", False)),
         "variance": _safe_float(row.get("variance"), 0.0),
         "stability_proxy": stability_proxy,
         "robustness_score": robustness_score,
@@ -267,6 +297,7 @@ def _run_research_chain(
 
     phase2_script_path = PROJECT_ROOT / "pipelines" / "research" / "phase2_conditional_hypotheses.py"
     registry_script_path = PROJECT_ROOT / "pipelines" / "research" / "build_event_registry.py"
+    bridge_script_path = PROJECT_ROOT / "pipelines" / "research" / "bridge_evaluate_phase2.py"
     for event_type, script, extra_args in PHASE2_EVENT_CHAIN:
         script_path = PROJECT_ROOT / "pipelines" / "research" / script
         if not script_path.exists():
@@ -316,6 +347,21 @@ def _run_research_chain(
         phase2_result = subprocess.run(phase2_cmd)
         if phase2_result.returncode != 0:
             logging.warning("Phase2 stage failed (non-blocking): %s", event_type)
+            continue
+        if bridge_script_path.exists():
+            bridge_cmd = [
+                sys.executable,
+                str(bridge_script_path),
+                "--run_id",
+                run_id,
+                "--event_type",
+                event_type,
+                "--symbols",
+                symbols,
+            ]
+            bridge_result = subprocess.run(bridge_cmd)
+            if bridge_result.returncode != 0:
+                logging.warning("Bridge stage failed (non-blocking): %s", event_type)
 
 
 def _collect_phase2_candidates(run_id: str, run_symbols: Sequence[str]) -> List[Dict[str, object]]:
@@ -329,6 +375,23 @@ def _collect_phase2_candidates(run_id: str, run_symbols: Sequence[str]) -> List[
         candidate_csv = event_dir / "phase2_candidates.csv"
         symbol_eval_lookup = _build_symbol_eval_lookup(event_dir)
         event_rows: List[Dict[str, object]] = []
+        phase2_lookup: Dict[str, Dict[str, object]] = {}
+        if candidate_csv.exists():
+            try:
+                phase2_df = pd.read_csv(candidate_csv)
+            except Exception:
+                phase2_df = pd.DataFrame()
+            if not phase2_df.empty:
+                for idx, payload in enumerate(phase2_df.to_dict(orient="records")):
+                    cid = str(payload.get("candidate_id", "")).strip()
+                    if not cid:
+                        cond = str(payload.get("condition", "")).strip()
+                        act = str(payload.get("action", "")).strip()
+                        if cond and act:
+                            cid = f"{cond}__{act}"
+                            payload["candidate_id"] = cid
+                    if cid:
+                        phase2_lookup[cid] = payload
 
         if promoted_json.exists():
             payload = json.loads(promoted_json.read_text(encoding="utf-8"))
@@ -344,6 +407,12 @@ def _collect_phase2_candidates(run_id: str, run_symbols: Sequence[str]) -> List[
                     if cond and act:
                         cid = f"{cond}__{act}"
                         candidate_row["candidate_id"] = cid
+                if cid and cid in phase2_lookup:
+                    merged = dict(phase2_lookup[cid])
+                    merged.update(candidate_row)
+                    candidate_row = merged
+                if ("gate_bridge_tradable" in candidate_row) and (not _as_bool(candidate_row.get("gate_bridge_tradable", False))):
+                    continue
                 if cid and cid in symbol_eval_lookup:
                     candidate_row.update(symbol_eval_lookup[cid])
                 event_rows.append(
@@ -361,11 +430,16 @@ def _collect_phase2_candidates(run_id: str, run_symbols: Sequence[str]) -> List[
         if not event_rows and candidate_csv.exists():
             df = pd.read_csv(candidate_csv)
             if not df.empty:
-                if "gate_all" in df.columns:
+                if "gate_all_research" in df.columns:
+                    df = df[df["gate_all_research"].map(_as_bool)].copy()
+                elif "gate_all" in df.columns:
                     df = df[df["gate_all"].map(_as_bool)].copy()
+                if "gate_bridge_tradable" in df.columns:
+                    df = df[df["gate_bridge_tradable"].map(_as_bool)].copy()
                 if not df.empty:
                     for idx, row in df.iterrows():
                         row_payload = row.to_dict()
+                        row_payload["status"] = str(row_payload.get("status", "PROMOTED_RESEARCH")).strip() or "PROMOTED_RESEARCH"
                         cid = str(row_payload.get("candidate_id", "")).strip()
                         if not cid:
                             cond = str(row_payload.get("condition", "")).strip()
@@ -382,7 +456,7 @@ def _collect_phase2_candidates(run_id: str, run_symbols: Sequence[str]) -> List[
                                 row=row_payload,
                                 idx=idx,
                                 source_path=candidate_csv,
-                                default_status="DRAFT",
+                                default_status="PROMOTED_RESEARCH",
                                 run_symbols=run_symbols,
                             )
                         )
@@ -451,9 +525,31 @@ def main() -> int:
                 "event",
                 "candidate_id",
                 "status",
+                "candidate_type",
+                "overlay_base_candidate_id",
                 "edge_score",
                 "expected_return_proxy",
                 "expectancy_per_trade",
+                "after_cost_expectancy_per_trade",
+                "stressed_after_cost_expectancy_per_trade",
+                "selection_score_executed",
+                "bridge_eval_status",
+                "bridge_train_after_cost_bps",
+                "bridge_validation_after_cost_bps",
+                "bridge_validation_stressed_after_cost_bps",
+                "bridge_validation_trades",
+                "bridge_effective_cost_bps_per_trade",
+                "bridge_gross_edge_bps_per_trade",
+                "gate_bridge_has_trades_validation",
+                "gate_bridge_after_cost_positive_validation",
+                "gate_bridge_after_cost_stressed_positive_validation",
+                "gate_bridge_edge_cost_ratio",
+                "gate_bridge_turnover_controls",
+                "gate_bridge_tradable",
+                "gate_all_research",
+                "cost_ratio",
+                "turnover_proxy_mean",
+                "avg_dynamic_cost_bps",
                 "variance",
                 "stability_proxy",
                 "robustness_score",
@@ -465,7 +561,11 @@ def main() -> int:
             ],
         )
         if not df.empty:
-            df = df.sort_values(["profit_density_score", "edge_score", "stability_proxy"], ascending=[False, False, False]).reset_index(drop=True)
+            df["selection_score_executed"] = pd.to_numeric(df.get("selection_score_executed"), errors="coerce").fillna(0.0)
+            df = df.sort_values(
+                ["selection_score_executed", "profit_density_score", "edge_score", "stability_proxy"],
+                ascending=[False, False, False, False],
+            ).reset_index(drop=True)
         df.to_csv(out_csv, index=False)
         out_json.write_text(df.to_json(orient="records", indent=2), encoding="utf-8")
 

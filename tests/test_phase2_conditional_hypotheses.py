@@ -386,6 +386,8 @@ def test_phase2_manifest_and_candidates_include_oos_and_multiplicity_fields(tmp_
             "delay_dispersion",
             "delay_robustness_score",
             "gate_delay_robustness",
+            "candidate_type",
+            "overlay_base_candidate_id",
             "gate_oos_min_samples",
             "gate_oos_validation",
             "gate_oos_validation_test",
@@ -403,6 +405,21 @@ def test_phase2_manifest_and_candidates_include_oos_and_multiplicity_fields(tmp_
             "gate_after_cost_stressed_positive",
             "gate_cost_model_valid",
             "gate_cost_ratio",
+            "bridge_eval_status",
+            "bridge_train_after_cost_bps",
+            "bridge_validation_after_cost_bps",
+            "bridge_validation_stressed_after_cost_bps",
+            "bridge_validation_trades",
+            "bridge_effective_cost_bps_per_trade",
+            "bridge_gross_edge_bps_per_trade",
+            "gate_bridge_has_trades_validation",
+            "gate_bridge_after_cost_positive_validation",
+            "gate_bridge_after_cost_stressed_positive_validation",
+            "gate_bridge_edge_cost_ratio",
+            "gate_bridge_turnover_controls",
+            "gate_bridge_tradable",
+            "selection_score_executed",
+            "gate_all_research",
         ]:
             assert col in candidates.columns
 
@@ -436,6 +453,27 @@ def test_phase2_outputs_quality_score_and_strict_oos_gate(tmp_path: Path) -> Non
     low_sample = (validation_samples < 120) | (test_samples < 120)
     if low_sample.any():
         assert (~strict_actual[low_sample]).all()
+
+
+def test_phase2_assigns_candidate_type_and_overlay_base(tmp_path: Path) -> None:
+    run_id = "phase2_candidate_typing"
+    _write_phase1_fixture(tmp_path=tmp_path, run_id=run_id)
+    _run_phase2(tmp_path=tmp_path, run_id=run_id)
+
+    out_dir = tmp_path / "reports" / "phase2" / run_id / "vol_shock_relaxation"
+    candidates = pd.read_csv(out_dir / "phase2_candidates.csv")
+    if candidates.empty:
+        return
+
+    assert "candidate_type" in candidates.columns
+    assert "overlay_base_candidate_id" in candidates.columns
+    delay_rows = candidates[candidates["action"].astype(str).str.startswith("delay_")]
+    if not delay_rows.empty:
+        assert (delay_rows["candidate_type"].astype(str) == "standalone").all()
+    overlay_rows = candidates[candidates["action"].astype(str).str.startswith("risk_throttle_")]
+    if not overlay_rows.empty:
+        assert (overlay_rows["candidate_type"].astype(str) == "overlay").all()
+        assert (overlay_rows["overlay_base_candidate_id"].astype(str).str.len() > 0).all()
 
 
 def test_effective_sample_size_iid_like_series_is_near_n() -> None:

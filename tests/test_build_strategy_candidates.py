@@ -576,6 +576,37 @@ def test_build_strategy_candidates_filters_non_promoted_by_default(monkeypatch, 
     assert payload == []
 
 
+def test_build_strategy_candidates_filters_non_bridge_tradable_by_default(monkeypatch, tmp_path: Path) -> None:
+    run_id = "strategy_builder_bridge_tradable_filter"
+    _write_edge_inputs(tmp_path, run_id=run_id)
+    edge_csv = tmp_path / "reports" / "edge_candidates" / run_id / "edge_candidates_normalized.csv"
+    edge_df = pd.read_csv(edge_csv)
+    edge_df["gate_bridge_tradable"] = [0]
+    edge_df.to_csv(edge_csv, index=False)
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(build_strategy_candidates, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_strategy_candidates.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--include_alpha_bundle",
+            "0",
+            "--ignore_checklist",
+            "1",
+        ],
+    )
+    assert build_strategy_candidates.main() == 0
+    out_json = tmp_path / "reports" / "strategy_builder" / run_id / "strategy_candidates.json"
+    payload = json.loads(out_json.read_text(encoding="utf-8"))
+    assert payload == []
+
+
 def test_build_strategy_candidates_detail_lookup_by_candidate_id(monkeypatch, tmp_path: Path) -> None:
     run_id = "strategy_builder_candidate_id_lookup"
     edge_dir = tmp_path / "reports" / "edge_candidates" / run_id

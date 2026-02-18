@@ -107,6 +107,11 @@ def _as_bool_series(values: pd.Series) -> pd.Series:
     return values.astype(str).str.strip().str.lower().isin({"1", "true", "t", "yes", "y"})
 
 
+def _numeric_series(df: pd.DataFrame, column: str, default: float = 0.0) -> pd.Series:
+    source = df[column] if column in df.columns else pd.Series(default, index=df.index)
+    return pd.to_numeric(source, errors="coerce").fillna(default)
+
+
 def _checklist_decision(run_id: str) -> str:
     path = DATA_ROOT / "runs" / run_id / "research_checklist" / "checklist.json"
     if not path.exists():
@@ -409,6 +414,7 @@ def _build_promoted_strategy_candidate(
         "profit_density_score": max(0.0, selection_score),
         "quality_score": max(0.0, selection_score),
         "selection_score": selection_score,
+        "selection_score_executed": max(0.0, selection_score),
         "symbols": run_symbols,
         "candidate_symbol": candidate_symbol,
         "run_symbols": run_symbols,
@@ -420,6 +426,7 @@ def _build_promoted_strategy_candidate(
         "risk_controls": controls,
         "manual_backtest_command": _manual_backtest_command_for_strategy(base_strategy, symbols_csv),
         "gate_oos_consistency_strict": True,
+        "gate_bridge_tradable": True,
         "notes": notes,
     }
 
@@ -514,9 +521,13 @@ def _build_edge_strategy_candidate(
         max(0.0, expectancy_per_trade) * max(0.0, robustness_score) * max(0.0, event_frequency),
     )
     delay_robustness_score = _safe_float(row.get("delay_robustness_score"), 0.0)
+    selection_score_executed = _safe_float(row.get("selection_score_executed"), 0.0)
     quality_score = _safe_float(
         row.get("quality_score"),
         (
+            selection_score_executed
+            if selection_score_executed > 0.0
+            else (
             profit_density_score
             if profit_density_score > 0.0
             else (
@@ -525,6 +536,7 @@ def _build_edge_strategy_candidate(
                 + 0.20 * max(0.0, delay_robustness_score)
                 + 0.20 * max(0.0, profit_density_score)
             )
+            )
         ),
     )
     n_events = _safe_int(row.get("n_events"), 0)
@@ -532,10 +544,15 @@ def _build_edge_strategy_candidate(
     gate_oos_consistency_strict = _as_bool(
         detail.get("gate_oos_consistency_strict", row.get("gate_oos_consistency_strict", True))
     )
+    gate_bridge_tradable = _as_bool(
+        detail.get("gate_bridge_tradable", row.get("gate_bridge_tradable", True))
+    )
 
     condition = str(detail.get("condition", "all"))
     action = str(detail.get("action", "no_action"))
-    selection_score = quality_score if quality_score > 0.0 else (0.65 * edge_score) + (0.35 * stability_proxy)
+    selection_score = selection_score_executed if selection_score_executed > 0.0 else quality_score
+    if selection_score <= 0.0:
+        selection_score = (0.65 * edge_score) + (0.35 * stability_proxy)
     controls = _risk_controls_from_action(action)
     route = _route_event_family(event)
     execution_family = route["execution_family"] if route else "unmapped"
@@ -634,6 +651,7 @@ def _build_edge_strategy_candidate(
         "profit_density_score": profit_density_score,
         "quality_score": quality_score,
         "selection_score": selection_score,
+        "selection_score_executed": selection_score_executed,
         "symbols": symbols,
         "candidate_symbol": symbol_scope["candidate_symbol"],
         "run_symbols": symbol_scope["run_symbols"],
@@ -645,6 +663,7 @@ def _build_edge_strategy_candidate(
         "risk_controls": controls,
         "manual_backtest_command": manual_backtest_command,
         "gate_oos_consistency_strict": bool(gate_oos_consistency_strict),
+        "gate_bridge_tradable": bool(gate_bridge_tradable),
         "notes": notes,
     }
 
@@ -834,7 +853,10 @@ def _count_by_source(rows: List[Dict[str, object]]) -> Dict[str, int]:
 
 
 def _candidate_rank_key(row: Dict[str, object]) -> Tuple[float, float, float, int, str]:
-    quality_score = _safe_float(row.get("quality_score"), _safe_float(row.get("selection_score"), 0.0))
+    quality_score = _safe_float(
+        row.get("selection_score_executed"),
+        _safe_float(row.get("quality_score"), _safe_float(row.get("selection_score"), 0.0)),
+    )
     expectancy = _safe_float(
         row.get("expectancy_after_multiplicity"),
         _safe_float(row.get("expectancy_per_trade"), 0.0),
@@ -956,6 +978,8 @@ def main() -> int:
                 edge_df = edge_df[status_series == "PROMOTED"].copy()
             if "gate_oos_consistency_strict" in edge_df.columns:
                 edge_df = edge_df[_as_bool_series(edge_df["gate_oos_consistency_strict"])].copy()
+            if "gate_bridge_tradable" in edge_df.columns:
+                edge_df = edge_df[_as_bool_series(edge_df["gate_bridge_tradable"])].copy()
 
         strategy_rows: List[Dict[str, object]] = [
             _build_promoted_strategy_candidate(
@@ -968,8 +992,9 @@ def main() -> int:
         missing_detail_records: List[Dict[str, str]] = []
         skipped_strict_gate_count = 0
         if not edge_df.empty:
-            edge_df["expectancy_per_trade"] = pd.to_numeric(edge_df.get("expectancy_per_trade"), errors="coerce").fillna(
-                pd.to_numeric(edge_df.get("expected_return_proxy"), errors="coerce").fillna(0.0)
+            expected_return_proxy = _numeric_series(edge_df, "expected_return_proxy", default=0.0)
+            edge_df["expectancy_per_trade"] = _numeric_series(edge_df, "expectancy_per_trade", default=np.nan).fillna(
+                expected_return_proxy
             )
             expectancy_after_source = (
                 edge_df["expectancy_after_multiplicity"]
@@ -979,15 +1004,18 @@ def main() -> int:
             edge_df["expectancy_after_multiplicity"] = pd.to_numeric(expectancy_after_source, errors="coerce").fillna(
                 edge_df["expectancy_per_trade"]
             )
-            edge_df["robustness_score"] = pd.to_numeric(edge_df.get("robustness_score"), errors="coerce").fillna(edge_df["stability_proxy"])
-            edge_df["event_frequency"] = pd.to_numeric(edge_df.get("event_frequency"), errors="coerce").fillna(0.0)
-            edge_df["profit_density_score"] = pd.to_numeric(edge_df.get("profit_density_score"), errors="coerce")
+            edge_df["robustness_score"] = _numeric_series(edge_df, "robustness_score", default=np.nan).fillna(
+                _numeric_series(edge_df, "stability_proxy", default=0.0)
+            )
+            edge_df["event_frequency"] = _numeric_series(edge_df, "event_frequency", default=0.0)
+            edge_df["profit_density_score"] = _numeric_series(edge_df, "profit_density_score", default=np.nan)
             fallback_pds = (
                 edge_df["expectancy_per_trade"].clip(lower=0.0)
                 * edge_df["robustness_score"].clip(lower=0.0)
                 * edge_df["event_frequency"].clip(lower=0.0)
             )
             edge_df["profit_density_score"] = edge_df["profit_density_score"].fillna(fallback_pds)
+            edge_df["selection_score_executed"] = _numeric_series(edge_df, "selection_score_executed", default=0.0)
             delay_source = (
                 edge_df["delay_robustness_score"]
                 if "delay_robustness_score" in edge_df.columns
@@ -1012,13 +1040,24 @@ def main() -> int:
                 edge_df["quality_score"].notna(),
                 fallback_quality_series,
             )
-            edge_df["selection_score"] = edge_df["quality_score"]
+            edge_df["selection_score"] = np.where(
+                edge_df["selection_score_executed"] > 0.0,
+                edge_df["selection_score_executed"],
+                edge_df["quality_score"],
+            )
             edge_df.loc[edge_df["selection_score"] <= 0.0, "selection_score"] = (
                 0.65 * edge_df["edge_score"] + 0.35 * edge_df["stability_proxy"]
             )
             edge_df = edge_df.sort_values(
-                ["event", "quality_score", "expectancy_after_multiplicity", "robustness_score", "selection_score"],
-                ascending=[True, False, False, False, False],
+                [
+                    "event",
+                    "selection_score_executed",
+                    "quality_score",
+                    "expectancy_after_multiplicity",
+                    "robustness_score",
+                    "selection_score",
+                ],
+                ascending=[True, False, False, False, False, False],
             ).reset_index(drop=True)
 
             for event, group in edge_df.groupby("event", sort=True):
@@ -1040,6 +1079,12 @@ def main() -> int:
                         detail.get("gate_oos_consistency_strict", row.get("gate_oos_consistency_strict", True))
                     )
                     if not gate_oos_consistency_strict:
+                        skipped_strict_gate_count += 1
+                        continue
+                    gate_bridge_tradable = _as_bool(
+                        detail.get("gate_bridge_tradable", row.get("gate_bridge_tradable", True))
+                    )
+                    if not gate_bridge_tradable:
                         skipped_strict_gate_count += 1
                         continue
                     strategy_rows.append(_build_edge_strategy_candidate(row=row.to_dict(), detail=detail, symbols=symbols))

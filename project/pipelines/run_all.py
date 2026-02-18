@@ -111,6 +111,7 @@ def _print_artifact_summary(run_id: str) -> None:
         ("runs", DATA_ROOT / "runs" / run_id),
         ("phase2", DATA_ROOT / "reports" / "phase2" / run_id),
         ("phase2_quality_summary", DATA_ROOT / "reports" / "phase2" / run_id / "discovery_quality_summary.json"),
+        ("bridge_eval", DATA_ROOT / "reports" / "bridge_eval" / run_id),
         ("edge_candidates", DATA_ROOT / "reports" / "edge_candidates" / run_id / "edge_candidates_normalized.csv"),
         ("promotions", DATA_ROOT / "reports" / "promotions" / run_id / "promotion_report.json"),
         ("strategy_builder", DATA_ROOT / "reports" / "strategy_builder" / run_id),
@@ -272,6 +273,13 @@ def main() -> int:
     parser.add_argument("--phase2_delay_grid_bars", default="0,4,8,16,30")
     parser.add_argument("--phase2_min_delay_positive_ratio", type=float, default=0.60)
     parser.add_argument("--phase2_min_delay_robustness_score", type=float, default=0.60)
+    parser.add_argument("--run_bridge_eval_phase2", type=int, default=1)
+    parser.add_argument("--bridge_edge_cost_k", type=float, default=2.0)
+    parser.add_argument("--bridge_stressed_cost_multiplier", type=float, default=1.5)
+    parser.add_argument("--bridge_min_validation_trades", type=int, default=20)
+    parser.add_argument("--bridge_train_frac", type=float, default=0.6)
+    parser.add_argument("--bridge_validation_frac", type=float, default=0.2)
+    parser.add_argument("--bridge_embargo_days", type=int, default=0)
     parser.add_argument("--run_discovery_quality_summary", type=int, default=1)
 
     parser.add_argument("--run_edge_candidate_universe", type=int, default=0)
@@ -707,6 +715,42 @@ def main() -> int:
                     ],
                 )
             )
+            if int(args.run_bridge_eval_phase2):
+                bridge_stage_name = (
+                    "bridge_evaluate_phase2"
+                    if len(selected_chain) == 1
+                    else f"bridge_evaluate_phase2_{event_type}"
+                )
+                stages.append(
+                    (
+                        bridge_stage_name,
+                        PROJECT_ROOT / "pipelines" / "research" / "bridge_evaluate_phase2.py",
+                        [
+                            "--run_id",
+                            run_id,
+                            "--event_type",
+                            event_type,
+                            "--symbols",
+                            symbols,
+                            "--start",
+                            start,
+                            "--end",
+                            end,
+                            "--train_frac",
+                            str(float(args.bridge_train_frac)),
+                            "--validation_frac",
+                            str(float(args.bridge_validation_frac)),
+                            "--embargo_days",
+                            str(int(args.bridge_embargo_days)),
+                            "--edge_cost_k",
+                            str(float(args.bridge_edge_cost_k)),
+                            "--stressed_cost_multiplier",
+                            str(float(args.bridge_stressed_cost_multiplier)),
+                            "--min_validation_trades",
+                            str(int(args.bridge_min_validation_trades)),
+                        ],
+                    )
+                )
 
     if int(args.run_phase2_conditional) and int(args.run_discovery_quality_summary):
         stages.append(

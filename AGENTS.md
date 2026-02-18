@@ -1,58 +1,50 @@
-# Repository Guidelines
+# Codex Operating Instructions (Backtest Repo)
 
-## Project Structure & Module Organization
-- `project/pipelines/` contains runnable pipeline stages: `ingest/`, `clean/`, `features/`, `research/`, `backtest/`, `report/`, and `alpha_bundle/`.
-- `project/features/` contains reusable feature/event logic (for example liquidity vacuum definitions).
-- `project/engine/` and `project/strategies/` contain execution/backtest runtime components.
-- `tests/` contains pytest coverage for orchestration and pipeline contracts.
-- Runtime artifacts are written under `data/` (especially `data/runs/`, `data/reports/`, `data/lake/`, `data/feature_store/`).
+## Mission
+Run bridge-first research-to-execution diagnostics and produce explicit funnel evidence for where candidates fail.
 
-## Build, Test, and Development Commands
-- Setup:
-```bash
-python3 -m venv .venv
-./.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
-```
-- Run canonical discovery:
-```bash
-./.venv/bin/python project/pipelines/run_all.py --run_id RUN --symbols BTCUSDT,ETHUSDT --start 2020-01-01 --end 2025-12-31 --run_phase2_conditional 1 --phase2_event_type all
-```
-- Make targets:
-  - `make run` (ingest + clean + features + context)
-  - `make discover-edges` (phase1 + phase2 + edge export)
-  - `make discover-hybrid` (discover + expectancy checks)
-  - `make test` (pytest)
+## Pinned Frozen Run (Default)
+- `run_id`: `RUN_2022_2023`
+- `symbols`: `BTCUSDT,ETHUSDT`
+- `start`: `2021-01-01`
+- `end`: `2022-12-31`
 
-## Coding Style & Naming Conventions
-- Python style: PEP 8, 4-space indentation, explicit typing for new/modified public helpers.
-- Keep pipeline scripts deterministic and file-path explicit (`Path`, no hidden cwd assumptions).
-- Use descriptive stage names and snake_case IDs (`phase2_conditional_hypotheses`, `liquidity_vacuum`).
-- Preserve existing data contracts (`data/reports/<stage>/<run_id>/...`) when extending stages.
+## Required Funnel Artifact
+- Path: `data/reports/<run_id>/funnel_summary.json`
+- Per-family required fields:
+  - `phase2_candidates`
+  - `phase2_gate_all_pass`
+  - `bridge_evaluable`
+  - `bridge_pass_val`
+  - `compiled_bases`
+  - `compiled_overlays`
+  - `wf_tested`
+  - `wf_survivors`
+  - `top_failure_reasons`
 
-## Testing Guidelines
-- Framework: `pytest` with tests in `tests/test_*.py`.
-- Add or update tests for orchestration changes (`run_all.py`), schema/IO contract changes, and new ingest/feature logic.
-- Run locally before PR:
-```bash
-./.venv/bin/pytest -q
-```
+## Bridge Policy (Canonical)
+- Enforce in bridge stage:
+  - `edge_to_cost >= 2.0` on validation
+- Persist cost sweep columns on validation:
+  - `exp_costed_x0_5`
+  - `exp_costed_x1_0`
+  - `exp_costed_x1_5`
+  - `exp_costed_x2_0`
+- `bridge_pass_val` must reflect `gate_bridge_tradable`.
 
-## Commit & Pull Request Guidelines
-- Preferred commit format: `feat: ...`, `fix: ...`, `chore: ...`, `refactor: ...`.
-- Keep commits focused (pipeline logic, tests, docs together only when tightly coupled).
-- PRs should include:
-  - change summary and affected stages,
-  - exact run/test commands executed,
-  - sample output paths (for example `data/reports/phase2/<run_id>/...`),
-  - notes on data assumptions (symbols, date range, market: `perp`/`spot`).
+## Overlay Policy
+- Overlay candidates are delta-vs-base only.
+- Overlay-only candidates must not appear as standalone executable strategies in backtest or walkforward.
 
-## Security & Configuration Tips
-- Set `BACKTEST_DATA_ROOT` to a controlled local path; avoid committing runtime artifacts.
-- Treat API/network ingestion as non-deterministic input; persist manifests/logs for reproducibility.
+## Execution Checklist
+1. Run `project/pipelines/run_all.py` with bridge, walkforward, and promotion enabled for the frozen window.
+2. Confirm `data/reports/<run_id>/funnel_summary.json` exists.
+3. Confirm bridge outputs include cost sweep + edge-to-cost ratio.
+4. Confirm promotion and walkforward consume only executable base strategies.
 
-## Plan Milestone Map (Engineering Backlog)
-- **Milestone A (R2 + R3):** Implement walk-forward split labels, OOS-only promotion gating, and multiplicity-adjusted significance in phase2 outputs.
-- **Milestone B (R4):** Enforce source/schema provenance completeness across clean/features manifests.
-- **Milestone C (R6 + R11):** Add funding/borrow PnL decomposition and historical universe snapshots for survivorship-bias-safe backtests.
-- **Milestone D (R5 + R8):** Integrate OI/liquidation/revision-lag features and add stability/capacity robustness diagnostics with checklist gates.
-- **Milestone E (R10):** Add MEV-aware execution overlay and microstructure strategy template routing/tests.
+## Failure Pivot Rule
+If `bridge_pass_val == 0` across all families, treat as “no executed edge at current costs” and pivot to semantic strategy changes (effect horizon, turnover reduction, de-clustering, hold-time alignment), not threshold relaxation.
+
+## Guardrails
+- Keep strict defaults (no non-production checklist bypass) for decision runs.
+- Keep test split untouched for selection.

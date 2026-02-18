@@ -32,6 +32,7 @@ Optional enrichment:
 
 If outputs are empty, check:
 - upstream edge universe exists,
+- bridge tradability gate (`gate_bridge_tradable`) is present and true for selected rows,
 - checklist did not gate out all candidates,
 - stage manifest stats (`edge_rows_seen`, `strategy_candidate_count`).
 
@@ -39,6 +40,7 @@ If outputs are empty, check:
 
 - source metadata (`event`, `condition`, `action`, `status`)
 - ranking fields (`edge_score`, `stability_proxy`, `selection_score`)
+- executed ranking field (`selection_score_executed`) when bridge artifacts are available
 - execution routing (`execution_family`, `base_strategy`)
 - readiness (`backtest_ready`, `backtest_ready_reason`)
 - risk controls (`entry_delay_bars`, size/overlay controls)

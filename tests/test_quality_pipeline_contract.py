@@ -27,6 +27,8 @@ def test_quality_pipeline_contract_from_phase2_to_builder(monkeypatch, tmp_path:
                 "action": "delay_8",
                 "gate_pass": 1,
                 "gate_oos_consistency_strict": 1,
+                "gate_bridge_tradable": 1,
+                "selection_score_executed": 25.0,
                 "quality_score": 0.55,
                 "fail_reasons": "",
             },
@@ -36,8 +38,10 @@ def test_quality_pipeline_contract_from_phase2_to_builder(monkeypatch, tmp_path:
                 "action": "delay_16",
                 "gate_pass": 1,
                 "gate_oos_consistency_strict": 0,
+                "gate_bridge_tradable": 0,
+                "selection_score_executed": -5.0,
                 "quality_score": 0.99,
-                "fail_reasons": "gate_oos_consistency_strict",
+                "fail_reasons": "gate_oos_consistency_strict,gate_bridge_tradable",
             },
         ]
     ).to_csv(phase2_csv, index=False)
@@ -59,6 +63,8 @@ def test_quality_pipeline_contract_from_phase2_to_builder(monkeypatch, tmp_path:
                 "capacity_proxy": 1.0,
                 "profit_density_score": 0.0024,
                 "quality_score": 0.55,
+                "selection_score_executed": 25.0,
+                "gate_bridge_tradable": 1,
                 "n_events": 120,
                 "source_path": str(phase2_csv),
             },
@@ -77,6 +83,8 @@ def test_quality_pipeline_contract_from_phase2_to_builder(monkeypatch, tmp_path:
                 "capacity_proxy": 1.0,
                 "profit_density_score": 0.0108,
                 "quality_score": 0.99,
+                "selection_score_executed": -5.0,
+                "gate_bridge_tradable": 0,
                 "n_events": 120,
                 "source_path": str(phase2_csv),
             },
@@ -129,5 +137,5 @@ def test_quality_pipeline_contract_from_phase2_to_builder(monkeypatch, tmp_path:
     selected_edge_rows = [row for row in payload if row.get("source_type") == "edge_candidate"]
     assert selected_edge_rows
     assert all(bool(row.get("gate_oos_consistency_strict")) for row in selected_edge_rows)
+    assert all(bool(row.get("gate_bridge_tradable")) for row in selected_edge_rows)
     assert {row.get("candidate_id") for row in selected_edge_rows} == {"strict_pass"}
-

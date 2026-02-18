@@ -31,6 +31,8 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--min_edge_candidates", type=int, default=1)
     parser.add_argument("--min_promoted_candidates", type=int, default=1)
+    parser.add_argument("--min_bridge_tradable_candidates", type=int, default=1)
+    parser.add_argument("--min_bridge_tradable_promoted_candidates", type=int, default=1)
     parser.add_argument("--min_expectancy_evidence", type=int, default=1)
     parser.add_argument("--min_robust_survivors", type=int, default=1)
     parser.add_argument("--require_expectancy_exists", type=int, default=1)
@@ -61,20 +63,33 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 def _edge_candidate_metrics(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return {"rows": 0, "promoted": 0}
+        return {"rows": 0, "promoted": 0, "bridge_tradable": 0, "bridge_tradable_promoted": 0}
 
     rows = 0
     promoted = 0
+    bridge_tradable = 0
+    bridge_tradable_promoted = 0
     try:
         with path.open("r", encoding="utf-8", newline="") as handle:
             reader = csv.DictReader(handle)
             for row in reader:
                 rows += 1
-                if str(row.get("status", "")).strip().upper() == "PROMOTED":
+                is_promoted = str(row.get("status", "")).strip().upper() in {"PROMOTED", "PROMOTED_RESEARCH"}
+                is_bridge_tradable = str(row.get("gate_bridge_tradable", "")).strip().lower() in {"1", "true", "t", "yes", "y"}
+                if is_promoted:
                     promoted += 1
+                if is_bridge_tradable:
+                    bridge_tradable += 1
+                    if is_promoted:
+                        bridge_tradable_promoted += 1
     except OSError:
-        return {"rows": 0, "promoted": 0}
-    return {"rows": rows, "promoted": promoted}
+        return {"rows": 0, "promoted": 0, "bridge_tradable": 0, "bridge_tradable_promoted": 0}
+    return {
+        "rows": rows,
+        "promoted": promoted,
+        "bridge_tradable": bridge_tradable,
+        "bridge_tradable_promoted": bridge_tradable_promoted,
+    }
 
 
 def _build_payload(
@@ -90,6 +105,8 @@ def _build_payload(
 
     candidate_rows = int(edge_metrics.get("rows", 0) or 0)
     promoted_rows = int(edge_metrics.get("promoted", 0) or 0)
+    bridge_tradable_rows = int(edge_metrics.get("bridge_tradable", 0) or 0)
+    bridge_tradable_promoted_rows = int(edge_metrics.get("bridge_tradable_promoted", 0) or 0)
     candidate_ok = candidate_rows >= int(args.min_edge_candidates)
     gates.append(_gate_result("edge_candidates_generated", candidate_ok, candidate_rows, int(args.min_edge_candidates)))
     if not candidate_ok:
@@ -98,6 +115,33 @@ def _build_payload(
     gates.append(_gate_result("promoted_edge_candidates", promoted_ok, promoted_rows, int(args.min_promoted_candidates)))
     if not promoted_ok:
         reasons.append(f"promoted edge candidates below threshold ({promoted_rows} < {args.min_promoted_candidates})")
+    bridge_rows_ok = bridge_tradable_rows >= int(args.min_bridge_tradable_candidates)
+    gates.append(
+        _gate_result(
+            "bridge_tradable_candidates",
+            bridge_rows_ok,
+            bridge_tradable_rows,
+            int(args.min_bridge_tradable_candidates),
+        )
+    )
+    if not bridge_rows_ok:
+        reasons.append(
+            f"bridge-tradable candidates below threshold ({bridge_tradable_rows} < {args.min_bridge_tradable_candidates})"
+        )
+    bridge_promoted_ok = bridge_tradable_promoted_rows >= int(args.min_bridge_tradable_promoted_candidates)
+    gates.append(
+        _gate_result(
+            "bridge_tradable_promoted_candidates",
+            bridge_promoted_ok,
+            bridge_tradable_promoted_rows,
+            int(args.min_bridge_tradable_promoted_candidates),
+        )
+    )
+    if not bridge_promoted_ok:
+        reasons.append(
+            "bridge-tradable promoted candidates below threshold "
+            f"({bridge_tradable_promoted_rows} < {args.min_bridge_tradable_promoted_candidates})"
+        )
 
     expectancy_exists = bool(expectancy_payload.get("expectancy_exists", False))
     require_expectancy = bool(int(args.require_expectancy_exists))
@@ -163,6 +207,8 @@ def _build_payload(
             "min_promoted_candidates": int(args.min_promoted_candidates),
             "min_expectancy_evidence": int(args.min_expectancy_evidence),
             "min_robust_survivors": int(args.min_robust_survivors),
+            "min_bridge_tradable_candidates": int(args.min_bridge_tradable_candidates),
+            "min_bridge_tradable_promoted_candidates": int(args.min_bridge_tradable_promoted_candidates),
             "require_expectancy_exists": bool(int(args.require_expectancy_exists)),
             "require_stability_pass": bool(int(args.require_stability_pass)),
             "require_capacity_pass": bool(int(args.require_capacity_pass)),
@@ -170,6 +216,8 @@ def _build_payload(
         "metrics": {
             "edge_candidate_rows": candidate_rows,
             "edge_candidate_promoted": promoted_rows,
+            "bridge_tradable_candidates": bridge_tradable_rows,
+            "bridge_tradable_promoted_candidates": bridge_tradable_promoted_rows,
             "expectancy_exists": expectancy_exists,
             "expectancy_evidence_count": expectancy_evidence_count,
             "robust_survivor_count": survivor_count,

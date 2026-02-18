@@ -154,6 +154,20 @@ def test_compiler_emits_per_event_blueprints_with_required_fields(monkeypatch, t
     assert liquidity_absence_row["entry"]["condition_nodes"][0]["operator"] == "in_range"
 
 
+def test_quality_floor_requires_bridge_tradable_when_present() -> None:
+    base_row = {
+        "robustness_score": 0.9,
+        "n_events": 120,
+        "after_cost_expectancy_per_trade": 0.01,
+        "stressed_after_cost_expectancy_per_trade": 0.005,
+        "cost_ratio": 0.2,
+        "gate_bridge_tradable": False,
+    }
+    assert compile_strategy_blueprints._passes_quality_floor(base_row, strict_cost_fields=True) is False
+    base_row["gate_bridge_tradable"] = True
+    assert compile_strategy_blueprints._passes_quality_floor(base_row, strict_cost_fields=True) is True
+
+
 def test_compiler_is_deterministic_under_rerun(monkeypatch, tmp_path: Path) -> None:
     run_id = "dsl_compile_deterministic"
     _write_inputs(tmp_path=tmp_path, run_id=run_id)

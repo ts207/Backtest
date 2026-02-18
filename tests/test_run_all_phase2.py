@@ -95,11 +95,13 @@ def test_run_all_includes_phase2_chain_when_enabled(monkeypatch) -> None:
     assert "analyze_vol_shock_relaxation" in stage_names
     assert "build_event_registry" in stage_names
     assert "phase2_conditional_hypotheses" in stage_names
+    assert "bridge_evaluate_phase2" in stage_names
     assert stage_names.index("build_features_v1") < stage_names.index("analyze_vol_shock_relaxation")
     assert stage_names.index("analyze_vol_shock_relaxation") < stage_names.index("phase2_conditional_hypotheses")
     assert stage_names.index("analyze_vol_shock_relaxation") < stage_names.index("build_event_registry")
     assert stage_names.index("build_event_registry") < stage_names.index("phase2_conditional_hypotheses")
-    assert stage_names.index("phase2_conditional_hypotheses") < stage_names.index("summarize_discovery_quality")
+    assert stage_names.index("phase2_conditional_hypotheses") < stage_names.index("bridge_evaluate_phase2")
+    assert stage_names.index("bridge_evaluate_phase2") < stage_names.index("summarize_discovery_quality")
     assert stage_names.index("summarize_discovery_quality") < stage_names.index("generate_recommendations_checklist")
     assert stage_names.index("phase2_conditional_hypotheses") < stage_names.index("generate_recommendations_checklist")
     assert stage_names.index("generate_recommendations_checklist") < stage_names.index("compile_strategy_blueprints")
@@ -200,6 +202,56 @@ def test_run_all_passes_cost_args_to_phase2_and_compiler(monkeypatch) -> None:
     assert "--fees_bps" in compiler_args and "3.0" in compiler_args
     assert "--slippage_bps" in compiler_args and "1.0" in compiler_args
     assert "--cost_bps" in compiler_args and "4.0" in compiler_args
+
+
+def test_run_all_passes_bridge_flags_to_bridge_stage(monkeypatch) -> None:
+    captured: list[tuple[str, list[str]]] = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_bridge_flags",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_phase2_conditional",
+            "1",
+            "--phase2_event_type",
+            "vol_shock_relaxation",
+            "--bridge_edge_cost_k",
+            "2.5",
+            "--bridge_stressed_cost_multiplier",
+            "1.8",
+            "--bridge_min_validation_trades",
+            "12",
+            "--bridge_train_frac",
+            "0.65",
+            "--bridge_validation_frac",
+            "0.25",
+            "--bridge_embargo_days",
+            "1",
+        ],
+    )
+
+    assert run_all.main() == 0
+    bridge_args = next(base_args for stage, base_args in captured if stage == "bridge_evaluate_phase2")
+    assert "--edge_cost_k" in bridge_args and "2.5" in bridge_args
+    assert "--stressed_cost_multiplier" in bridge_args and "1.8" in bridge_args
+    assert "--min_validation_trades" in bridge_args and "12" in bridge_args
+    assert "--train_frac" in bridge_args and "0.65" in bridge_args
+    assert "--validation_frac" in bridge_args and "0.25" in bridge_args
+    assert "--embargo_days" in bridge_args and "1" in bridge_args
 
 
 def test_run_all_includes_recommendations_checklist_by_default(monkeypatch) -> None:

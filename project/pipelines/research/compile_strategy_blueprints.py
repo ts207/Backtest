@@ -292,6 +292,8 @@ def _passes_quality_floor(row: Dict[str, object], *, strict_cost_fields: bool = 
         return False
     if cost_ratio >= QUALITY_MAX_COST_RATIO:
         return False
+    if "gate_bridge_tradable" in row and not _as_bool(row.get("gate_bridge_tradable", False)):
+        return False
     return True
 
 

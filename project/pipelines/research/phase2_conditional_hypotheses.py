@@ -43,6 +43,8 @@ PRIMARY_OUTPUT_COLUMNS = [
     "condition_desc",
     "action",
     "action_family",
+    "candidate_type",
+    "overlay_base_candidate_id",
     "sample_size",
     "train_samples",
     "validation_samples",
@@ -124,7 +126,22 @@ PRIMARY_OUTPUT_COLUMNS = [
     "gate_after_cost_stressed_positive",
     "gate_cost_model_valid",
     "gate_cost_ratio",
+    "bridge_eval_status",
+    "bridge_train_after_cost_bps",
+    "bridge_validation_after_cost_bps",
+    "bridge_validation_stressed_after_cost_bps",
+    "bridge_validation_trades",
+    "bridge_effective_cost_bps_per_trade",
+    "bridge_gross_edge_bps_per_trade",
+    "gate_bridge_has_trades_validation",
+    "gate_bridge_after_cost_positive_validation",
+    "gate_bridge_after_cost_stressed_positive_validation",
+    "gate_bridge_edge_cost_ratio",
+    "gate_bridge_turnover_controls",
+    "gate_bridge_tradable",
+    "selection_score_executed",
     "gate_pass",
+    "gate_all_research",
     "gate_all",
     "supporting_hypothesis_count",
     "supporting_hypothesis_ids",
@@ -757,6 +774,38 @@ def _build_actions() -> List[ActionSpec]:
         ActionSpec("delay_30", "timing", {"delay_bars": 30}),
         ActionSpec("reenable_at_half_life", "timing", {"landmark": "rv_decay_half_life"}),
     ]
+
+
+def _candidate_type_from_action(action_name: str) -> str:
+    action = str(action_name or "").strip().lower()
+    if action == "entry_gate_skip" or action.startswith("risk_throttle_"):
+        return "overlay"
+    if action == "no_action" or action.startswith("delay_") or action == "reenable_at_half_life":
+        return "standalone"
+    return "standalone"
+
+
+def _assign_candidate_types_and_overlay_bases(candidates: pd.DataFrame, event_type: str) -> pd.DataFrame:
+    if candidates.empty:
+        return candidates
+    out = candidates.copy()
+    action_series = out["action"] if "action" in out.columns else pd.Series("", index=out.index, dtype=str)
+    out["candidate_type"] = action_series.astype(str).map(_candidate_type_from_action)
+    out["overlay_base_candidate_id"] = ""
+
+    no_action_rows = out[action_series.astype(str) == "no_action"]
+    base_by_condition: Dict[str, str] = {}
+    for _, row in no_action_rows.iterrows():
+        cond = str(row.get("condition", "")).strip()
+        candidate_id = str(row.get("candidate_id", "")).strip()
+        if cond and candidate_id and cond not in base_by_condition:
+            base_by_condition[cond] = candidate_id
+    fallback_base = f"BASE_TEMPLATE::{str(event_type).strip().lower()}"
+    overlay_mask = out["candidate_type"].astype(str) == "overlay"
+    for idx in out[overlay_mask].index:
+        condition = str(out.at[idx, "condition"]).strip() if "condition" in out.columns else ""
+        out.at[idx, "overlay_base_candidate_id"] = base_by_condition.get(condition, fallback_base)
+    return out
 
 
 def _attach_forward_opportunity(
@@ -1764,6 +1813,8 @@ def _evaluate_candidate(
         "condition_desc": condition.description,
         "action": action.name,
         "action_family": action.family,
+        "candidate_type": _candidate_type_from_action(action.name),
+        "overlay_base_candidate_id": "",
         "sample_size": int(len(sub)),
         "train_samples": train_samples,
         "validation_samples": validation_samples,
@@ -1844,6 +1895,20 @@ def _evaluate_candidate(
         "gate_after_cost_stressed_positive": bool(cost_fields["gate_after_cost_stressed_positive"]),
         "gate_cost_model_valid": bool(cost_fields["gate_cost_model_valid"]),
         "gate_cost_ratio": bool(cost_fields["gate_cost_ratio"]),
+        "bridge_eval_status": "pending",
+        "bridge_train_after_cost_bps": np.nan,
+        "bridge_validation_after_cost_bps": np.nan,
+        "bridge_validation_stressed_after_cost_bps": np.nan,
+        "bridge_validation_trades": 0,
+        "bridge_effective_cost_bps_per_trade": np.nan,
+        "bridge_gross_edge_bps_per_trade": np.nan,
+        "gate_bridge_has_trades_validation": False,
+        "gate_bridge_after_cost_positive_validation": False,
+        "gate_bridge_after_cost_stressed_positive_validation": False,
+        "gate_bridge_edge_cost_ratio": False,
+        "gate_bridge_turnover_controls": False,
+        "gate_bridge_tradable": False,
+        "selection_score_executed": np.nan,
         "gate_pass": bool(
             gate_a
             and gate_b
@@ -1860,6 +1925,7 @@ def _evaluate_candidate(
             and bool(cost_fields["gate_cost_ratio"])
             and bool(curvature_metrics.get("gate_parameter_curvature", True))
         ),
+        "gate_all_research": False,
         "gate_all": False,
         "fail_reasons": ",".join(fail_reasons) if fail_reasons else "",
     }
@@ -2475,6 +2541,16 @@ def main() -> int:
             & candidates["gate_cost_model_valid"].astype(bool)
             & candidates["gate_cost_ratio"].astype(bool)
         )
+        candidates["gate_all_research"] = (
+            candidates["gate_oos_validation"].astype(bool)
+            & candidates["gate_multiplicity_strict"].astype(bool)
+            & candidates["gate_ess"].astype(bool)
+            & candidates["gate_parameter_curvature"].astype(bool)
+            & candidates["gate_delay_robustness"].astype(bool)
+            & candidates["gate_after_cost_positive"].astype(bool)
+            & candidates["gate_after_cost_stressed_positive"].astype(bool)
+            & candidates["gate_cost_ratio"].astype(bool)
+        )
         for idx, row in candidates.iterrows():
             reasons = [x for x in str(row.get("fail_reasons", "")).split(",") if x]
             if not bool(row.get("gate_multiplicity_strict", False)):
@@ -2496,12 +2572,20 @@ def main() -> int:
             if not bool(row.get("gate_cost_ratio", False)):
                 reasons.append("gate_cost_ratio")
             candidates.at[idx, "fail_reasons"] = ",".join(dict.fromkeys(reasons))
+        candidates = _assign_candidate_types_and_overlay_bases(candidates, event_type=args.event_type)
     for col in PRIMARY_OUTPUT_COLUMNS:
         if col in candidates.columns:
             continue
         if col.startswith("gate_"):
             candidates[col] = False
-        elif col in {"fail_reasons", "supporting_hypothesis_ids", "delay_expectancy_map"}:
+        elif col in {
+            "fail_reasons",
+            "supporting_hypothesis_ids",
+            "delay_expectancy_map",
+            "candidate_type",
+            "overlay_base_candidate_id",
+            "bridge_eval_status",
+        }:
             candidates[col] = ""
         elif col in {"supporting_hypothesis_count", "num_tests_event_family", "sample_size", "train_samples", "validation_samples", "test_samples", "ess_lag_used"}:
             candidates[col] = 0

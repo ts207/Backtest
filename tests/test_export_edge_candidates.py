@@ -31,6 +31,7 @@ def test_collects_unified_multi_event_phase2_candidates(tmp_path: Path, monkeypa
                 "phase1_pass": True,
                 "candidates": [
                     {
+                        "candidate_id": "all__risk_throttle_0.5",
                         "condition": "all",
                         "action": "risk_throttle_0.5",
                         "sample_size": 42,
@@ -47,6 +48,8 @@ def test_collects_unified_multi_event_phase2_candidates(tmp_path: Path, monkeypa
                         "gate_d_friction_floor": True,
                         "gate_e_simplicity": True,
                         "gate_f_exposure_guard": True,
+                        "gate_bridge_tradable": True,
+                        "selection_score_executed": 17.5,
                     }
                 ],
             },
@@ -96,6 +99,8 @@ def test_collects_unified_multi_event_phase2_candidates(tmp_path: Path, monkeypa
                 "gate_d_friction_floor": True,
                 "gate_e_simplicity": True,
                 "gate_f_exposure_guard": True,
+                "gate_bridge_tradable": True,
+                "selection_score_executed": 5.5,
             }
         ]
     ).to_csv(liq_dir / "phase2_candidates.csv", index=False)
@@ -132,10 +137,13 @@ def test_collects_unified_multi_event_phase2_candidates(tmp_path: Path, monkeypa
     assert promoted["variance"] == 0.0004
     assert promoted["capacity_proxy"] == 1.8
     assert promoted["candidate_symbol"] == "BTCUSDT"
+    assert "selection_score_executed" in out_df.columns
+    assert bool(promoted["gate_bridge_tradable"]) is True
+    assert promoted["selection_score_executed"] == 17.5
 
     liq_row = out_df[out_df["event"] == "liquidity_absence_window"].iloc[0]
     assert liq_row["n_events"] == 30
-    assert liq_row["status"] == "DRAFT"
+    assert liq_row["status"] == "PROMOTED_RESEARCH"
     assert liq_row["candidate_symbol"] == "ALL"
 
 
@@ -238,3 +246,57 @@ def test_collect_phase2_candidates_adds_symbol_scores_and_rollout_gate(tmp_path:
     assert row["rollout_eligible"] is False
     symbol_scores = json.loads(row["symbol_scores"])
     assert set(symbol_scores.keys()) == {"BTCUSDT", "ETHUSDT"}
+
+
+def test_export_sorts_by_selection_score_executed(monkeypatch, tmp_path: Path) -> None:
+    run_id = "edge_exec_score_sort"
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(export_edge_candidates, "DATA_ROOT", tmp_path)
+
+    event_dir = tmp_path / "reports" / "phase2" / run_id / "vol_shock_relaxation"
+    event_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "candidate_id": "c_low_exec",
+                "condition": "all",
+                "action": "delay_8",
+                "sample_size": 50,
+                "delta_adverse_mean": -0.01,
+                "delta_opportunity_mean": 0.01,
+                "gate_all": True,
+                "gate_bridge_tradable": True,
+                "selection_score_executed": 5.0,
+                "profit_density_score": 100.0,
+            },
+            {
+                "candidate_id": "c_high_exec",
+                "condition": "all",
+                "action": "delay_16",
+                "sample_size": 50,
+                "delta_adverse_mean": -0.01,
+                "delta_opportunity_mean": 0.01,
+                "gate_all": True,
+                "gate_bridge_tradable": True,
+                "selection_score_executed": 25.0,
+                "profit_density_score": 1.0,
+            },
+        ]
+    ).to_csv(event_dir / "phase2_candidates.csv", index=False)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "export_edge_candidates.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT",
+            "--execute",
+            "0",
+        ],
+    )
+    assert export_edge_candidates.main() == 0
+    out_df = pd.read_csv(tmp_path / "reports" / "edge_candidates" / run_id / "edge_candidates_normalized.csv")
+    assert out_df.iloc[0]["candidate_id"] == "c_high_exec"
