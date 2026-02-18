@@ -7,7 +7,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -60,6 +60,11 @@ EVENT_FAMILY_STRATEGY_ROUTING: Dict[str, Dict[str, str]] = {
 }
 
 BACKTEST_READY_BASE_STRATEGIES = set(list_strategies())
+SOURCE_PRIORITY = {
+    "promoted_blueprint": 0,
+    "edge_candidate": 1,
+    "alpha_bundle": 2,
+}
 
 
 def _safe_float(value: object, default: float = 0.0) -> float:
@@ -180,6 +185,219 @@ def _risk_controls_from_action(action: str) -> Dict[str, object]:
 def _route_event_family(event: str) -> Optional[Dict[str, str]]:
     key = str(event).strip().lower()
     return EVENT_FAMILY_STRATEGY_ROUTING.get(key)
+
+
+def _infer_condition_from_blueprint(blueprint: Dict[str, object]) -> str:
+    entry = blueprint.get("entry", {}) if isinstance(blueprint.get("entry"), dict) else {}
+    conditions = entry.get("conditions", []) if isinstance(entry.get("conditions"), list) else []
+    for condition in conditions:
+        text = str(condition).strip()
+        if text:
+            return text
+    return "all"
+
+
+def _infer_action_from_blueprint(blueprint: Dict[str, object]) -> str:
+    overlays = blueprint.get("overlays", []) if isinstance(blueprint.get("overlays"), list) else []
+    for overlay in overlays:
+        if not isinstance(overlay, dict):
+            continue
+        if str(overlay.get("name", "")).strip().lower() != "risk_throttle":
+            continue
+        params = overlay.get("params", {}) if isinstance(overlay.get("params"), dict) else {}
+        size_scale = _safe_float(params.get("size_scale"), 1.0)
+        if size_scale <= 0.0:
+            return "entry_gate_skip"
+        if abs(size_scale - 1.0) > 1e-9:
+            return f"risk_throttle_{size_scale:g}"
+    entry = blueprint.get("entry", {}) if isinstance(blueprint.get("entry"), dict) else {}
+    delay = _safe_int(entry.get("delay_bars"), _safe_int(entry.get("entry_delay_bars"), 0))
+    if delay > 0:
+        return f"delay_{delay}"
+    return "no_action"
+
+
+def _candidate_symbol_from_blueprint(blueprint: Dict[str, object], symbols: List[str]) -> Tuple[str, bool]:
+    scope = blueprint.get("symbol_scope", {}) if isinstance(blueprint.get("symbol_scope"), dict) else {}
+    mode = str(scope.get("mode", "")).strip().lower()
+    run_symbols = [str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()]
+    if mode == "single_symbol":
+        scope_symbols = scope.get("symbols", []) if isinstance(scope.get("symbols"), list) else []
+        for symbol in scope_symbols:
+            normalized = str(symbol).strip().upper()
+            if normalized in run_symbols:
+                return normalized, False
+        if run_symbols:
+            return run_symbols[0], False
+    candidate_symbol = str(scope.get("candidate_symbol", "")).strip().upper()
+    if candidate_symbol and candidate_symbol != "ALL":
+        if candidate_symbol in run_symbols:
+            return candidate_symbol, False
+        if run_symbols:
+            return run_symbols[0], False
+    rollout = mode == "multi_symbol" and len(run_symbols) > 1
+    return "ALL" if rollout else (run_symbols[0] if run_symbols else "ALL"), rollout
+
+
+def _load_promoted_blueprints(run_id: str) -> Tuple[List[Dict[str, object]], Dict[str, Path]]:
+    promoted_path = DATA_ROOT / "reports" / "promotions" / run_id / "promoted_blueprints.jsonl"
+    report_path = DATA_ROOT / "reports" / "promotions" / run_id / "promotion_report.json"
+    blueprints: List[Dict[str, object]] = []
+    if promoted_path.exists():
+        for line in promoted_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            payload = json.loads(line)
+            if isinstance(payload, dict):
+                blueprints.append(payload)
+    report_by_id: Dict[str, Dict[str, object]] = {}
+    if report_path.exists():
+        try:
+            report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+        except Exception:
+            report_payload = {}
+        tested = report_payload.get("tested", []) if isinstance(report_payload, dict) else []
+        if isinstance(tested, list):
+            for row in tested:
+                if not isinstance(row, dict):
+                    continue
+                blueprint_id = str(row.get("blueprint_id", "")).strip()
+                if blueprint_id:
+                    report_by_id[blueprint_id] = row
+
+    rows: List[Dict[str, object]] = []
+    for blueprint in blueprints:
+        blueprint_id = str(blueprint.get("id", "")).strip()
+        promotion = blueprint.get("promotion", {}) if isinstance(blueprint.get("promotion"), dict) else {}
+        if not promotion and blueprint_id:
+            promotion = report_by_id.get(blueprint_id, {})
+        rows.append(
+            {
+                "blueprint": blueprint,
+                "promotion": promotion if isinstance(promotion, dict) else {},
+            }
+        )
+    return rows, {"promoted_path": promoted_path, "report_path": report_path}
+
+
+def _build_promoted_strategy_candidate(
+    blueprint: Dict[str, object],
+    promotion: Dict[str, object],
+    symbols: List[str],
+) -> Dict[str, object]:
+    event = str(blueprint.get("event_type", "")).strip()
+    blueprint_id = str(blueprint.get("id", "")).strip()
+    candidate_id = str(blueprint.get("candidate_id", "")).strip() or blueprint_id or "promoted"
+    condition = _infer_condition_from_blueprint(blueprint)
+    action = _infer_action_from_blueprint(blueprint)
+    controls = _risk_controls_from_action(action)
+
+    stressed_split = promotion.get("stressed_split_pnl", {}) if isinstance(promotion.get("stressed_split_pnl"), dict) else {}
+    split_pnl = promotion.get("split_pnl", {}) if isinstance(promotion.get("split_pnl"), dict) else {}
+    selection_score = _safe_float(
+        stressed_split.get("validation"),
+        _safe_float(split_pnl.get("validation"), 0.0),
+    )
+    if selection_score <= 0.0:
+        selection_score = _safe_float(promotion.get("symbol_pass_rate"), 0.0)
+    symbol_pass_rate = _safe_float(promotion.get("symbol_pass_rate"), 0.0)
+    trades = _safe_int(promotion.get("trades"), 0)
+
+    route = _route_event_family(event)
+    execution_family = route["execution_family"] if route else "unmapped"
+    base_strategy = route["base_strategy"] if route else "unmapped"
+    routing_reason = "" if route else f"Unknown event family `{event}`; no strategy routing is defined."
+
+    run_symbols = [str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()]
+    candidate_symbol, rollout_eligible = _candidate_symbol_from_blueprint(blueprint=blueprint, symbols=run_symbols)
+    deployment_scope = _resolve_deployment_scope(
+        candidate_symbol=candidate_symbol,
+        run_symbols=run_symbols,
+        symbol_scores={},
+        rollout_eligible=rollout_eligible,
+    )
+    deployment_symbols = deployment_scope["deployment_symbols"]
+    symbols_csv = ",".join(run_symbols)
+
+    executable_condition = bool(is_executable_condition(condition, run_symbols=run_symbols))
+    executable_action = bool(is_executable_action(action))
+    backtest_ready = bool(route is not None and base_strategy in BACKTEST_READY_BASE_STRATEGIES and executable_condition and executable_action)
+    if not executable_condition or not executable_action:
+        reasons: List[str] = []
+        if not executable_condition:
+            reasons.append(f"Non-executable condition per DSL contract: `{condition}`")
+        if not executable_action:
+            reasons.append(f"Non-executable action per DSL contract: `{action}`")
+        routing_reason = (routing_reason + ("; " if routing_reason else "") + "; ".join(reasons)).strip()
+
+    strategy_instances = [
+        {
+            "strategy_id": f"{base_strategy}_{symbol}",
+            "base_strategy": base_strategy,
+            "symbol": symbol,
+            "strategy_params": {
+                "promotion_thresholds": {
+                    "selection_score": selection_score,
+                    "symbol_pass_rate": symbol_pass_rate,
+                    "trades": trades,
+                },
+                "risk_controls": controls,
+                "condition": condition,
+                "action": action,
+                "blueprint_id": blueprint_id,
+            },
+        }
+        for symbol in deployment_symbols
+    ]
+
+    notes: List[str] = [
+        f"Derived from promoted blueprint {blueprint_id}.",
+        "Uses promotion evidence and blueprint runtime configuration as primary source.",
+    ]
+    if controls.get("block_entries"):
+        notes.append("Action implies full entry block; validate this as an explicit guard strategy before execution.")
+    if not backtest_ready:
+        if route is None:
+            notes.append(routing_reason)
+        else:
+            notes.append(
+                f"`{base_strategy}` is a strategy template. Add/choose a concrete backtest implementation before execution."
+            )
+
+    return {
+        "strategy_candidate_id": _sanitize_id(f"{event}_{condition}_{action}_{candidate_id}"),
+        "source_type": "promoted_blueprint",
+        "execution_family": execution_family,
+        "base_strategy": base_strategy,
+        "backtest_ready": backtest_ready,
+        "backtest_ready_reason": routing_reason if not backtest_ready else "",
+        "event": event,
+        "condition": condition,
+        "action": action,
+        "executable_condition": executable_condition,
+        "executable_action": executable_action,
+        "status": "PROMOTED",
+        "n_events": trades,
+        "edge_score": _safe_float(split_pnl.get("validation"), selection_score),
+        "expectancy_per_trade": _safe_float(split_pnl.get("validation"), selection_score),
+        "stability_proxy": symbol_pass_rate,
+        "robustness_score": symbol_pass_rate,
+        "event_frequency": 0.0,
+        "capacity_proxy": 0.0,
+        "profit_density_score": max(0.0, selection_score),
+        "selection_score": selection_score,
+        "symbols": run_symbols,
+        "candidate_symbol": candidate_symbol,
+        "run_symbols": run_symbols,
+        "symbol_scores": {},
+        "rollout_eligible": deployment_scope["rollout_eligible"],
+        "deployment_type": deployment_scope["deployment_type"],
+        "deployment_symbols": deployment_symbols,
+        "strategy_instances": strategy_instances,
+        "risk_controls": controls,
+        "manual_backtest_command": _manual_backtest_command_for_strategy(base_strategy, symbols_csv),
+        "notes": notes,
+    }
 
 
 def _manual_backtest_command_for_strategy(base_strategy: str, symbols_csv: str) -> str:
@@ -544,6 +762,27 @@ def _render_manual_instructions(run_id: str, symbols: List[str], candidates: Lis
     return "\n".join(lines)
 
 
+def _behavior_equivalence_key(row: Dict[str, object]) -> str:
+    payload = {
+        "base_strategy": str(row.get("base_strategy", "")),
+        "event": str(row.get("event", "")),
+        "condition": str(row.get("condition", "")),
+        "action": str(row.get("action", "")),
+        "candidate_symbol": str(row.get("candidate_symbol", "")),
+        "deployment_symbols": sorted(str(symbol) for symbol in row.get("deployment_symbols", [])),
+        "risk_controls": row.get("risk_controls", {}),
+    }
+    return json.dumps(payload, sort_keys=True)
+
+
+def _count_by_source(rows: List[Dict[str, object]]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for row in rows:
+        source = str(row.get("source_type", "unknown")).strip() or "unknown"
+        counts[source] = counts.get(source, 0) + 1
+    return counts
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build manual-backtest strategy candidates from promoted edges (multi-symbol aware)")
     parser.add_argument("--run_id", required=True)
@@ -605,6 +844,10 @@ def main() -> int:
                     "Use --ignore_checklist 1 only for explicit override."
                 )
 
+        promoted_payloads, promoted_paths = _load_promoted_blueprints(run_id=args.run_id)
+        inputs.append({"path": str(promoted_paths["promoted_path"]), "rows": None, "start_ts": None, "end_ts": None})
+        inputs.append({"path": str(promoted_paths["report_path"]), "rows": None, "start_ts": None, "end_ts": None})
+
         edge_csv = DATA_ROOT / "reports" / "edge_candidates" / args.run_id / "edge_candidates_normalized.csv"
         inputs.append({"path": str(edge_csv), "rows": None, "start_ts": None, "end_ts": None})
 
@@ -643,7 +886,14 @@ def main() -> int:
                     status_series = pd.Series("", index=edge_df.index, dtype=str)
                 edge_df = edge_df[status_series == "PROMOTED"].copy()
 
-        strategy_rows: List[Dict[str, object]] = []
+        strategy_rows: List[Dict[str, object]] = [
+            _build_promoted_strategy_candidate(
+                blueprint=payload.get("blueprint", {}) if isinstance(payload.get("blueprint"), dict) else {},
+                promotion=payload.get("promotion", {}) if isinstance(payload.get("promotion"), dict) else {},
+                symbols=symbols,
+            )
+            for payload in promoted_payloads
+        ]
         missing_detail_records: List[Dict[str, str]] = []
         if not edge_df.empty:
             edge_df["expectancy_per_trade"] = pd.to_numeric(edge_df.get("expectancy_per_trade"), errors="coerce").fillna(
@@ -690,24 +940,36 @@ def main() -> int:
                 f"count={len(missing_detail_records)} examples={missing_preview}"
             )
 
-        strategy_rows = sorted(strategy_rows, key=lambda x: float(x["selection_score"]), reverse=True)
-
         if int(args.include_alpha_bundle):
             alpha_candidate = _load_alpha_bundle_candidate(run_id=args.run_id, symbols=symbols)
             if alpha_candidate is not None:
                 strategy_rows.append(alpha_candidate)
 
-        strategy_rows = sorted(strategy_rows, key=lambda x: float(x["selection_score"]), reverse=True)
+        source_counts_seen = _count_by_source(strategy_rows)
+        strategy_rows = sorted(
+            strategy_rows,
+            key=lambda x: (
+                SOURCE_PRIORITY.get(str(x.get("source_type", "")), 99),
+                -float(x.get("selection_score", 0.0)),
+                str(x.get("strategy_candidate_id", "")),
+            ),
+        )
         deduped_rows: List[Dict[str, object]] = []
         seen_candidate_ids = set()
+        seen_behavior_keys = set()
         for row in strategy_rows:
             strategy_candidate_id = str(row.get("strategy_candidate_id", "")).strip()
             if strategy_candidate_id and strategy_candidate_id in seen_candidate_ids:
                 continue
+            behavior_key = _behavior_equivalence_key(row)
+            if behavior_key in seen_behavior_keys:
+                continue
             if strategy_candidate_id:
                 seen_candidate_ids.add(strategy_candidate_id)
+            seen_behavior_keys.add(behavior_key)
             deduped_rows.append(row)
         strategy_rows = deduped_rows[: int(args.max_candidates)]
+        source_counts_selected = _count_by_source(strategy_rows)
         for rank, row in enumerate(strategy_rows, start=1):
             row["rank"] = rank
 
@@ -722,6 +984,8 @@ def main() -> int:
             "builder_diagnostics": {
                 "missing_candidate_detail_count": skipped_missing_detail_count,
                 "skipped_missing_candidate_detail_count": skipped_missing_detail_count if int(args.allow_missing_candidate_detail) else 0,
+                "source_counts_seen": source_counts_seen,
+                "source_counts_selected": source_counts_selected,
             },
             "strategies": [
                 {
@@ -752,11 +1016,14 @@ def main() -> int:
             stats={
                 "strategy_candidate_count": int(len(strategy_rows)),
                 "edge_rows_seen": int(len(edge_df)),
+                "promoted_blueprints_seen": int(len(promoted_payloads)),
                 "included_alpha_bundle": bool(int(args.include_alpha_bundle)),
                 "missing_candidate_detail_count": int(skipped_missing_detail_count),
                 "skipped_missing_candidate_detail_count": (
                     int(skipped_missing_detail_count) if int(args.allow_missing_candidate_detail) else 0
                 ),
+                "source_counts_seen": source_counts_seen,
+                "source_counts_selected": source_counts_selected,
             },
         )
         return 0

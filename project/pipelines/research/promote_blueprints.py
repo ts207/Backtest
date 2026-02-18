@@ -137,6 +137,35 @@ def _stressed_pnl(frame: pd.DataFrame) -> Dict[str, float]:
     return out
 
 
+def _realized_cost_ratio_by_split(frame: pd.DataFrame) -> Dict[str, Dict[str, float]]:
+    if frame.empty:
+        return {
+            split: {
+                "gross_abs_pnl_sum": 0.0,
+                "trading_cost_sum": 0.0,
+                "realized_cost_ratio": 0.0,
+            }
+            for split in REQUIRED_WF_SPLITS
+        }
+    gross = pd.to_numeric(frame.get("gross_pnl"), errors="coerce").fillna(
+        pd.to_numeric(frame.get("pnl"), errors="coerce").fillna(0.0)
+    )
+    trading_cost = pd.to_numeric(frame.get("trading_cost"), errors="coerce").fillna(0.0)
+    out: Dict[str, Dict[str, float]] = {}
+    eps = 1e-12
+    for split in REQUIRED_WF_SPLITS:
+        mask = frame["split_label"] == split
+        gross_abs = float(gross[mask].abs().sum())
+        cost_sum = float(trading_cost[mask].sum())
+        denom = max(gross_abs + cost_sum, eps)
+        out[split] = {
+            "gross_abs_pnl_sum": gross_abs,
+            "trading_cost_sum": cost_sum,
+            "realized_cost_ratio": float(cost_sum / denom),
+        }
+    return out
+
+
 def _symbol_pass_rate(frame: pd.DataFrame) -> float:
     if frame.empty:
         return 0.0
@@ -364,6 +393,7 @@ def main() -> int:
     parser.add_argument("--max_loss_cluster_len", type=int, default=64)
     parser.add_argument("--max_cluster_loss_concentration", type=float, default=0.50)
     parser.add_argument("--min_tail_conditional_drawdown_95", type=float, default=-0.20)
+    parser.add_argument("--max_cost_ratio_train_validation", type=float, default=0.60)
     # Backward-compatible alias; if provided, overrides regime_max_share.
     parser.add_argument("--max_regime_dominance_share", type=float, default=0.999)
     parser.add_argument("--blueprints_path", default=None)
@@ -389,6 +419,7 @@ def main() -> int:
         "max_loss_cluster_len": int(args.max_loss_cluster_len),
         "max_cluster_loss_concentration": float(args.max_cluster_loss_concentration),
         "min_tail_conditional_drawdown_95": float(args.min_tail_conditional_drawdown_95),
+        "max_cost_ratio_train_validation": float(args.max_cost_ratio_train_validation),
         "max_regime_dominance_share": float(args.max_regime_dominance_share),
         "blueprints_path": str(blueprints_path),
         "allow_fallback_evidence": int(args.allow_fallback_evidence),
@@ -446,6 +477,7 @@ def main() -> int:
             trades = _count_entries(frame)
             split_pnl = _split_pnl(frame)
             stressed_split_pnl = _stressed_pnl(frame)
+            realized_cost_ratio_by_split = _realized_cost_ratio_by_split(frame)
             symbol_pass_rate = _symbol_pass_rate(frame)
             regime_dominance_share = _regime_dominance_share(frame)
             regime_source = "fallback"
@@ -534,6 +566,13 @@ def main() -> int:
                     )
                     >= float(args.min_tail_conditional_drawdown_95)
                 ),
+                "cost_ratio_train_validation": bool(
+                    max(
+                        _to_float(realized_cost_ratio_by_split["train"]["realized_cost_ratio"]),
+                        _to_float(realized_cost_ratio_by_split["validation"]["realized_cost_ratio"]),
+                    )
+                    <= float(args.max_cost_ratio_train_validation)
+                ),
             }
             promote = all(gates.values())
             fail_reasons = [name for name, passed in gates.items() if not passed]
@@ -552,6 +591,7 @@ def main() -> int:
                 "regime_evidence_source": regime_source,
                 "drawdown_cluster_metrics": drawdown_wf if drawdown_wf is not None else {},
                 "drawdown_evidence_source": drawdown_source,
+                "realized_cost_ratio_by_split": realized_cost_ratio_by_split,
                 "gates": gates,
                 "fail_reasons": fail_reasons,
                 "evidence_mode": evidence_mode,
@@ -585,6 +625,7 @@ def main() -> int:
                 "max_loss_cluster_len": int(args.max_loss_cluster_len),
                 "max_cluster_loss_concentration": float(args.max_cluster_loss_concentration),
                 "min_tail_conditional_drawdown_95": float(args.min_tail_conditional_drawdown_95),
+                "max_cost_ratio_train_validation": float(args.max_cost_ratio_train_validation),
                 "cost_stress_rule": "2x trading_cost on train+validation must stay positive",
             },
         }

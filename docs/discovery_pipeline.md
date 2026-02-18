@@ -38,6 +38,14 @@ So discovery can complete successfully without producing backtest/eval/promotion
 - `build_context_features`
 - `build_market_context`
 
+Market-scoped manifest naming:
+- perp manifests remain:
+  - `data/runs/<run_id>/build_cleaned_15m.json`
+  - `data/runs/<run_id>/build_features_v1.json`
+- spot manifests are isolated:
+  - `data/runs/<run_id>/build_cleaned_15m_spot.json`
+  - `data/runs/<run_id>/build_features_v1_spot.json`
+
 ### B) Research
 - hypothesis queue (`generate_hypothesis_queue.py`)
 - phase-1 family analyzers (`analyze_*`)
@@ -46,12 +54,28 @@ So discovery can complete successfully without producing backtest/eval/promotion
 - naive-entry validation (`evaluate_naive_entry.py`)
 - checklist (`generate_recommendations_checklist.py`)
 
+Checklist auto-continue behavior:
+- `run_all.py` default: `--auto_continue_on_keep_research 0` (fail-closed)
+- If checklist decision is `KEEP_RESEARCH` and execution is requested:
+  - default behavior: pipeline stops before execution stages
+  - override behavior (`--auto_continue_on_keep_research 1`): orchestrator injects:
+  - compiler: `--ignore_checklist 1 --allow_fallback_blueprints 1`
+  - builder: `--ignore_checklist 1 --allow_non_promoted 1`
+- Discovery-only runs remain strict (no auto-bypass).
+- `run_manifest.json` records:
+  - `checklist_decision`
+  - `auto_continue_applied`
+  - `auto_continue_reason`
+  - `execution_blocked_by_checklist`
+  - `non_production_overrides`
+
 Phase-2 now consumes `data/reports/hypothesis_generator/<run_id>/phase1_hypothesis_queue.*` when present and records matched hypothesis context per event family.
 Phase-2 Tier-1 hardening adds:
 - registry-parity enforcement (phase1 counts must match `data/events/<run_id>/events.parquet`),
 - cost-aware promotion fields:
   `after_cost_expectancy_per_trade`, `stressed_after_cost_expectancy_per_trade`,
   `turnover_proxy_mean`, `avg_dynamic_cost_bps`, `cost_ratio`,
+  `cost_input_coverage`, `cost_model_valid`, `gate_cost_model_valid`,
 - validation-only selection policy with dual labels:
   legacy (`validation_*`, `test_*`) + canonical aliases (`val_*`, `oos1_*`),
 - multiplicity now keyed from validation p-values (`val_p_value_adj_bh`).
@@ -72,6 +96,10 @@ Phase-2 Tier-2 hardening adds:
 Strategy-prep strictness now includes naive-entry contract:
 - compiler requires `data/reports/naive_entry/<run_id>/naive_entry_validation.csv` by default,
 - candidates must have `naive_pass=true` unless explicitly overridden with `--allow_naive_entry_fail 1`.
+- compiler applies explicit action semantics overlays (`entry_gate_skip`, `risk_throttle_*`) and drops runtime-equivalent behavior duplicates.
+- builder merges promoted blueprints and edge candidates with deterministic precedence:
+  - promoted blueprint > edge candidate > alpha bundle,
+  - then `selection_score` desc, then `strategy_candidate_id` asc.
 
 ### D) Optional downstream execution
 - backtest (`backtest_strategies.py`)
@@ -96,6 +124,8 @@ Promotion integrity defaults:
 - regime gate can consume walkforward strategy regime evidence directly (`regime_evidence_source=walkforward_strategy`).
 - drawdown-cluster gates consume walkforward strategy evidence directly:
   `max_loss_cluster_len`, `max_cluster_loss_concentration`, `min_tail_conditional_drawdown_95`.
+- realized train/validation cost ratio gate from strategy returns:
+  `--max_cost_ratio_train_validation` (default `0.60`).
 
 Report integrity defaults:
 - fail-closed backtest artifact contract (requires `metrics.json`, `equity_curve.csv`, and trade evidence),

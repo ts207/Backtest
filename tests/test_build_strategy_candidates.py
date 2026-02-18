@@ -64,6 +64,54 @@ def _write_edge_inputs(
     ).to_csv(edge_dir / "edge_candidates_normalized.csv", index=False)
 
 
+def _write_promotion_inputs(
+    tmp_path: Path,
+    run_id: str,
+    *,
+    event: str = "vol_shock_relaxation",
+    blueprint_id: str = "bp_promoted",
+    candidate_id: str = "promoted_0",
+    condition: str = "all",
+    action: str = "delay_30",
+    validation_score: float = 0.25,
+) -> None:
+    promo_dir = tmp_path / "reports" / "promotions" / run_id
+    promo_dir.mkdir(parents=True, exist_ok=True)
+    delay_bars = 0
+    overlays = []
+    if action.startswith("delay_"):
+        delay_bars = int(action.split("_")[-1])
+    elif action == "entry_gate_skip":
+        overlays = [{"name": "risk_throttle", "params": {"size_scale": 0.0}}]
+    elif action.startswith("risk_throttle_"):
+        overlays = [{"name": "risk_throttle", "params": {"size_scale": float(action.split("_")[-1])}}]
+    row = {
+        "id": blueprint_id,
+        "run_id": run_id,
+        "event_type": event,
+        "candidate_id": candidate_id,
+        "symbol_scope": {"mode": "multi_symbol", "symbols": ["BTCUSDT", "ETHUSDT"], "candidate_symbol": "ALL"},
+        "entry": {"conditions": [condition], "delay_bars": delay_bars},
+        "overlays": overlays,
+        "evaluation": {"min_trades": 100},
+        "lineage": {"source_path": "x"},
+    }
+    (promo_dir / "promoted_blueprints.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+    report = {
+        "run_id": run_id,
+        "tested": [
+            {
+                "blueprint_id": blueprint_id,
+                "trades": 180,
+                "split_pnl": {"train": 0.5, "validation": validation_score, "test": 0.1},
+                "stressed_split_pnl": {"train": 0.4, "validation": validation_score, "test": 0.05},
+                "symbol_pass_rate": 0.8,
+            }
+        ],
+    }
+    (promo_dir / "promotion_report.json").write_text(json.dumps(report), encoding="utf-8")
+
+
 def test_build_strategy_candidates_from_promoted_edges(monkeypatch, tmp_path: Path) -> None:
     run_id = "strategy_builder_run"
     _write_edge_inputs(tmp_path, run_id=run_id)
@@ -630,3 +678,108 @@ def test_build_strategy_candidates_applies_final_cap_after_alpha_append(monkeypa
     out_json = tmp_path / "reports" / "strategy_builder" / run_id / "strategy_candidates.json"
     payload = json.loads(out_json.read_text(encoding="utf-8"))
     assert len(payload) == 1
+
+
+def test_strategy_builder_merges_promotions_and_edge_candidates(monkeypatch, tmp_path: Path) -> None:
+    run_id = "strategy_builder_merge_sources"
+    _write_edge_inputs(tmp_path, run_id=run_id, event="vol_shock_relaxation", action="delay_30")
+    _write_promotion_inputs(
+        tmp_path,
+        run_id=run_id,
+        event="funding_extreme_reversal_window",
+        blueprint_id="bp_promoted",
+        candidate_id="promoted_1",
+        condition="all",
+        action="delay_8",
+        validation_score=0.3,
+    )
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(build_strategy_candidates, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_strategy_candidates.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--include_alpha_bundle",
+            "0",
+            "--ignore_checklist",
+            "1",
+        ],
+    )
+    assert build_strategy_candidates.main() == 0
+    payload = json.loads((tmp_path / "reports" / "strategy_builder" / run_id / "strategy_candidates.json").read_text(encoding="utf-8"))
+    assert len(payload) == 2
+    assert {row["source_type"] for row in payload} == {"promoted_blueprint", "edge_candidate"}
+
+
+def test_strategy_builder_prefers_promoted_source_on_conflict(monkeypatch, tmp_path: Path) -> None:
+    run_id = "strategy_builder_source_priority"
+    _write_edge_inputs(tmp_path, run_id=run_id, event="vol_shock_relaxation", condition="all", action="delay_30")
+    _write_promotion_inputs(
+        tmp_path,
+        run_id=run_id,
+        event="vol_shock_relaxation",
+        blueprint_id="bp_priority",
+        candidate_id="vol_shock_relaxation_0",
+        condition="all",
+        action="delay_30",
+        validation_score=0.25,
+    )
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(build_strategy_candidates, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_strategy_candidates.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--include_alpha_bundle",
+            "0",
+            "--ignore_checklist",
+            "1",
+        ],
+    )
+    assert build_strategy_candidates.main() == 0
+    payload = json.loads((tmp_path / "reports" / "strategy_builder" / run_id / "strategy_candidates.json").read_text(encoding="utf-8"))
+    assert len(payload) == 1
+    assert payload[0]["source_type"] == "promoted_blueprint"
+
+
+def test_strategy_builder_reports_source_diagnostics(monkeypatch, tmp_path: Path) -> None:
+    run_id = "strategy_builder_source_diag"
+    _write_edge_inputs(tmp_path, run_id=run_id)
+    _write_promotion_inputs(tmp_path, run_id=run_id)
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(build_strategy_candidates, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_strategy_candidates.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT,ETHUSDT",
+            "--include_alpha_bundle",
+            "0",
+            "--ignore_checklist",
+            "1",
+        ],
+    )
+    assert build_strategy_candidates.main() == 0
+    manifest = json.loads((tmp_path / "reports" / "strategy_builder" / run_id / "deployment_manifest.json").read_text(encoding="utf-8"))
+    seen = manifest["builder_diagnostics"]["source_counts_seen"]
+    selected = manifest["builder_diagnostics"]["source_counts_selected"]
+    assert seen["promoted_blueprint"] == 1
+    assert seen["edge_candidate"] == 1
+    assert selected["promoted_blueprint"] >= 1

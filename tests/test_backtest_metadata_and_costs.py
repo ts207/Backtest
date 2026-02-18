@@ -118,6 +118,7 @@ def test_backtest_main_writes_cost_decomposition_and_reproducibility(monkeypatch
     [
         ("funding_extreme_reversal_v1", "carry"),
         ("cross_venue_desync_v1", "spread"),
+        ("dsl_interpreter_v1__range_compression_breakout_window__btc", "dsl"),
     ],
 )
 def test_backtest_metadata_records_execution_family_without_breakout_only_config(

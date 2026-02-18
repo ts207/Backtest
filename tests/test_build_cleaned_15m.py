@@ -115,3 +115,65 @@ def test_clean_writes_run_scoped_partitions(monkeypatch, tmp_path: Path) -> None
         / "month=01"
     )
     assert list(run_scoped.glob("*.csv")) or list(run_scoped.glob("*.parquet"))
+
+
+def test_build_cleaned_manifest_stage_name_market_scoped(monkeypatch, tmp_path: Path) -> None:
+    run_id = "clean_manifest_market_scoped"
+    symbol = "BTCUSDT"
+    _seed_raw(tmp_path, symbol=symbol, start="2024-01-01", periods=96)
+    spot_raw = pd.read_csv(tmp_path / "lake" / "raw" / "binance" / "perp" / symbol / "ohlcv_15m" / "part.csv")
+    _write_csv(spot_raw, tmp_path / "lake" / "raw" / "binance" / "spot" / symbol / "ohlcv_15m" / "part.csv")
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(build_cleaned_15m, "DATA_ROOT", tmp_path)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_cleaned_15m.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            symbol,
+            "--market",
+            "perp",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-01",
+            "--allow_missing_funding",
+            "1",
+            "--force",
+            "1",
+        ],
+    )
+    assert build_cleaned_15m.main() == 0
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_cleaned_15m.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            symbol,
+            "--market",
+            "spot",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-01",
+            "--force",
+            "1",
+        ],
+    )
+    assert build_cleaned_15m.main() == 0
+
+    perp_manifest = tmp_path / "runs" / run_id / "build_cleaned_15m.json"
+    spot_manifest = tmp_path / "runs" / run_id / "build_cleaned_15m_spot.json"
+    assert perp_manifest.exists()
+    assert spot_manifest.exists()
+    assert json.loads(perp_manifest.read_text(encoding="utf-8"))["status"] == "success"
+    assert json.loads(spot_manifest.read_text(encoding="utf-8"))["status"] == "success"

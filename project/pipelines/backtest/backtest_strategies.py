@@ -54,11 +54,15 @@ STRATEGY_EXECUTION_FAMILY = {
 
 
 def _execution_family_for_strategies(strategies: List[str]) -> str:
-    families = {
-        STRATEGY_EXECUTION_FAMILY.get(str(strategy).strip(), "unknown")
-        for strategy in strategies
-        if str(strategy).strip()
-    }
+    families = set()
+    for strategy in strategies:
+        strategy_id = str(strategy).strip()
+        if not strategy_id:
+            continue
+        if strategy_id.startswith("dsl_interpreter_v1__"):
+            families.add("dsl")
+            continue
+        families.add(STRATEGY_EXECUTION_FAMILY.get(strategy_id, "unknown"))
     if len(families) == 1:
         return next(iter(families))
     if not families:

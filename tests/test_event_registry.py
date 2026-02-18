@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "project"))
 
 from events.registry import EVENT_REGISTRY_SPECS, load_registry_events
+from events.registry import load_registry_flags
 
 
 def _write_phase1_event_fixture(tmp_path: Path, run_id: str, event_type: str, rows: int = 12) -> None:
@@ -83,3 +84,57 @@ def test_event_registry_rebuild_is_deterministic(tmp_path: Path) -> None:
     manifest = tmp_path / "events" / run_id / "registry_manifest.json"
     payload = json.loads(manifest.read_text(encoding="utf-8"))
     assert payload["event_rows"] == len(first_sorted)
+
+
+def test_registry_incremental_build_preserves_previous_families(tmp_path: Path) -> None:
+    run_id = "registry_incremental_preserve"
+    event_a = "vol_shock_relaxation"
+    event_b = "liquidity_absence_window"
+    _write_phase1_event_fixture(tmp_path=tmp_path, run_id=run_id, event_type=event_a, rows=7)
+    _write_phase1_event_fixture(tmp_path=tmp_path, run_id=run_id, event_type=event_b, rows=5)
+
+    _run_build_registry(tmp_path=tmp_path, run_id=run_id, event_type=event_a)
+    _run_build_registry(tmp_path=tmp_path, run_id=run_id, event_type=event_b)
+
+    registry_events = load_registry_events(data_root=tmp_path, run_id=run_id)
+    per_family = registry_events.groupby("event_type").size().to_dict()
+    assert int(per_family.get(event_a, 0)) == 7
+    assert int(per_family.get(event_b, 0)) == 5
+
+
+def test_registry_flags_include_multiple_families_after_sequential_builds(tmp_path: Path) -> None:
+    run_id = "registry_flags_multifamily"
+    event_a = "vol_shock_relaxation"
+    event_b = "liquidity_absence_window"
+    _write_phase1_event_fixture(tmp_path=tmp_path, run_id=run_id, event_type=event_a, rows=8)
+    _write_phase1_event_fixture(tmp_path=tmp_path, run_id=run_id, event_type=event_b, rows=6)
+
+    _run_build_registry(tmp_path=tmp_path, run_id=run_id, event_type=event_a)
+    _run_build_registry(tmp_path=tmp_path, run_id=run_id, event_type=event_b)
+
+    flags = load_registry_flags(data_root=tmp_path, run_id=run_id)
+    signal_a = EVENT_REGISTRY_SPECS[event_a].signal_column
+    signal_b = EVENT_REGISTRY_SPECS[event_b].signal_column
+    assert signal_a in flags.columns
+    assert signal_b in flags.columns
+    assert bool(flags[signal_a].any())
+    assert bool(flags[signal_b].any())
+
+
+def test_registry_merge_replaces_selected_family_only(tmp_path: Path) -> None:
+    run_id = "registry_replace_selected_family"
+    event_a = "vol_shock_relaxation"
+    event_b = "liquidity_absence_window"
+    _write_phase1_event_fixture(tmp_path=tmp_path, run_id=run_id, event_type=event_a, rows=9)
+    _write_phase1_event_fixture(tmp_path=tmp_path, run_id=run_id, event_type=event_b, rows=4)
+
+    _run_build_registry(tmp_path=tmp_path, run_id=run_id, event_type=event_a)
+    _run_build_registry(tmp_path=tmp_path, run_id=run_id, event_type=event_b)
+
+    _write_phase1_event_fixture(tmp_path=tmp_path, run_id=run_id, event_type=event_a, rows=3)
+    _run_build_registry(tmp_path=tmp_path, run_id=run_id, event_type=event_a)
+
+    registry_events = load_registry_events(data_root=tmp_path, run_id=run_id)
+    per_family = registry_events.groupby("event_type").size().to_dict()
+    assert int(per_family.get(event_a, 0)) == 3
+    assert int(per_family.get(event_b, 0)) == 4

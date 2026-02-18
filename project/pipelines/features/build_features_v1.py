@@ -254,7 +254,8 @@ def main() -> int:
             "funding": "funding_15m_v1",
         },
     }
-    manifest = start_manifest("build_features_v1", run_id, params, inputs, outputs)
+    stage_name = "build_features_v1" if market == "perp" else "build_features_v1_spot"
+    manifest = start_manifest(stage_name, run_id, params, inputs, outputs)
     stats: Dict[str, object] = {"symbols": {}}
 
     try:

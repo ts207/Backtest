@@ -17,6 +17,8 @@ from events.registry import (
     EVENT_REGISTRY_SPECS,
     build_event_flags,
     collect_registry_events,
+    load_registry_events,
+    merge_registry_events,
     write_event_registry_artifacts,
 )
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
@@ -55,10 +57,16 @@ def main() -> int:
             src = DATA_ROOT / "reports" / spec.reports_dir / args.run_id / spec.events_file
             inputs.append({"path": str(src), "rows": None, "start_ts": None, "end_ts": None})
 
-        events = collect_registry_events(
+        incoming_events = collect_registry_events(
             data_root=DATA_ROOT,
             run_id=args.run_id,
             event_types=selected_event_types,
+        )
+        existing_events = load_registry_events(data_root=DATA_ROOT, run_id=args.run_id)
+        events = merge_registry_events(
+            existing=existing_events,
+            incoming=incoming_events,
+            selected_event_types=selected_event_types,
         )
         flags = build_event_flags(
             events=events,
@@ -74,18 +82,21 @@ def main() -> int:
             event_flags=flags,
         )
 
-        if events.empty:
-            per_family_counts: Dict[str, int] = {event_type: 0 for event_type in selected_event_types}
-        else:
-            per_family_counts = {
-                str(event_type): int(count)
-                for event_type, count in events.groupby("event_type", sort=True).size().to_dict().items()
-            }
+        per_family_counts: Dict[str, int] = {event_type: 0 for event_type in sorted(EVENT_REGISTRY_SPECS.keys())}
+        if not events.empty:
+            for event_type, count in events.groupby("event_type", sort=True).size().to_dict().items():
+                per_family_counts[str(event_type)] = int(count)
+        incoming_per_family_counts: Dict[str, int] = {event_type: 0 for event_type in selected_event_types}
+        if not incoming_events.empty:
+            for event_type, count in incoming_events.groupby("event_type", sort=True).size().to_dict().items():
+                incoming_per_family_counts[str(event_type)] = int(count)
         summary = {
             "run_id": args.run_id,
             "selected_event_types": selected_event_types,
+            "incoming_event_rows": int(len(incoming_events)),
             "event_rows": int(len(events)),
             "event_flag_rows": int(len(flags)),
+            "incoming_per_family_counts": incoming_per_family_counts,
             "per_family_counts": per_family_counts,
             **paths,
         }
@@ -100,9 +111,12 @@ def main() -> int:
             manifest,
             "success",
             stats={
+                "incoming_event_rows": int(len(incoming_events)),
                 "event_rows": int(len(events)),
                 "event_flag_rows": int(len(flags)),
-                "event_family_count": int(len(per_family_counts)),
+                "selected_event_family_count": int(len(selected_event_types)),
+                "event_family_count": int(sum(1 for value in per_family_counts.values() if int(value) > 0)),
+                "per_family_counts": per_family_counts,
             },
         )
         return 0

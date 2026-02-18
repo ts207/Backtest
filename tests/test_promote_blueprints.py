@@ -43,7 +43,12 @@ def _write_blueprint(path: Path, run_id: str, blueprint_id: str = "bp_one") -> N
     path.write_text(json.dumps(row) + "\n", encoding="utf-8")
 
 
-def _write_returns(path: Path) -> None:
+def _write_returns(
+    path: Path,
+    *,
+    gross_pnl_when_pos: float = 0.0020,
+    trading_cost_when_pos: float = 0.0002,
+) -> None:
     records = []
     for symbol in ("BTCUSDT", "ETHUSDT"):
         ts = pd.date_range("2024-01-01", periods=220, freq="15min", tz="UTC")
@@ -58,8 +63,8 @@ def _write_returns(path: Path) -> None:
                     "position_scale": 1.0,
                     "ret": 0.0015 if pos else 0.0,
                     "pnl": 0.0010 if pos else 0.0,
-                    "gross_pnl": 0.0020 if pos else 0.0,
-                    "trading_cost": 0.0002 if pos else 0.0,
+                    "gross_pnl": gross_pnl_when_pos if pos else 0.0,
+                    "trading_cost": trading_cost_when_pos if pos else 0.0,
                     "funding_pnl": 0.0,
                     "borrow_cost": 0.0,
                     "close": 100.0 + float(i) * 0.01,
@@ -397,3 +402,102 @@ def test_promote_blueprints_fails_drawdown_cluster_gates(monkeypatch, tmp_path: 
     assert tested["gates"]["drawdown_cluster_concentration"] is False
     assert tested["gates"]["tail_conditional_drawdown"] is False
     assert tested["promoted"] is False
+
+
+def test_promote_blueprints_blocks_when_realized_cost_ratio_exceeds_threshold(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    run_id = "promote_bp_cost_ratio_fail"
+    bp_dir = tmp_path / "reports" / "strategy_blueprints" / run_id
+    bp_dir.mkdir(parents=True, exist_ok=True)
+    bp_path = bp_dir / "blueprints.jsonl"
+    _write_blueprint(bp_path, run_id=run_id)
+
+    engine_dir = tmp_path / "runs" / run_id / "engine"
+    engine_dir.mkdir(parents=True, exist_ok=True)
+    _write_returns(
+        engine_dir / "strategy_returns_dsl_interpreter_v1__bp_one.csv",
+        gross_pnl_when_pos=0.0010,
+        trading_cost_when_pos=0.0100,
+    )
+    _write_walkforward_summary(
+        tmp_path,
+        run_id,
+        {
+            "dsl_interpreter_v1__bp_one": {
+                "train": {"total_trades": 150, "net_pnl": 1.0, "stressed_net_pnl": 0.8},
+                "validation": {"total_trades": 120, "net_pnl": 0.8, "stressed_net_pnl": 0.6},
+                "test": {"total_trades": 90, "net_pnl": 0.4, "stressed_net_pnl": 0.2},
+            }
+        },
+    )
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(promote_blueprints, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "promote_blueprints.py",
+            "--run_id",
+            run_id,
+            "--max_cost_ratio_train_validation",
+            "0.60",
+        ],
+    )
+    assert promote_blueprints.main() == 0
+
+    report = json.loads((tmp_path / "reports" / "promotions" / run_id / "promotion_report.json").read_text(encoding="utf-8"))
+    tested = report["tested"][0]
+    assert tested["gates"]["cost_ratio_train_validation"] is False
+    assert tested["promoted"] is False
+    assert tested["realized_cost_ratio_by_split"]["train"]["realized_cost_ratio"] > 0.6
+    assert tested["realized_cost_ratio_by_split"]["validation"]["realized_cost_ratio"] > 0.6
+
+
+def test_promote_blueprints_passes_when_realized_cost_ratio_within_threshold(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    run_id = "promote_bp_cost_ratio_pass"
+    bp_dir = tmp_path / "reports" / "strategy_blueprints" / run_id
+    bp_dir.mkdir(parents=True, exist_ok=True)
+    bp_path = bp_dir / "blueprints.jsonl"
+    _write_blueprint(bp_path, run_id=run_id)
+
+    engine_dir = tmp_path / "runs" / run_id / "engine"
+    engine_dir.mkdir(parents=True, exist_ok=True)
+    _write_returns(engine_dir / "strategy_returns_dsl_interpreter_v1__bp_one.csv")
+    _write_walkforward_summary(
+        tmp_path,
+        run_id,
+        {
+            "dsl_interpreter_v1__bp_one": {
+                "train": {"total_trades": 150, "net_pnl": 1.0, "stressed_net_pnl": 0.8},
+                "validation": {"total_trades": 120, "net_pnl": 0.8, "stressed_net_pnl": 0.6},
+                "test": {"total_trades": 90, "net_pnl": 0.4, "stressed_net_pnl": 0.2},
+            }
+        },
+    )
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(promote_blueprints, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "promote_blueprints.py",
+            "--run_id",
+            run_id,
+            "--max_cost_ratio_train_validation",
+            "0.60",
+        ],
+    )
+    assert promote_blueprints.main() == 0
+
+    report = json.loads((tmp_path / "reports" / "promotions" / run_id / "promotion_report.json").read_text(encoding="utf-8"))
+    tested = report["tested"][0]
+    assert tested["gates"]["cost_ratio_train_validation"] is True
+    assert tested["realized_cost_ratio_by_split"]["train"]["realized_cost_ratio"] <= 0.6
+    assert tested["realized_cost_ratio_by_split"]["validation"]["realized_cost_ratio"] <= 0.6

@@ -102,6 +102,10 @@ REGISTRY_EVENT_COLUMNS = [
 ]
 
 
+def _empty_registry_events() -> pd.DataFrame:
+    return pd.DataFrame(columns=REGISTRY_EVENT_COLUMNS)
+
+
 def _registry_root(data_root: Path, run_id: str) -> Path:
     return Path(data_root) / "events" / str(run_id)
 
@@ -143,17 +147,17 @@ def _feature_payload(row: pd.Series) -> str:
 
 def normalize_phase1_events(events: pd.DataFrame, spec: EventRegistrySpec, run_id: str) -> pd.DataFrame:
     if events.empty:
-        return pd.DataFrame(columns=REGISTRY_EVENT_COLUMNS)
+        return _empty_registry_events()
 
     out = events.copy()
     timestamp_col = _first_existing_column(out, ["enter_ts", "anchor_ts", "timestamp", "event_ts"])
     if timestamp_col is None:
-        return pd.DataFrame(columns=REGISTRY_EVENT_COLUMNS)
+        return _empty_registry_events()
 
     out["timestamp"] = pd.to_datetime(out[timestamp_col], utc=True, errors="coerce")
     out = out.dropna(subset=["timestamp"]).copy()
     if out.empty:
-        return pd.DataFrame(columns=REGISTRY_EVENT_COLUMNS)
+        return _empty_registry_events()
 
     if "symbol" not in out.columns:
         out["symbol"] = "ALL"
@@ -210,10 +214,51 @@ def collect_registry_events(data_root: Path, run_id: str, event_types: Iterable[
             rows.append(normalized)
 
     if not rows:
-        return pd.DataFrame(columns=REGISTRY_EVENT_COLUMNS)
+        return _empty_registry_events()
     out = pd.concat(rows, ignore_index=True)
     out = out.sort_values(["timestamp", "symbol", "event_type", "event_id"]).reset_index(drop=True)
     return out[REGISTRY_EVENT_COLUMNS]
+
+
+def _normalize_registry_events_frame(events: pd.DataFrame) -> pd.DataFrame:
+    if events is None or events.empty:
+        return _empty_registry_events()
+
+    out = events.copy()
+    for column in REGISTRY_EVENT_COLUMNS:
+        if column not in out.columns:
+            out[column] = None
+    out = out[REGISTRY_EVENT_COLUMNS].copy()
+    out["run_id"] = out["run_id"].fillna("").astype(str)
+    out["event_type"] = out["event_type"].fillna("").astype(str)
+    out["signal_column"] = out["signal_column"].fillna("").astype(str)
+    out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True, errors="coerce")
+    out = out.dropna(subset=["timestamp"]).copy()
+    out["symbol"] = out["symbol"].fillna("ALL").astype(str).str.upper().replace("", "ALL")
+    out["event_id"] = out["event_id"].fillna("").astype(str)
+    out["features_at_event"] = out["features_at_event"].fillna("{}").astype(str)
+    out = out.drop_duplicates(subset=["event_type", "timestamp", "symbol", "event_id"]).copy()
+    out = out.sort_values(["timestamp", "symbol", "event_type", "event_id"]).reset_index(drop=True)
+    return out[REGISTRY_EVENT_COLUMNS]
+
+
+def merge_registry_events(
+    *,
+    existing: pd.DataFrame,
+    incoming: pd.DataFrame,
+    selected_event_types: Iterable[str] | None,
+) -> pd.DataFrame:
+    selected = {str(event_type).strip() for event_type in (selected_event_types or []) if str(event_type).strip()}
+    existing_norm = _normalize_registry_events_frame(existing)
+    incoming_norm = _normalize_registry_events_frame(incoming)
+    if selected:
+        existing_kept = existing_norm[~existing_norm["event_type"].isin(selected)].copy()
+        incoming_replacement = incoming_norm[incoming_norm["event_type"].isin(selected)].copy()
+    else:
+        existing_kept = _empty_registry_events()
+        incoming_replacement = incoming_norm
+    merged = pd.concat([existing_kept, incoming_replacement], ignore_index=True)
+    return _normalize_registry_events_frame(merged)
 
 
 def _load_symbol_timestamps(data_root: Path, run_id: str, symbol: str, timeframe: str = "15m") -> pd.Series:
@@ -327,11 +372,9 @@ def load_registry_events(
     symbols: Sequence[str] | None = None,
 ) -> pd.DataFrame:
     events = _read_registry_stem(data_root=data_root, run_id=run_id, stem="events")
+    events = _normalize_registry_events_frame(events)
     if events.empty:
-        return pd.DataFrame(columns=REGISTRY_EVENT_COLUMNS)
-
-    events["timestamp"] = pd.to_datetime(events.get("timestamp"), utc=True, errors="coerce")
-    events = events.dropna(subset=["timestamp"]).copy()
+        return _empty_registry_events()
     if event_type is not None:
         events = events[events["event_type"].astype(str) == str(event_type)].copy()
     if symbols is not None:

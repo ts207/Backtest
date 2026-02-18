@@ -139,3 +139,54 @@ def test_build_features_prefers_run_scoped_cleaned_input(tmp_path: Path) -> None
     compat_out_dir = tmp_path / "lake" / "features" / "perp" / symbol / "15m" / "features_v1"
     compat_files = sorted(compat_out_dir.rglob("*.csv")) + sorted(compat_out_dir.rglob("*.parquet"))
     assert compat_files
+
+
+def test_build_features_manifest_stage_name_market_scoped(tmp_path: Path) -> None:
+    run_id = "feat_manifest_market_scoped"
+    symbol = "BTCUSDT"
+    _seed_cleaned(tmp_path, symbol)
+    spot_cleaned = pd.read_csv(tmp_path / "lake" / "cleaned" / "perp" / symbol / "bars_15m" / "part.csv")
+    _write_csv(spot_cleaned, tmp_path / "lake" / "cleaned" / "spot" / symbol / "bars_15m" / "part.csv")
+
+    env = os.environ.copy()
+    env["BACKTEST_DATA_ROOT"] = str(tmp_path)
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "project" / "pipelines" / "features" / "build_features_v1.py"),
+            "--run_id",
+            run_id,
+            "--symbols",
+            symbol,
+            "--market",
+            "perp",
+            "--force",
+            "1",
+        ],
+        check=True,
+        env=env,
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "project" / "pipelines" / "features" / "build_features_v1.py"),
+            "--run_id",
+            run_id,
+            "--symbols",
+            symbol,
+            "--market",
+            "spot",
+            "--force",
+            "1",
+        ],
+        check=True,
+        env=env,
+    )
+
+    perp_manifest = tmp_path / "runs" / run_id / "build_features_v1.json"
+    spot_manifest = tmp_path / "runs" / run_id / "build_features_v1_spot.json"
+    assert perp_manifest.exists()
+    assert spot_manifest.exists()
+    assert json.loads(perp_manifest.read_text(encoding="utf-8"))["status"] == "success"
+    assert json.loads(spot_manifest.read_text(encoding="utf-8"))["status"] == "success"

@@ -397,6 +397,124 @@ def _evaluation_from_row(row: Dict[str, object], fees_bps: float, slippage_bps: 
     )
 
 
+def _action_overlays(action: str) -> List[OverlaySpec]:
+    normalized = str(action or "").strip().lower()
+    if normalized == "entry_gate_skip":
+        return [OverlaySpec(name="risk_throttle", params={"size_scale": 0.0})]
+    if normalized.startswith("risk_throttle_"):
+        try:
+            scale = float(normalized.split("_")[-1])
+        except ValueError:
+            scale = 1.0
+        scale = max(0.0, min(1.0, scale))
+        return [OverlaySpec(name="risk_throttle", params={"size_scale": scale})]
+    return []
+
+
+def _merge_overlays(policy_overlays: List[OverlaySpec], action_overlays: List[OverlaySpec]) -> List[OverlaySpec]:
+    by_name: Dict[str, OverlaySpec] = {}
+    order: List[str] = []
+
+    for overlay in policy_overlays:
+        if overlay.name not in by_name:
+            order.append(overlay.name)
+        by_name[overlay.name] = overlay
+    for overlay in action_overlays:
+        if overlay.name not in by_name:
+            order.append(overlay.name)
+        by_name[overlay.name] = overlay
+
+    return [by_name[name] for name in order]
+
+
+def _blueprint_behavior_fingerprint(blueprint: Blueprint) -> str:
+    payload = {
+        "event_type": blueprint.event_type,
+        "direction": blueprint.direction,
+        "symbol_scope": {
+            "mode": blueprint.symbol_scope.mode,
+            "symbols": list(blueprint.symbol_scope.symbols),
+            "candidate_symbol": blueprint.symbol_scope.candidate_symbol,
+        },
+        "entry": {
+            "triggers": list(blueprint.entry.triggers),
+            "conditions": list(blueprint.entry.conditions),
+            "confirmations": list(blueprint.entry.confirmations),
+            "delay_bars": int(blueprint.entry.delay_bars),
+            "cooldown_bars": int(blueprint.entry.cooldown_bars),
+            "condition_logic": blueprint.entry.condition_logic,
+            "condition_nodes": [
+                {
+                    "feature": node.feature,
+                    "operator": node.operator,
+                    "value": node.value,
+                    "value_high": node.value_high,
+                    "lookback_bars": node.lookback_bars,
+                    "window_bars": node.window_bars,
+                }
+                for node in blueprint.entry.condition_nodes
+            ],
+            "arm_bars": int(blueprint.entry.arm_bars),
+            "reentry_lockout_bars": int(blueprint.entry.reentry_lockout_bars),
+        },
+        "exit": {
+            "time_stop_bars": blueprint.exit.time_stop_bars,
+            "invalidation": dict(blueprint.exit.invalidation),
+            "stop_type": blueprint.exit.stop_type,
+            "stop_value": blueprint.exit.stop_value,
+            "target_type": blueprint.exit.target_type,
+            "target_value": blueprint.exit.target_value,
+            "trailing_stop_type": blueprint.exit.trailing_stop_type,
+            "trailing_stop_value": blueprint.exit.trailing_stop_value,
+            "break_even_r": blueprint.exit.break_even_r,
+        },
+        "sizing": {
+            "mode": blueprint.sizing.mode,
+            "risk_per_trade": blueprint.sizing.risk_per_trade,
+            "target_vol": blueprint.sizing.target_vol,
+            "max_gross_leverage": blueprint.sizing.max_gross_leverage,
+            "max_position_scale": blueprint.sizing.max_position_scale,
+            "portfolio_risk_budget": blueprint.sizing.portfolio_risk_budget,
+            "symbol_risk_budget": blueprint.sizing.symbol_risk_budget,
+        },
+        "overlays": sorted(
+            [{"name": overlay.name, "params": dict(overlay.params)} for overlay in blueprint.overlays],
+            key=lambda row: str(row.get("name", "")),
+        ),
+        "evaluation": {
+            "min_trades": blueprint.evaluation.min_trades,
+            "cost_model": dict(blueprint.evaluation.cost_model),
+            "robustness_flags": dict(blueprint.evaluation.robustness_flags),
+        },
+    }
+    return json.dumps(payload, sort_keys=True)
+
+
+def _dedupe_blueprints_by_behavior(
+    blueprints: List[Blueprint],
+) -> Tuple[List[Blueprint], Dict[str, object]]:
+    seen: Dict[str, str] = {}
+    keep_map: Dict[str, List[str]] = {}
+    dropped_ids: List[str] = []
+    deduped: List[Blueprint] = []
+
+    for blueprint in blueprints:
+        fingerprint = _blueprint_behavior_fingerprint(blueprint)
+        keep_id = seen.get(fingerprint)
+        if keep_id is None:
+            seen[fingerprint] = blueprint.id
+            deduped.append(blueprint)
+            continue
+        dropped_ids.append(blueprint.id)
+        keep_map.setdefault(keep_id, []).append(blueprint.id)
+
+    return deduped, {
+        "behavior_duplicate_count": int(len(dropped_ids)),
+        "behavior_duplicate_dropped_ids": dropped_ids,
+        "behavior_duplicate_keep_map": {key: sorted(value) for key, value in keep_map.items()},
+    }
+
+
 def _rank_key(row: Dict[str, object]) -> Tuple[float, float, float, float, str]:
     oos_gate = _as_bool(row.get("gate_oos_validation", row.get("gate_oos_validation_test", False)))
     after_cost = _safe_float(row.get("after_cost_expectancy_per_trade"), _safe_float(row.get("expectancy_per_trade"), 0.0))
@@ -611,7 +729,8 @@ def _build_blueprint(
         names=[str(x) for x in policy.get("overlays", [])],
         robustness_score=_safe_float(merged.get("robustness_score"), 0.0),
     )
-    overlays = [OverlaySpec(name=str(item["name"]), params=dict(item["params"])) for item in overlay_rows]
+    policy_overlays = [OverlaySpec(name=str(item["name"]), params=dict(item["params"])) for item in overlay_rows]
+    overlays = _merge_overlays(policy_overlays, _action_overlays(str(merged.get("action", ""))))
 
     bp_id = _sanitize(f"bp_{run_id}_{event_type}_{candidate_id}_{symbol_scope.mode}")
     blueprint = Blueprint(
@@ -921,18 +1040,20 @@ def main() -> int:
             if (len(selected) == 0) and (not int(args.allow_naive_entry_fail)):
                 raise ValueError(f"All selected candidates for event={event_type} failed naive-entry validation.")
 
-        blueprints = sorted(blueprints, key=lambda b: (b.event_type, b.candidate_id, b.id))
         if not blueprints:
             raise ValueError(
                 "No blueprints were produced from promoted evidence. "
                 "Use --allow_fallback_blueprints 1 only for explicit non-production fallback."
             )
         blueprints, trim_stats = _trim_blueprints_with_walkforward_evidence(blueprints=blueprints, run_id=args.run_id)
-        blueprints = sorted(blueprints, key=lambda b: (b.event_type, b.candidate_id, b.id))
         if not blueprints:
             if bool(trim_stats.get("wf_trimmed_all", False)):
                 raise ValueError("Walkforward trimming removed all blueprints; strict mode fails closed.")
             raise ValueError("No blueprints remained after compile filters.")
+        blueprints, duplicate_stats = _dedupe_blueprints_by_behavior(blueprints)
+        blueprints = sorted(blueprints, key=lambda b: (b.event_type, b.candidate_id, b.id))
+        if not blueprints:
+            raise ValueError("No blueprints remained after behavior-level deduplication.")
 
         out_jsonl = out_dir / "blueprints.jsonl"
         lines = [json.dumps(bp.to_dict(), sort_keys=True) for bp in blueprints]
@@ -957,6 +1078,9 @@ def main() -> int:
             "rejected_naive_entry_count": int(rejected_naive_entry_count),
             "rejected_quality_floor_count": int(rejected_quality_floor_count),
             "wf_trimmed_all": bool(trim_stats.get("wf_trimmed_all", False)),
+            "behavior_duplicate_count": int(duplicate_stats.get("behavior_duplicate_count", 0)),
+            "behavior_duplicate_dropped_ids": list(duplicate_stats.get("behavior_duplicate_dropped_ids", [])),
+            "behavior_duplicate_keep_map": dict(duplicate_stats.get("behavior_duplicate_keep_map", {})),
             "per_event_rejections": per_event_rejections,
             "per_event_counts": {
                 event_type: int(sum(1 for bp in blueprints if bp.event_type == event_type)) for event_type in event_types
@@ -974,6 +1098,7 @@ def main() -> int:
                 "wf_trim_split": str(trim_stats.get("trim_split", "validation")),
                 "wf_evidence_used": bool(trim_stats.get("wf_evidence_used", False)),
                 "dropped_blueprint_ids": list(trim_stats.get("dropped_blueprint_ids", [])),
+                "behavior_duplicate_dropped_ids": list(duplicate_stats.get("behavior_duplicate_dropped_ids", [])),
                 "blueprint_count": int(len(blueprints)),
                 "strict_cost_fields": bool(int(args.strict_cost_fields)),
                 "execution_cost_config_digest": resolved_costs.config_digest,

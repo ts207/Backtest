@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -1085,3 +1086,190 @@ def test_run_all_passes_strategy_preparation_strictness_flags(monkeypatch) -> No
     assert "--ignore_checklist" in builder_args and "1" in builder_args
     assert "--allow_non_promoted" in builder_args and "1" in builder_args
     assert "--allow_missing_candidate_detail" in builder_args and "1" in builder_args
+
+
+def test_run_all_keep_research_blocks_execution_by_default(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path)
+    captured: list[tuple[str, list[str]]] = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        if stage == "generate_recommendations_checklist":
+            out_dir = tmp_path / "runs" / run_id / "research_checklist"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "checklist.json").write_text(json.dumps({"decision": "KEEP_RESEARCH"}), encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_keep_research_blocked",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_backtest",
+            "1",
+            "--strategies",
+            "vol_compression_v1",
+        ],
+    )
+
+    assert run_all.main() == 1
+    stage_names = [stage for stage, _ in captured]
+    assert "generate_recommendations_checklist" in stage_names
+    assert "compile_strategy_blueprints" not in stage_names
+
+    run_manifest_path = tmp_path / "runs" / "run_keep_research_blocked" / "run_manifest.json"
+    run_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+    assert run_manifest["checklist_decision"] == "KEEP_RESEARCH"
+    assert bool(run_manifest["execution_blocked_by_checklist"]) is True
+    assert run_manifest["failed_stage"] == "checklist_gate"
+    assert bool(run_manifest["auto_continue_applied"]) is False
+    assert run_manifest["non_production_overrides"] == []
+
+
+def test_run_all_keep_research_override_allows_execution_and_marks_manifest(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path)
+    captured: list[tuple[str, list[str]]] = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        if stage == "generate_recommendations_checklist":
+            out_dir = tmp_path / "runs" / run_id / "research_checklist"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "checklist.json").write_text(json.dumps({"decision": "KEEP_RESEARCH"}), encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_keep_research_override",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_backtest",
+            "1",
+            "--strategies",
+            "vol_compression_v1",
+            "--auto_continue_on_keep_research",
+            "1",
+        ],
+    )
+
+    assert run_all.main() == 0
+    blueprint_args = next(base_args for stage, base_args in captured if stage == "compile_strategy_blueprints")
+    builder_args = next(base_args for stage, base_args in captured if stage == "build_strategy_candidates")
+    assert "--ignore_checklist" in blueprint_args and "1" in blueprint_args
+    assert "--allow_fallback_blueprints" in blueprint_args and "1" in blueprint_args
+    assert "--ignore_checklist" in builder_args and "1" in builder_args
+    assert "--allow_non_promoted" in builder_args and "1" in builder_args
+
+    run_manifest_path = tmp_path / "runs" / "run_keep_research_override" / "run_manifest.json"
+    run_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+    assert run_manifest["checklist_decision"] == "KEEP_RESEARCH"
+    assert bool(run_manifest["auto_continue_applied"]) is True
+    assert "KEEP_RESEARCH" in str(run_manifest["auto_continue_reason"])
+    assert bool(run_manifest["execution_blocked_by_checklist"]) is False
+    assert len(run_manifest["non_production_overrides"]) >= 2
+    assert any("compile_strategy_blueprints" in item for item in run_manifest["non_production_overrides"])
+    assert any("build_strategy_candidates" in item for item in run_manifest["non_production_overrides"])
+
+
+def test_run_all_does_not_auto_continue_for_discovery_only_runs(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path)
+    captured: list[tuple[str, list[str]]] = []
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        if stage == "generate_recommendations_checklist":
+            out_dir = tmp_path / "runs" / run_id / "research_checklist"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "checklist.json").write_text(json.dumps({"decision": "KEEP_RESEARCH"}), encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_auto_continue_discovery_only",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+        ],
+    )
+
+    assert run_all.main() == 0
+    blueprint_args = next(base_args for stage, base_args in captured if stage == "compile_strategy_blueprints")
+    builder_args = next(base_args for stage, base_args in captured if stage == "build_strategy_candidates")
+    assert "--ignore_checklist" in blueprint_args and "0" in blueprint_args
+    assert "--allow_fallback_blueprints" in blueprint_args and "0" in blueprint_args
+    assert "--ignore_checklist" in builder_args and "0" in builder_args
+    assert "--allow_non_promoted" in builder_args and "0" in builder_args
+
+    run_manifest_path = tmp_path / "runs" / "run_auto_continue_discovery_only" / "run_manifest.json"
+    run_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+    assert run_manifest["checklist_decision"] == "KEEP_RESEARCH"
+    assert bool(run_manifest["auto_continue_applied"]) is False
+
+
+def test_run_manifest_records_auto_continue_metadata(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path)
+
+    def _fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        if stage == "generate_recommendations_checklist":
+            out_dir = tmp_path / "runs" / run_id / "research_checklist"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "checklist.json").write_text(json.dumps({"decision": "PROMOTE"}), encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(run_all, "_run_stage", _fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "run_manifest_auto_continue_meta",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+            "--run_backtest",
+            "1",
+            "--strategies",
+            "vol_compression_v1",
+        ],
+    )
+
+    assert run_all.main() == 0
+    run_manifest_path = tmp_path / "runs" / "run_manifest_auto_continue_meta" / "run_manifest.json"
+    run_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+    assert run_manifest["checklist_decision"] == "PROMOTE"
+    assert bool(run_manifest["auto_continue_applied"]) is False
+    assert run_manifest["auto_continue_reason"] in ("", None)
+    assert bool(run_manifest["execution_blocked_by_checklist"]) is False
+    assert run_manifest["non_production_overrides"] == []

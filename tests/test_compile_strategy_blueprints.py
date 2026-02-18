@@ -4,6 +4,7 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -545,6 +546,190 @@ def test_compile_blueprint_lineage_source_path_is_run_scoped() -> None:
     assert rows
     expected_suffix = f"/phase2/{run_id}/vol_shock_relaxation/phase2_candidates.csv"
     assert str(rows[0]["source_path"]).endswith(expected_suffix)
+
+
+def test_compiler_applies_action_semantics_to_overlays() -> None:
+    stats = {
+        "half_life": np.array([12.0], dtype=float),
+        "adverse": np.array([0.01], dtype=float),
+        "favorable": np.array([0.02], dtype=float),
+    }
+    bp_skip = compile_strategy_blueprints._build_blueprint(
+        run_id="run_action_overlay",
+        run_symbols=["BTCUSDT"],
+        event_type="range_compression_breakout_window",
+        row={
+            "candidate_id": "c_skip",
+            "condition": "all",
+            "action": "entry_gate_skip",
+            "sample_size": 200,
+            "n_events": 200,
+            "robustness_score": 0.9,
+            "source_path": "x",
+        },
+        phase2_lookup={},
+        stats=stats,
+        fees_bps=4.0,
+        slippage_bps=2.0,
+    )
+    bp_throttle = compile_strategy_blueprints._build_blueprint(
+        run_id="run_action_overlay",
+        run_symbols=["BTCUSDT"],
+        event_type="range_compression_breakout_window",
+        row={
+            "candidate_id": "c_throttle",
+            "condition": "all",
+            "action": "risk_throttle_0.5",
+            "sample_size": 200,
+            "n_events": 200,
+            "robustness_score": 0.9,
+            "source_path": "x",
+        },
+        phase2_lookup={},
+        stats=stats,
+        fees_bps=4.0,
+        slippage_bps=2.0,
+    )
+
+    skip_overlay = next((ov for ov in bp_skip.overlays if ov.name == "risk_throttle"), None)
+    throttle_overlay = next((ov for ov in bp_throttle.overlays if ov.name == "risk_throttle"), None)
+    assert skip_overlay is not None
+    assert throttle_overlay is not None
+    assert float(skip_overlay.params.get("size_scale", 1.0)) == 0.0
+    assert float(throttle_overlay.params.get("size_scale", 1.0)) == 0.5
+
+
+def test_compiler_drops_behavior_duplicates_and_keeps_best_ranked() -> None:
+    stats = {
+        "half_life": np.array([12.0], dtype=float),
+        "adverse": np.array([0.01], dtype=float),
+        "favorable": np.array([0.02], dtype=float),
+    }
+    bp_a = compile_strategy_blueprints._build_blueprint(
+        run_id="run_dedupe",
+        run_symbols=["BTCUSDT"],
+        event_type="range_compression_breakout_window",
+        row={
+            "candidate_id": "all__entry_gate_skip",
+            "condition": "all",
+            "action": "entry_gate_skip",
+            "sample_size": 200,
+            "n_events": 200,
+            "robustness_score": 0.9,
+            "source_path": "x",
+        },
+        phase2_lookup={},
+        stats=stats,
+        fees_bps=4.0,
+        slippage_bps=2.0,
+    )
+    bp_b = compile_strategy_blueprints._build_blueprint(
+        run_id="run_dedupe",
+        run_symbols=["BTCUSDT"],
+        event_type="range_compression_breakout_window",
+        row={
+            "candidate_id": "all__risk_throttle_0",
+            "condition": "all",
+            "action": "risk_throttle_0",
+            "sample_size": 200,
+            "n_events": 200,
+            "robustness_score": 0.9,
+            "source_path": "x",
+        },
+        phase2_lookup={},
+        stats=stats,
+        fees_bps=4.0,
+        slippage_bps=2.0,
+    )
+
+    deduped, diag = compile_strategy_blueprints._dedupe_blueprints_by_behavior([bp_a, bp_b])
+    assert len(deduped) == 1
+    assert deduped[0].id == bp_a.id
+    assert int(diag["behavior_duplicate_count"]) == 1
+    assert bp_b.id in diag["behavior_duplicate_dropped_ids"]
+    keep_map = dict(diag["behavior_duplicate_keep_map"])
+    assert bp_a.id in keep_map
+    assert bp_b.id in keep_map[bp_a.id]
+
+
+def test_compiler_summary_records_duplicate_drop_diagnostics(monkeypatch, tmp_path: Path) -> None:
+    run_id = "dsl_compile_duplicate_summary"
+    edge_dir = tmp_path / "reports" / "edge_candidates" / run_id
+    edge_dir.mkdir(parents=True, exist_ok=True)
+    phase2_dir = tmp_path / "reports" / "phase2" / run_id / "range_compression_breakout_window"
+    phase2_dir.mkdir(parents=True, exist_ok=True)
+    report_dir = tmp_path / "reports" / "range_compression_breakout_window" / run_id
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    pd.DataFrame(
+        [
+            {
+                "run_id": run_id,
+                "event": "range_compression_breakout_window",
+                "candidate_id": "all__entry_gate_skip",
+                "status": "PROMOTED",
+                "candidate_symbol": "BTCUSDT",
+                "expectancy_per_trade": 0.03,
+                "robustness_score": 0.9,
+                "event_frequency": 0.3,
+                "capacity_proxy": 0.8,
+                "profit_density_score": 0.03,
+                "n_events": 200,
+                "source_path": "x",
+            },
+                {
+                    "run_id": run_id,
+                    "event": "range_compression_breakout_window",
+                    "candidate_id": "all__risk_throttle_0",
+                    "status": "PROMOTED",
+                    "candidate_symbol": "BTCUSDT",
+                    "expectancy_per_trade": 0.02,
+                    "robustness_score": 0.9,
+                    "event_frequency": 0.3,
+                    "capacity_proxy": 0.8,
+                    "profit_density_score": 0.02,
+                    "n_events": 200,
+                    "source_path": "x",
+            },
+        ]
+    ).to_csv(edge_dir / "edge_candidates_normalized.csv", index=False)
+
+    pd.DataFrame(
+        [
+            {"candidate_id": "all__entry_gate_skip", "condition": "all", "action": "entry_gate_skip", "sample_size": 200},
+            {"candidate_id": "all__risk_throttle_0", "condition": "all", "action": "risk_throttle_0", "sample_size": 200},
+        ]
+    ).to_csv(phase2_dir / "phase2_candidates.csv", index=False)
+
+    pd.DataFrame({"rv_decay_half_life": [12], "range_pct_96": [0.01], "forward_abs_return_h": [0.02]}).to_csv(
+        report_dir / "range_compression_breakout_window_events.csv", index=False
+    )
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(compile_strategy_blueprints, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "compile_strategy_blueprints.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT",
+            "--max_per_event",
+            "2",
+            "--ignore_checklist",
+            "1",
+        ]
+        + ALLOW_NAIVE_ENTRY_FAIL_ARGS,
+    )
+    assert compile_strategy_blueprints.main() == 0
+
+    summary_path = tmp_path / "reports" / "strategy_blueprints" / run_id / "blueprints_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert int(summary["behavior_duplicate_count"]) == 1
+    assert len(summary["behavior_duplicate_dropped_ids"]) == 1
+    assert summary["behavior_duplicate_keep_map"]
 
 
 def test_compiler_requires_promote_checklist_by_default(monkeypatch, tmp_path: Path) -> None:

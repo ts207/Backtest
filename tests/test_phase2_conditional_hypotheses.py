@@ -390,9 +390,12 @@ def test_phase2_manifest_and_candidates_include_oos_and_multiplicity_fields(tmp_
             "stressed_after_cost_expectancy_per_trade",
             "turnover_proxy_mean",
             "avg_dynamic_cost_bps",
+            "cost_input_coverage",
+            "cost_model_valid",
             "cost_ratio",
             "gate_after_cost_positive",
             "gate_after_cost_stressed_positive",
+            "gate_cost_model_valid",
             "gate_cost_ratio",
         ]:
             assert col in candidates.columns
@@ -652,7 +655,7 @@ def test_phase2_fails_without_split_or_timestamp(tmp_path: Path) -> None:
     ]
     proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
     assert proc.returncode != 0
-    assert "Event registry parity check failed" in (proc.stderr + proc.stdout)
+    assert "Phase 2 requires split_label or valid enter_ts" in (proc.stderr + proc.stdout)
 
 
 def test_phase2_freezes_when_controls_coverage_is_below_threshold(tmp_path: Path) -> None:
@@ -705,6 +708,7 @@ def test_phase2_oos_gate_blocks_positive_test_split() -> None:
         action=action,
         bootstrap_iters=200,
         seed=17,
+        run_symbols=["BTCUSDT"],
         cost_floor=0.0,
         tail_material_threshold=0.0,
         opportunity_tight_eps=0.005,
@@ -745,6 +749,7 @@ def test_phase2_oos_gate_requires_minimum_split_samples() -> None:
         action=action,
         bootstrap_iters=200,
         seed=17,
+        run_symbols=["BTCUSDT"],
         cost_floor=0.0,
         tail_material_threshold=0.0,
         opportunity_tight_eps=0.005,
@@ -759,6 +764,129 @@ def test_phase2_oos_gate_requires_minimum_split_samples() -> None:
     assert result["gate_oos_min_samples"] is False
     assert result["gate_oos_validation_test"] is False
     assert "gate_oos_min_samples" in result["fail_reasons"]
+
+
+def test_phase2_cost_model_invalid_inputs_fail_gate() -> None:
+    n = 60
+    split_label = ["train"] * 30 + ["validation"] * 15 + ["test"] * 15
+    sub = pd.DataFrame(
+        {
+            "year": [2022] * n,
+            "symbol": ["BTCUSDT"] * n,
+            "vol_regime": ["high"] * n,
+            "split_label": split_label,
+            "baseline_mode": ["matched_controls_excess"] * n,
+            "adverse_proxy_excess": [0.04] * n,
+            "opportunity_value_excess": [0.0] * n,
+            "forward_abs_return_h": [0.0] * n,
+            "time_to_secondary_shock": [12.0] * n,
+            "rv_decay_half_life": [20.0] * n,
+        }
+    )
+    condition = ConditionSpec("all", "all", lambda d: pd.Series(True, index=d.index))
+    action = ActionSpec("risk_throttle_0.5", "risk_throttle", {"k": 0.5})
+
+    result = _evaluate_candidate(
+        sub=sub,
+        condition=condition,
+        action=action,
+        bootstrap_iters=200,
+        seed=17,
+        run_symbols=["BTCUSDT"],
+        cost_floor=0.0,
+        tail_material_threshold=0.0,
+        opportunity_tight_eps=0.005,
+        opportunity_near_zero_eps=0.001,
+        net_benefit_floor=0.0,
+        simplicity_gate=True,
+    )
+
+    assert float(result["cost_input_coverage"]) < 0.8
+    assert bool(result["cost_model_valid"]) is False
+    assert bool(result["gate_cost_model_valid"]) is False
+    assert "gate_cost_model_valid" in str(result["fail_reasons"])
+
+
+def test_phase2_turnover_proxy_entry_gate_skip_is_zero() -> None:
+    n = 40
+    split_label = ["train"] * 20 + ["validation"] * 10 + ["test"] * 10
+    sub = pd.DataFrame(
+        {
+            "year": [2022] * n,
+            "symbol": ["BTCUSDT"] * n,
+            "vol_regime": ["high"] * n,
+            "split_label": split_label,
+            "baseline_mode": ["matched_controls_excess"] * n,
+            "adverse_proxy_excess": [0.04] * n,
+            "opportunity_value_excess": [0.0] * n,
+            "forward_abs_return_h": [0.0] * n,
+            "time_to_secondary_shock": [12.0] * n,
+            "rv_decay_half_life": [20.0] * n,
+            "spread_bps": [5.0] * n,
+            "quote_volume": [1_000_000.0] * n,
+            "close": [10_000.0] * n,
+            "high": [10_100.0] * n,
+            "low": [9_900.0] * n,
+        }
+    )
+    condition = ConditionSpec("all", "all", lambda d: pd.Series(True, index=d.index))
+    action = ActionSpec("entry_gate_skip", "entry_gating", {})
+    result = _evaluate_candidate(
+        sub=sub,
+        condition=condition,
+        action=action,
+        bootstrap_iters=100,
+        seed=11,
+        run_symbols=["BTCUSDT"],
+        cost_floor=0.0,
+        tail_material_threshold=0.0,
+        opportunity_tight_eps=0.005,
+        opportunity_near_zero_eps=0.001,
+        net_benefit_floor=0.0,
+        simplicity_gate=True,
+    )
+    assert float(result["turnover_proxy_mean"]) == 0.0
+
+
+def test_phase2_turnover_proxy_risk_throttle_zero_is_zero() -> None:
+    n = 40
+    split_label = ["train"] * 20 + ["validation"] * 10 + ["test"] * 10
+    sub = pd.DataFrame(
+        {
+            "year": [2022] * n,
+            "symbol": ["BTCUSDT"] * n,
+            "vol_regime": ["high"] * n,
+            "split_label": split_label,
+            "baseline_mode": ["matched_controls_excess"] * n,
+            "adverse_proxy_excess": [0.04] * n,
+            "opportunity_value_excess": [0.0] * n,
+            "forward_abs_return_h": [0.0] * n,
+            "time_to_secondary_shock": [12.0] * n,
+            "rv_decay_half_life": [20.0] * n,
+            "spread_bps": [5.0] * n,
+            "quote_volume": [1_000_000.0] * n,
+            "close": [10_000.0] * n,
+            "high": [10_100.0] * n,
+            "low": [9_900.0] * n,
+        }
+    )
+    condition = ConditionSpec("all", "all", lambda d: pd.Series(True, index=d.index))
+    action = ActionSpec("risk_throttle_0", "risk_throttle", {"k": 0.0})
+    result = _evaluate_candidate(
+        sub=sub,
+        condition=condition,
+        action=action,
+        bootstrap_iters=100,
+        seed=11,
+        run_symbols=["BTCUSDT"],
+        cost_floor=0.0,
+        tail_material_threshold=0.0,
+        opportunity_tight_eps=0.005,
+        opportunity_near_zero_eps=0.001,
+        net_benefit_floor=0.0,
+        simplicity_gate=True,
+    )
+    assert float(result["turnover_proxy_mean"]) == 0.0
 
 
 def test_deployment_mode_concentrate_when_top_symbol_clearly_dominates() -> None:

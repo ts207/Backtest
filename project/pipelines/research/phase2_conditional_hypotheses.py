@@ -115,9 +115,12 @@ PRIMARY_OUTPUT_COLUMNS = [
     "stressed_after_cost_expectancy_per_trade",
     "turnover_proxy_mean",
     "avg_dynamic_cost_bps",
+    "cost_input_coverage",
+    "cost_model_valid",
     "cost_ratio",
     "gate_after_cost_positive",
     "gate_after_cost_stressed_positive",
+    "gate_cost_model_valid",
     "gate_cost_ratio",
     "gate_pass",
     "gate_all",
@@ -154,6 +157,7 @@ DEPLOYMENT_MODE_CONCENTRATE = "concentrate"
 DEPLOYMENT_MODE_DIVERSIFY = "diversify"
 HYPOTHESIS_QUEUE_DIR = "hypothesis_generator"
 NUMERIC_CONDITION_PATTERN = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(>=|<=|==|>|<)\s*(-?\d+(?:\.\d+)?)\s*$")
+COST_INPUT_COVERAGE_MIN = 0.80
 
 
 @dataclass(frozen=True)
@@ -979,9 +983,19 @@ def _attach_event_market_features(
 def _turnover_proxy_for_action(action: ActionSpec, n: int) -> np.ndarray:
     if n <= 0:
         return np.array([], dtype=float)
-    if action.family in {"entry_gating", "risk_throttle"}:
-        k = float(action.params.get("k", 1.0))
+    if action.name == "entry_gate_skip":
+        return np.full(n, 0.0, dtype=float)
+    if action.family == "risk_throttle" or action.name.startswith("risk_throttle_"):
+        raw_scale = action.params.get("k")
+        if raw_scale is None and action.name.startswith("risk_throttle_"):
+            try:
+                raw_scale = float(action.name.split("_")[-1])
+            except ValueError:
+                raw_scale = 1.0
+        k = float(raw_scale if raw_scale is not None else 1.0)
         return np.full(n, max(0.0, min(1.0, k)), dtype=float)
+    if action.family == "entry_gating":
+        return np.full(n, 1.0, dtype=float)
     if action.name.startswith("delay_") or action.name == "reenable_at_half_life":
         return np.full(n, 1.0, dtype=float)
     if action.name == "no_action":
@@ -1005,21 +1019,34 @@ def _candidate_cost_fields(
             "stressed_after_cost_expectancy_per_trade": float(expectancy_per_trade),
             "turnover_proxy_mean": 0.0,
             "avg_dynamic_cost_bps": 0.0,
+            "cost_input_coverage": 0.0,
+            "cost_model_valid": False,
             "cost_ratio": 0.0,
             "gate_after_cost_positive": bool(expectancy_per_trade > 0.0),
             "gate_after_cost_stressed_positive": bool(expectancy_per_trade > 0.0),
+            "gate_cost_model_valid": False,
             "gate_cost_ratio": True,
         }
 
     idx = sub.index
+    spread = pd.to_numeric(sub.get("spread_bps", pd.Series(np.nan, index=idx)), errors="coerce")
+    atr = pd.to_numeric(sub.get("atr_14", pd.Series(np.nan, index=idx)), errors="coerce")
+    quote_volume = pd.to_numeric(sub.get("quote_volume", pd.Series(np.nan, index=idx)), errors="coerce")
+    close = pd.to_numeric(sub.get("close", pd.Series(np.nan, index=idx)), errors="coerce")
+    high = pd.to_numeric(sub.get("high", pd.Series(np.nan, index=idx)), errors="coerce")
+    low = pd.to_numeric(sub.get("low", pd.Series(np.nan, index=idx)), errors="coerce")
+    coverage_components = [spread, quote_volume, close, high, low]
+    coverage_values = [float(comp.notna().mean()) for comp in coverage_components]
+    cost_input_coverage = float(np.nanmean(coverage_values)) if coverage_values else 0.0
+
     frame = pd.DataFrame(
         {
-            "spread_bps": pd.to_numeric(sub.get("spread_bps", pd.Series(0.0, index=idx)), errors="coerce").fillna(0.0),
-            "atr_14": pd.to_numeric(sub.get("atr_14", pd.Series(np.nan, index=idx)), errors="coerce"),
-            "quote_volume": pd.to_numeric(sub.get("quote_volume", pd.Series(np.nan, index=idx)), errors="coerce"),
-            "close": pd.to_numeric(sub.get("close", pd.Series(np.nan, index=idx)), errors="coerce"),
-            "high": pd.to_numeric(sub.get("high", pd.Series(np.nan, index=idx)), errors="coerce"),
-            "low": pd.to_numeric(sub.get("low", pd.Series(np.nan, index=idx)), errors="coerce"),
+            "spread_bps": spread.fillna(0.0),
+            "atr_14": atr,
+            "quote_volume": quote_volume,
+            "close": close,
+            "high": high,
+            "low": low,
         },
         index=idx,
     )
@@ -1028,6 +1055,9 @@ def _candidate_cost_fields(
         turnover=pd.Series(turnover, index=idx, dtype=float),
         config=dict(execution_cost_config),
     )
+    cost_values = cost_bps_series.to_numpy(dtype=float)
+    finite_cost = bool(cost_values.size > 0 and np.isfinite(cost_values).all())
+    cost_model_valid = bool(cost_input_coverage >= COST_INPUT_COVERAGE_MIN and finite_cost)
     cost_per_trade = float(np.nanmean((cost_bps_series.to_numpy(dtype=float) * turnover) / 10_000.0))
     cost_per_trade = max(0.0, cost_per_trade)
     after_cost = float(expectancy_per_trade - cost_per_trade)
@@ -1039,9 +1069,12 @@ def _candidate_cost_fields(
         "stressed_after_cost_expectancy_per_trade": stressed_after_cost,
         "turnover_proxy_mean": float(np.nanmean(turnover)),
         "avg_dynamic_cost_bps": float(np.nanmean(cost_bps_series.to_numpy(dtype=float))),
+        "cost_input_coverage": cost_input_coverage,
+        "cost_model_valid": cost_model_valid,
         "cost_ratio": cost_ratio,
         "gate_after_cost_positive": bool(after_cost > 0.0),
         "gate_after_cost_stressed_positive": bool(stressed_after_cost > 0.0),
+        "gate_cost_model_valid": cost_model_valid,
         "gate_cost_ratio": bool(cost_ratio < 0.60),
     }
 
@@ -1635,6 +1668,7 @@ def _evaluate_candidate(
         gate_g,
         bool(cost_fields["gate_after_cost_positive"]),
         bool(cost_fields["gate_after_cost_stressed_positive"]),
+        bool(cost_fields["gate_cost_model_valid"]),
         bool(cost_fields["gate_cost_ratio"]),
     ]
     robustness_score = float(np.mean([1.0 if g else 0.0 for g in gate_values]))
@@ -1708,6 +1742,8 @@ def _evaluate_candidate(
         fail_reasons.append("gate_after_cost_positive")
     if not bool(cost_fields["gate_after_cost_stressed_positive"]):
         fail_reasons.append("gate_after_cost_stressed_positive")
+    if not bool(cost_fields["gate_cost_model_valid"]):
+        fail_reasons.append("gate_cost_model_valid")
     if not bool(cost_fields["gate_cost_ratio"]):
         fail_reasons.append("gate_cost_ratio")
     if not bool(curvature_metrics.get("gate_parameter_curvature", True)):
@@ -1791,9 +1827,12 @@ def _evaluate_candidate(
         "stressed_after_cost_expectancy_per_trade": float(cost_fields["stressed_after_cost_expectancy_per_trade"]),
         "turnover_proxy_mean": float(cost_fields["turnover_proxy_mean"]),
         "avg_dynamic_cost_bps": float(cost_fields["avg_dynamic_cost_bps"]),
+        "cost_input_coverage": float(cost_fields["cost_input_coverage"]),
+        "cost_model_valid": bool(cost_fields["cost_model_valid"]),
         "cost_ratio": float(cost_fields["cost_ratio"]),
         "gate_after_cost_positive": bool(cost_fields["gate_after_cost_positive"]),
         "gate_after_cost_stressed_positive": bool(cost_fields["gate_after_cost_stressed_positive"]),
+        "gate_cost_model_valid": bool(cost_fields["gate_cost_model_valid"]),
         "gate_cost_ratio": bool(cost_fields["gate_cost_ratio"]),
         "gate_pass": bool(
             gate_a
@@ -1807,6 +1846,7 @@ def _evaluate_candidate(
             and gate_ess
             and bool(cost_fields["gate_after_cost_positive"])
             and bool(cost_fields["gate_after_cost_stressed_positive"])
+            and bool(cost_fields["gate_cost_model_valid"])
             and bool(cost_fields["gate_cost_ratio"])
             and bool(curvature_metrics.get("gate_parameter_curvature", True))
         ),
@@ -2351,9 +2391,16 @@ def main() -> int:
         )
         candidates["turnover_proxy_mean"] = pd.to_numeric(candidates.get("turnover_proxy_mean"), errors="coerce").fillna(0.0)
         candidates["avg_dynamic_cost_bps"] = pd.to_numeric(candidates.get("avg_dynamic_cost_bps"), errors="coerce").fillna(0.0)
+        candidates["cost_input_coverage"] = pd.to_numeric(candidates.get("cost_input_coverage"), errors="coerce").fillna(0.0)
+        candidates["cost_model_valid"] = candidates.get("cost_model_valid", False)
+        candidates["cost_model_valid"] = pd.Series(candidates["cost_model_valid"], index=candidates.index).astype(bool)
         candidates["cost_ratio"] = pd.to_numeric(candidates.get("cost_ratio"), errors="coerce").fillna(2.0)
         candidates["gate_after_cost_positive"] = candidates["after_cost_expectancy_per_trade"] > 0.0
         candidates["gate_after_cost_stressed_positive"] = candidates["stressed_after_cost_expectancy_per_trade"] > 0.0
+        candidates["gate_cost_model_valid"] = (
+            candidates["cost_model_valid"].astype(bool)
+            & (candidates["cost_input_coverage"] >= float(COST_INPUT_COVERAGE_MIN))
+        )
         candidates["gate_cost_ratio"] = candidates["cost_ratio"] < 0.60
         candidates["gate_ess"] = candidates["gate_ess"].astype(bool)
         candidates["gate_parameter_curvature"] = candidates["gate_parameter_curvature"].astype(bool)
@@ -2384,6 +2431,7 @@ def main() -> int:
             & candidates["gate_delay_robustness"].astype(bool)
             & candidates["gate_after_cost_positive"].astype(bool)
             & candidates["gate_after_cost_stressed_positive"].astype(bool)
+            & candidates["gate_cost_model_valid"].astype(bool)
             & candidates["gate_cost_ratio"].astype(bool)
         )
         candidates["event_frequency"] = pd.to_numeric(candidates.get("event_frequency"), errors="coerce").fillna(0.0)
@@ -2399,6 +2447,7 @@ def main() -> int:
             & candidates["gate_delay_robustness"].astype(bool)
             & candidates["gate_after_cost_positive"].astype(bool)
             & candidates["gate_after_cost_stressed_positive"].astype(bool)
+            & candidates["gate_cost_model_valid"].astype(bool)
             & candidates["gate_cost_ratio"].astype(bool)
         )
         for idx, row in candidates.iterrows():
@@ -2415,6 +2464,8 @@ def main() -> int:
                 reasons.append("gate_after_cost_positive")
             if not bool(row.get("gate_after_cost_stressed_positive", False)):
                 reasons.append("gate_after_cost_stressed_positive")
+            if not bool(row.get("gate_cost_model_valid", False)):
+                reasons.append("gate_cost_model_valid")
             if not bool(row.get("gate_cost_ratio", False)):
                 reasons.append("gate_cost_ratio")
             candidates.at[idx, "fail_reasons"] = ",".join(dict.fromkeys(reasons))
@@ -2490,9 +2541,12 @@ def main() -> int:
                     "stressed_after_cost_expectancy_per_trade": _safe_float(row.get("stressed_after_cost_expectancy_per_trade"), 0.0),
                     "turnover_proxy_mean": _safe_float(row.get("turnover_proxy_mean"), 0.0),
                     "avg_dynamic_cost_bps": _safe_float(row.get("avg_dynamic_cost_bps"), 0.0),
+                    "cost_input_coverage": _safe_float(row.get("cost_input_coverage"), 0.0),
+                    "cost_model_valid": _as_bool(row.get("cost_model_valid", False)),
                     "cost_ratio": _safe_float(row.get("cost_ratio"), 0.0),
                     "gate_after_cost_positive": _as_bool(row.get("gate_after_cost_positive", False)),
                     "gate_after_cost_stressed_positive": _as_bool(row.get("gate_after_cost_stressed_positive", False)),
+                    "gate_cost_model_valid": _as_bool(row.get("gate_cost_model_valid", False)),
                     "gate_cost_ratio": _as_bool(row.get("gate_cost_ratio", False)),
                     "execution_cost_config": execution_cost_config,
                     "execution_cost_config_digest": resolved_costs.config_digest,
@@ -2589,6 +2643,7 @@ def main() -> int:
         "oos_pass_count": int(candidates["gate_oos_validation"].sum()) if not candidates.empty and "gate_oos_validation" in candidates.columns else 0,
         "after_cost_positive_count": int(candidates["gate_after_cost_positive"].sum()) if not candidates.empty and "gate_after_cost_positive" in candidates.columns else 0,
         "after_cost_stressed_positive_count": int(candidates["gate_after_cost_stressed_positive"].sum()) if not candidates.empty and "gate_after_cost_stressed_positive" in candidates.columns else 0,
+        "cost_model_valid_count": int(candidates["gate_cost_model_valid"].sum()) if not candidates.empty and "gate_cost_model_valid" in candidates.columns else 0,
         "cost_ratio_pass_count": int(candidates["gate_cost_ratio"].sum()) if not candidates.empty and "gate_cost_ratio" in candidates.columns else 0,
         "symbol_evaluations": int(len(symbol_eval)),
         "deployable_symbol_rows": int(symbol_eval["deployable"].astype(bool).sum()) if not symbol_eval.empty else 0,

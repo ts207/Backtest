@@ -175,7 +175,8 @@ def main() -> int:
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
-    manifest = start_manifest("build_cleaned_15m", run_id, params, inputs, outputs)
+    stage_name = "build_cleaned_15m" if market == "perp" else "build_cleaned_15m_spot"
+    manifest = start_manifest(stage_name, run_id, params, inputs, outputs)
     stats: Dict[str, object] = {"symbols": {}}
 
     try:

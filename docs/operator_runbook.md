@@ -140,6 +140,10 @@ Strict mode is the default for strategy preparation:
   - `--strategy_builder_ignore_checklist 0`
   - `--strategy_builder_allow_non_promoted 0`
   - `--strategy_builder_allow_missing_candidate_detail 0`
+  - Merges evidence from:
+    - `reports/promotions/<run_id>/promoted_blueprints.jsonl`
+    - `reports/edge_candidates/<run_id>/edge_candidates_normalized.csv`
+  - Source precedence on conflicts: promoted blueprint > edge candidate
 - Naive-entry stage:
   - `--run_naive_entry_eval 1`
   - `--naive_min_trades 100`
@@ -165,6 +169,21 @@ Explicit override example:
   --promotion_allow_fallback_evidence 1
 ```
 
+Execution convenience for checklist `KEEP_RESEARCH`:
+- `run_all.py` now defaults `--auto_continue_on_keep_research 0` (fail-closed).
+- If checklist decision is `KEEP_RESEARCH` and execution is requested, pipeline stops before execution stages by default.
+- When checklist decision is `KEEP_RESEARCH` and execution is requested (`--run_backtest 1` or `--run_walkforward_eval 1`), orchestrator injects:
+  - compiler: `--ignore_checklist 1 --allow_fallback_blueprints 1`
+  - builder: `--ignore_checklist 1 --allow_non_promoted 1`
+- The injected overrides only apply when explicitly enabling `--auto_continue_on_keep_research 1` (non-production diagnostics).
+- Discovery-only runs keep strict strategy-prep defaults (no auto bypass).
+- Run manifest trace fields:
+  - `checklist_decision`
+  - `auto_continue_applied`
+  - `auto_continue_reason`
+  - `execution_blocked_by_checklist`
+  - `non_production_overrides`
+
 ## 9) Promotion Strictness (Defaults)
 
 Promotion is fail-closed by default:
@@ -177,6 +196,8 @@ Promotion is fail-closed by default:
   - `--max_loss_cluster_len` (default `64`)
   - `--max_cluster_loss_concentration` (default `0.50`)
   - `--min_tail_conditional_drawdown_95` (default `-0.20`)
+- Enforces realized cost dominance guard on train/validation:
+  - `--max_cost_ratio_train_validation` (default `0.60`)
 
 Fallback override (not recommended for production):
 

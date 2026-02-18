@@ -72,6 +72,36 @@ def _run_stage(stage: str, script_path: Path, base_args: List[str], run_id: str)
     return True
 
 
+def _checklist_json_path(run_id: str) -> Path:
+    return DATA_ROOT / "runs" / run_id / "research_checklist" / "checklist.json"
+
+
+def _load_checklist_decision(run_id: str) -> str | None:
+    path = _checklist_json_path(run_id)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    decision = str(payload.get("decision", "")).strip().upper()
+    return decision or None
+
+
+def _upsert_cli_flag(base_args: List[str], flag: str, value: str) -> None:
+    try:
+        idx = base_args.index(flag)
+    except ValueError:
+        base_args.extend([flag, value])
+        return
+    if idx + 1 < len(base_args):
+        base_args[idx + 1] = value
+    else:
+        base_args.append(value)
+
+
 def _as_flag(value: int) -> str:
     return str(int(value))
 
@@ -264,6 +294,7 @@ def main() -> int:
     parser.add_argument("--run_expectancy_robustness", type=int, default=0)
     parser.add_argument("--run_recommendations_checklist", type=int, default=1)
     parser.add_argument("--strict_recommendations_checklist", type=int, default=0)
+    parser.add_argument("--auto_continue_on_keep_research", type=int, default=0)
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--run_backtest", type=int, default=0)
     parser.add_argument("--clean_engine_artifacts", type=int, default=1)
@@ -281,6 +312,7 @@ def main() -> int:
     parser.add_argument("--promotion_max_loss_cluster_len", type=int, default=64)
     parser.add_argument("--promotion_max_cluster_loss_concentration", type=float, default=0.50)
     parser.add_argument("--promotion_min_tail_conditional_drawdown_95", type=float, default=-0.20)
+    parser.add_argument("--promotion_max_cost_ratio_train_validation", type=float, default=0.60)
     parser.add_argument("--report_allow_backtest_artifact_fallback", type=int, default=0)
     parser.add_argument("--run_make_report", type=int, default=0)
     parser.add_argument("--fees_bps", type=float, default=None)
@@ -881,6 +913,8 @@ def main() -> int:
                     str(float(args.promotion_max_cluster_loss_concentration)),
                     "--min_tail_conditional_drawdown_95",
                     str(float(args.promotion_min_tail_conditional_drawdown_95)),
+                    "--max_cost_ratio_train_validation",
+                    str(float(args.promotion_max_cost_ratio_train_validation)),
                 ],
             )
         )
@@ -968,10 +1002,19 @@ def main() -> int:
         "planned_stages": [stage for stage, _, _ in stages],
         "stage_timings_sec": {},
         "failed_stage": None,
+        "checklist_decision": None,
+        "auto_continue_applied": False,
+        "auto_continue_reason": "",
+        "execution_blocked_by_checklist": False,
+        "non_production_overrides": [],
     }
     _write_run_manifest(run_id, run_manifest)
 
     print(f"Planned stages: {len(stages)}")
+    auto_continue_applied = False
+    checklist_decision: str | None = None
+    auto_continue_reason = ""
+    non_production_overrides: List[str] = []
     for idx, (stage, script, base_args) in enumerate(stages, start=1):
         print(f"[{idx}/{len(stages)}] Starting stage: {stage}")
         started = time.perf_counter()
@@ -989,6 +1032,72 @@ def main() -> int:
             for stage_name, duration in sorted(stage_timings, key=lambda x: x[1], reverse=True):
                 print(f"  - {stage_name}: {duration:.1f}s")
             return 1
+        if stage == "generate_recommendations_checklist":
+            checklist_decision = _load_checklist_decision(run_id)
+            run_manifest["checklist_decision"] = checklist_decision
+            if checklist_decision == "KEEP_RESEARCH" and execution_requested:
+                if bool(int(args.auto_continue_on_keep_research)):
+                    for pending_stage, _, pending_args in stages[idx:]:
+                        if pending_stage == "compile_strategy_blueprints":
+                            _upsert_cli_flag(pending_args, "--ignore_checklist", "1")
+                            _upsert_cli_flag(pending_args, "--allow_fallback_blueprints", "1")
+                            non_production_overrides.append(
+                                "compile_strategy_blueprints:--ignore_checklist=1,--allow_fallback_blueprints=1"
+                            )
+                        elif pending_stage == "build_strategy_candidates":
+                            _upsert_cli_flag(pending_args, "--ignore_checklist", "1")
+                            _upsert_cli_flag(pending_args, "--allow_non_promoted", "1")
+                            non_production_overrides.append(
+                                "build_strategy_candidates:--ignore_checklist=1,--allow_non_promoted=1"
+                            )
+                    auto_continue_applied = True
+                    auto_continue_reason = (
+                        "checklist decision KEEP_RESEARCH with execution requested; "
+                        "injected compiler/builder non-production overrides"
+                    )
+                    print("Auto-continue activated for execution stages due to checklist KEEP_RESEARCH.")
+                else:
+                    blocked_stage_names = [
+                        pending_stage
+                        for pending_stage, _, _ in stages[idx:]
+                        if pending_stage
+                        in {
+                            "compile_strategy_blueprints",
+                            "build_strategy_candidates",
+                            "backtest_strategies",
+                            "run_walkforward",
+                            "promote_blueprints",
+                            "make_report",
+                        }
+                    ]
+                    first_blocked = blocked_stage_names[0] if blocked_stage_names else "execution_stages"
+                    run_manifest["finished_at"] = _utc_now_iso()
+                    run_manifest["status"] = "failed"
+                    run_manifest["failed_stage"] = "checklist_gate"
+                    run_manifest["execution_blocked_by_checklist"] = True
+                    run_manifest["stage_timings_sec"] = {
+                        name: round(duration, 3) for name, duration in stage_timings
+                    }
+                    auto_continue_reason = (
+                        "checklist decision KEEP_RESEARCH with execution requested; "
+                        "fail-closed default blocked execution stages"
+                    )
+                    run_manifest["auto_continue_applied"] = False
+                    run_manifest["auto_continue_reason"] = auto_continue_reason
+                    run_manifest["non_production_overrides"] = []
+                    _write_run_manifest(run_id, run_manifest)
+                    print(
+                        "Checklist gate blocked execution because decision=KEEP_RESEARCH. "
+                        f"First blocked stage: {first_blocked}. "
+                        "Re-run with --auto_continue_on_keep_research 1 only for non-production diagnostics.",
+                        file=sys.stderr,
+                    )
+                    return 1
+            run_manifest["auto_continue_applied"] = bool(auto_continue_applied)
+            run_manifest["auto_continue_reason"] = auto_continue_reason
+            run_manifest["execution_blocked_by_checklist"] = False
+            run_manifest["non_production_overrides"] = sorted(set(non_production_overrides))
+            _write_run_manifest(run_id, run_manifest)
 
     print("Stage timing summary (slowest first):")
     for stage_name, duration in sorted(stage_timings, key=lambda x: x[1], reverse=True):
@@ -999,6 +1108,11 @@ def main() -> int:
     run_manifest["finished_at"] = _utc_now_iso()
     run_manifest["status"] = "success"
     run_manifest["stage_timings_sec"] = {name: round(duration, 3) for name, duration in stage_timings}
+    run_manifest["checklist_decision"] = checklist_decision
+    run_manifest["auto_continue_applied"] = bool(auto_continue_applied)
+    run_manifest["auto_continue_reason"] = auto_continue_reason
+    run_manifest["execution_blocked_by_checklist"] = False
+    run_manifest["non_production_overrides"] = sorted(set(non_production_overrides))
     _write_run_manifest(run_id, run_manifest)
     return 0
 

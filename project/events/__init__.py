@@ -6,6 +6,7 @@ from events.registry import (
     collect_registry_events,
     load_registry_events,
     load_registry_flags,
+    merge_registry_events,
     normalize_phase1_events,
     write_event_registry_artifacts,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "collect_registry_events",
     "load_registry_events",
     "load_registry_flags",
+    "merge_registry_events",
     "normalize_phase1_events",
     "write_event_registry_artifacts",
 ]
