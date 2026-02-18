@@ -172,6 +172,92 @@ def _annualized_sharpe(pnl_series: pd.Series) -> float:
     return float((mean / std) * np.sqrt(BARS_PER_YEAR_15M))
 
 
+def _safe_metric_float(value: object, default: float = 0.0) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    if not np.isfinite(out):
+        return float(default)
+    return float(out)
+
+
+def _annualized_sortino(pnl_series: pd.Series) -> float:
+    if pnl_series.empty:
+        return 0.0
+    downside = pnl_series[pnl_series < 0.0]
+    downside_std = float(downside.std()) if not downside.empty else 0.0
+    if not np.isfinite(downside_std) or downside_std <= 0.0:
+        return 0.0
+    mean = float(pnl_series.mean())
+    return float((mean / downside_std) * np.sqrt(BARS_PER_YEAR_15M))
+
+
+def _max_drawdown_from_returns(pnl_series: pd.Series) -> float:
+    if pnl_series.empty:
+        return 0.0
+    equity = (1.0 + pnl_series).cumprod()
+    peak = equity.cummax().replace(0.0, np.nan)
+    drawdown = (equity / peak - 1.0).replace([np.inf, -np.inf], np.nan).dropna()
+    if drawdown.empty:
+        return 0.0
+    return float(drawdown.min())
+
+
+def _annual_return_from_returns(pnl_series: pd.Series) -> float:
+    if pnl_series.empty:
+        return 0.0
+    gross = float((1.0 + pnl_series).prod())
+    if not np.isfinite(gross) or gross <= 0.0:
+        return -1.0
+    periods = max(1, int(len(pnl_series)))
+    return float(gross ** (float(BARS_PER_YEAR_15M) / float(periods)) - 1.0)
+
+
+def _standardized_metrics_from_returns(pnl_series: pd.Series) -> Dict[str, object]:
+    returns = pd.to_numeric(pnl_series, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna().astype(float)
+    if returns.empty:
+        return {
+            "sharpe": 0.0,
+            "sortino": 0.0,
+            "calmar": 0.0,
+            "max_drawdown": 0.0,
+            "annual_return": 0.0,
+            "metrics_source": "fallback",
+        }
+
+    try:
+        import empyrical as ep  # Optional dependency from empyrical-reloaded package.
+
+        sharpe = _safe_metric_float(ep.sharpe_ratio(returns, annualization=BARS_PER_YEAR_15M), 0.0)
+        sortino = _safe_metric_float(ep.sortino_ratio(returns, annualization=BARS_PER_YEAR_15M), 0.0)
+        calmar = _safe_metric_float(ep.calmar_ratio(returns, annualization=BARS_PER_YEAR_15M), 0.0)
+        max_drawdown = _safe_metric_float(ep.max_drawdown(returns), _max_drawdown_from_returns(returns))
+        annual_return = _safe_metric_float(ep.annual_return(returns, annualization=BARS_PER_YEAR_15M), _annual_return_from_returns(returns))
+        return {
+            "sharpe": float(sharpe),
+            "sortino": float(sortino),
+            "calmar": float(calmar),
+            "max_drawdown": float(max_drawdown),
+            "annual_return": float(annual_return),
+            "metrics_source": "empyrical_reloaded",
+        }
+    except Exception:
+        sharpe = _annualized_sharpe(returns)
+        sortino = _annualized_sortino(returns)
+        max_drawdown = _max_drawdown_from_returns(returns)
+        annual_return = _annual_return_from_returns(returns)
+        calmar = float(annual_return / abs(max_drawdown)) if max_drawdown < 0.0 else 0.0
+        return {
+            "sharpe": float(sharpe),
+            "sortino": float(sortino),
+            "calmar": float(calmar),
+            "max_drawdown": float(max_drawdown),
+            "annual_return": float(annual_return),
+            "metrics_source": "fallback",
+        }
+
+
 def _compute_drawdown(equity_series: pd.Series) -> float:
     if equity_series.empty:
         return 0.0
@@ -469,6 +555,67 @@ def _load_per_strategy_split_metrics_strict(
         "unexpected_strategy_ids": unexpected,
     }
     return out, diagnostics
+
+
+def _load_split_pnl_series_strict(
+    split_run_id: str,
+    *,
+    split_label: str,
+    expected_strategy_ids: List[str] | None = None,
+    allow_unexpected_strategy_files: bool = False,
+) -> pd.Series:
+    engine_dir = DATA_ROOT / "runs" / split_run_id / "engine"
+    if not engine_dir.exists():
+        raise ValueError(f"Missing engine directory for split={split_label} run_id={split_run_id}: {engine_dir}")
+    strategy_files = sorted(engine_dir.glob("strategy_returns_*.csv"))
+    if not strategy_files:
+        raise ValueError(
+            f"No strategy return artifacts found for split={split_label} run_id={split_run_id} in {engine_dir}"
+        )
+
+    observed_map: Dict[str, Path] = {}
+    for path in strategy_files:
+        strategy_id = _strategy_id_from_path(path)
+        if not strategy_id:
+            raise ValueError(f"Invalid strategy return filename for split={split_label} run_id={split_run_id}: {path.name}")
+        observed_map[strategy_id] = path
+
+    selected_strategy_ids = sorted(observed_map.keys())
+    if expected_strategy_ids is not None:
+        expected = {str(x).strip() for x in expected_strategy_ids if str(x).strip()}
+        missing = sorted(expected - set(observed_map.keys()))
+        if missing:
+            raise ValueError(
+                f"Missing expected strategy returns for split={split_label} run_id={split_run_id}: {missing}"
+            )
+        unexpected = sorted(set(observed_map.keys()) - expected)
+        if unexpected and not bool(allow_unexpected_strategy_files):
+            raise ValueError(
+                f"Unexpected strategy returns for split={split_label} run_id={split_run_id}: {unexpected}"
+            )
+        selected_strategy_ids = sorted(expected) if bool(allow_unexpected_strategy_files) else sorted(observed_map.keys())
+
+    combined = pd.Series(dtype=float)
+    for strategy_id in selected_strategy_ids:
+        path = observed_map[strategy_id]
+        try:
+            frame = pd.read_csv(path)
+        except Exception as exc:
+            raise ValueError(f"Failed reading strategy return file for split={split_label} run_id={split_run_id}: {path}") from exc
+        missing_cols = [col for col in REQUIRED_STRATEGY_RETURN_COLUMNS if col not in frame.columns]
+        if missing_cols:
+            raise ValueError(
+                f"Strategy return file missing required columns for split={split_label} run_id={split_run_id}: "
+                f"{path.name} missing {missing_cols}"
+            )
+        frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
+        frame["pnl"] = pd.to_numeric(frame["pnl"], errors="coerce").fillna(0.0)
+        frame = frame.dropna(subset=["timestamp"])
+        if frame.empty:
+            continue
+        pnl_ts = frame.groupby("timestamp", sort=True)["pnl"].sum()
+        combined = pnl_ts.astype(float) if combined.empty else combined.add(pnl_ts.astype(float), fill_value=0.0)
+    return combined.sort_index() if not combined.empty else pd.Series(dtype=float)
 
 
 def _build_backtest_cmd(
@@ -778,6 +925,15 @@ def main() -> int:
         final_test_metrics = test_row["metrics"]
         if not isinstance(final_test_metrics, dict) or not final_test_metrics:
             raise ValueError("Walkforward final_test_metrics is missing or invalid.")
+        test_returns = _load_split_pnl_series_strict(
+            split_run_id=str(test_row["run_id"]),
+            split_label="test",
+            expected_strategy_ids=expected_strategy_ids,
+            allow_unexpected_strategy_files=bool(int(args.allow_unexpected_strategy_files)),
+        )
+        standardized_metrics = _standardized_metrics_from_returns(test_returns)
+        final_test_metrics = dict(final_test_metrics)
+        final_test_metrics["standardized_metrics"] = dict(standardized_metrics)
         integrity_checks = {
             "artifacts_validated": True,
             "required_test_present": True,
@@ -792,6 +948,7 @@ def main() -> int:
             "per_strategy_regime_metrics": per_strategy_regime_metrics,
             "per_strategy_drawdown_cluster_metrics": per_strategy_drawdown_cluster_metrics,
             "final_test_metrics": final_test_metrics,
+            "standardized_metrics": standardized_metrics,
             "tested_splits": len(split_rows),
             "expected_strategy_count": int(len(expected_strategy_ids or [])),
             "observed_strategy_count": int(len(observed_strategy_ids)),

@@ -111,6 +111,51 @@ def test_run_walkforward_writes_summary_with_per_split_and_test_metrics(monkeypa
     assert summary["integrity_checks"]["config_passthrough_count"] == 2
 
 
+def test_walkforward_emits_standardized_metrics_payload(monkeypatch, tmp_path: Path) -> None:
+    run_id = "wf_standardized_metrics"
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(run_walkforward, "DATA_ROOT", tmp_path)
+
+    def _fake_split_backtest(cmd: list[str]) -> int:
+        split_run_id = cmd[cmd.index("--run_id") + 1]
+        metrics_dir = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / split_run_id
+        metrics_dir.mkdir(parents=True, exist_ok=True)
+        engine_dir = tmp_path / "runs" / split_run_id / "engine"
+        engine_dir.mkdir(parents=True, exist_ok=True)
+        _write_metrics(metrics_dir, trades=120 if split_run_id.endswith("__wf_test") else 200)
+        _write_strategy_returns(engine_dir, "vol_compression_v1")
+        return 0
+
+    monkeypatch.setattr(run_walkforward, "_run_split_backtest", _fake_split_backtest)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_walkforward.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-03-31",
+            "--strategies",
+            "vol_compression_v1",
+        ],
+    )
+
+    assert run_walkforward.main() == 0
+    summary_path = tmp_path / "reports" / "eval" / run_id / "walkforward_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert "standardized_metrics" in summary
+    metrics = summary["standardized_metrics"]
+    for key in ["sharpe", "sortino", "calmar", "max_drawdown", "annual_return"]:
+        assert key in metrics
+        assert isinstance(metrics[key], float)
+    assert metrics["metrics_source"] in {"empyrical_reloaded", "fallback"}
+
+
 def test_run_walkforward_requires_exactly_one_execution_mode(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
     monkeypatch.setattr(run_walkforward, "DATA_ROOT", tmp_path)
