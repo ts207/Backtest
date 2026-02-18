@@ -128,6 +128,12 @@ def _run_phase2(tmp_path: Path, run_id: str, extra_args: list[str] | None = None
     subprocess.run(cmd, check=True, env=env)
 
 
+def _as_bool_series(values: pd.Series) -> pd.Series:
+    if values.dtype == bool:
+        return values.astype(bool)
+    return values.astype(str).str.strip().str.lower().isin({"1", "true", "t", "yes", "y"})
+
+
 def test_phase2_caps_and_outputs(tmp_path: Path) -> None:
     run_id = "phase2_test"
     _write_phase1_fixture(tmp_path=tmp_path, run_id=run_id)
@@ -399,6 +405,37 @@ def test_phase2_manifest_and_candidates_include_oos_and_multiplicity_fields(tmp_
             "gate_cost_ratio",
         ]:
             assert col in candidates.columns
+
+
+def test_phase2_outputs_quality_score_and_strict_oos_gate(tmp_path: Path) -> None:
+    run_id = "phase2_quality_score"
+    _write_phase1_fixture(tmp_path=tmp_path, run_id=run_id)
+    _run_phase2(tmp_path=tmp_path, run_id=run_id)
+
+    out_dir = tmp_path / "reports" / "phase2" / run_id / "vol_shock_relaxation"
+    candidates = pd.read_csv(out_dir / "phase2_candidates.csv")
+    if candidates.empty:
+        return
+
+    assert "quality_score" in candidates.columns
+    assert "gate_oos_consistency_strict" in candidates.columns
+
+    gate_oos_validation = _as_bool_series(candidates["gate_oos_validation"])
+    gate_oos_validation_test = _as_bool_series(candidates["gate_oos_validation_test"])
+    validation_samples = pd.to_numeric(candidates["validation_samples"], errors="coerce").fillna(0.0)
+    test_samples = pd.to_numeric(candidates["test_samples"], errors="coerce").fillna(0.0)
+    expected_strict = (
+        gate_oos_validation
+        & gate_oos_validation_test
+        & (validation_samples >= 120)
+        & (test_samples >= 120)
+    )
+
+    strict_actual = _as_bool_series(candidates["gate_oos_consistency_strict"])
+    assert strict_actual.equals(expected_strict)
+    low_sample = (validation_samples < 120) | (test_samples < 120)
+    if low_sample.any():
+        assert (~strict_actual[low_sample]).all()
 
 
 def test_effective_sample_size_iid_like_series_is_near_n() -> None:

@@ -65,6 +65,7 @@ PRIMARY_OUTPUT_COLUMNS = [
     "event_frequency",
     "capacity_proxy",
     "profit_density_score",
+    "quality_score",
     "gate_a_ci_separated",
     "gate_b_time_stable",
     "gate_b_year_signs",
@@ -108,6 +109,7 @@ PRIMARY_OUTPUT_COLUMNS = [
     "gate_oos_min_samples",
     "gate_oos_validation",
     "gate_oos_validation_test",
+    "gate_oos_consistency_strict",
     "gate_multiplicity",
     "gate_multiplicity_strict",
     "gate_ess",
@@ -1687,6 +1689,11 @@ def _evaluate_candidate(
         and np.isfinite(validation_delta_adverse_mean)
         and validation_delta_adverse_mean < 0.0
     )
+    gate_oos_consistency_strict = bool(
+        gate_oos_validation
+        and validation_samples >= 120
+        and test_samples >= 120
+    )
     if gate_oos_validation:
         robustness_score = min(1.0, robustness_score + 0.1)
 
@@ -1728,6 +1735,8 @@ def _evaluate_candidate(
         fail_reasons.append("gate_oos_min_samples")
     if not gate_oos_validation:
         fail_reasons.append("gate_oos_validation")
+    if not gate_oos_consistency_strict:
+        fail_reasons.append("gate_oos_consistency_strict")
     if not gate_ess:
         fail_reasons.append("gate_ess")
 
@@ -1820,6 +1829,7 @@ def _evaluate_candidate(
         "gate_oos_min_samples": gate_oos_min_samples,
         "gate_oos_validation": gate_oos_validation,
         "gate_oos_validation_test": gate_oos_validation,
+        "gate_oos_consistency_strict": gate_oos_consistency_strict,
         "gate_multiplicity": False,
         "gate_multiplicity_strict": False,
         "gate_ess": gate_ess,
@@ -2413,6 +2423,14 @@ def main() -> int:
             gate_oos_series = pd.Series(False, index=candidates.index)
         candidates["gate_oos_validation"] = pd.Series(gate_oos_series, index=candidates.index).astype(bool)
         candidates["gate_oos_validation_test"] = candidates["gate_oos_validation"]
+        candidates["validation_samples"] = pd.to_numeric(candidates.get("validation_samples"), errors="coerce").fillna(0.0)
+        candidates["test_samples"] = pd.to_numeric(candidates.get("test_samples"), errors="coerce").fillna(0.0)
+        candidates["gate_oos_consistency_strict"] = (
+            candidates["gate_oos_validation"].astype(bool)
+            & candidates["gate_oos_validation_test"].astype(bool)
+            & (candidates["validation_samples"] >= 120)
+            & (candidates["test_samples"] >= 120)
+        )
         candidates["val_delta_adverse_mean"] = pd.to_numeric(
             candidates.get("val_delta_adverse_mean", candidates.get("validation_delta_adverse_mean")),
             errors="coerce",
@@ -2438,9 +2456,16 @@ def main() -> int:
         candidates["profit_density_score"] = (
             candidates["after_cost_expectancy_per_trade"] * candidates["robustness_score"] * candidates["event_frequency"]
         )
+        candidates["quality_score"] = (
+            0.35 * pd.to_numeric(candidates.get("expectancy_after_multiplicity"), errors="coerce").fillna(0.0).clip(lower=0.0)
+            + 0.25 * pd.to_numeric(candidates.get("robustness_score"), errors="coerce").fillna(0.0).clip(lower=0.0)
+            + 0.20 * pd.to_numeric(candidates.get("delay_robustness_score"), errors="coerce").fillna(0.0).clip(lower=0.0)
+            + 0.20 * pd.to_numeric(candidates.get("profit_density_score"), errors="coerce").fillna(0.0).clip(lower=0.0)
+        )
         candidates["gate_all"] = (
             candidates["gate_pass"].astype(bool)
             & candidates["gate_oos_validation"].astype(bool)
+            & candidates["gate_oos_consistency_strict"].astype(bool)
             & candidates["gate_multiplicity_strict"].astype(bool)
             & candidates["gate_ess"].astype(bool)
             & candidates["gate_parameter_curvature"].astype(bool)
@@ -2456,6 +2481,8 @@ def main() -> int:
                 reasons.append("gate_multiplicity_strict")
             if not bool(row.get("gate_ess", False)):
                 reasons.append("gate_ess")
+            if not bool(row.get("gate_oos_consistency_strict", False)):
+                reasons.append("gate_oos_consistency_strict")
             if not bool(row.get("gate_parameter_curvature", False)):
                 reasons.append("gate_parameter_curvature")
             if not bool(row.get("gate_delay_robustness", False)):
