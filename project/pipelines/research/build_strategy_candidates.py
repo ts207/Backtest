@@ -991,6 +991,7 @@ def main() -> int:
         ]
         missing_detail_records: List[Dict[str, str]] = []
         skipped_strict_gate_count = 0
+        skipped_overlay_count = 0
         if not edge_df.empty:
             expected_return_proxy = _numeric_series(edge_df, "expected_return_proxy", default=0.0)
             edge_df["expectancy_per_trade"] = _numeric_series(edge_df, "expectancy_per_trade", default=np.nan).fillna(
@@ -1075,6 +1076,10 @@ def main() -> int:
                             }
                         )
                         continue
+                    candidate_type = str(row.get("candidate_type", "edge")).strip().lower()
+                    if candidate_type == "overlay":
+                        skipped_overlay_count += 1
+                        continue
                     gate_oos_consistency_strict = _as_bool(
                         detail.get("gate_oos_consistency_strict", row.get("gate_oos_consistency_strict", True))
                     )
@@ -1150,6 +1155,7 @@ def main() -> int:
                 "source_counts_seen": source_counts_seen,
                 "source_counts_selected": source_counts_selected,
                 "skipped_strict_gate_count": int(skipped_strict_gate_count),
+                "skipped_overlay_count": int(skipped_overlay_count),
             },
             "strategies": [
                 {
@@ -1189,6 +1195,7 @@ def main() -> int:
                 "source_counts_seen": source_counts_seen,
                 "source_counts_selected": source_counts_selected,
                 "skipped_strict_gate_count": int(skipped_strict_gate_count),
+                "skipped_overlay_count": int(skipped_overlay_count),
             },
         )
         return 0
