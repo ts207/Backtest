@@ -156,3 +156,6 @@ def test_run_all_writes_run_level_manifest_with_provenance(monkeypatch, tmp_path
         assert key in payload
         assert str(payload[key]).strip() != ""
     assert payload["status"] == "success"
+    assert "ended_at" in payload, "run_manifest must contain ended_at field"
+    assert payload["ended_at"] is not None, "ended_at must be populated on success"
+    assert "T" in str(payload["ended_at"]), f"ended_at should be ISO 8601: {payload['ended_at']}"
