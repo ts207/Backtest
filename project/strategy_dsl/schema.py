@@ -191,7 +191,7 @@ class LineageSpec:
     compiler_version: str
     generated_at_utc: str
     wf_evidence_hash: str = ""
-    wf_status: str = "pass"
+    wf_status: str = "pending"
     events_count_used_for_gate: int = 0
     min_events_threshold: int = 0
 
@@ -202,6 +202,8 @@ class LineageSpec:
         valid_wf_statuses = {"pass", "trimmed_zero_trade", "trimmed_worst_negative", "pending"}
         if self.wf_status not in valid_wf_statuses:
             raise ValueError(f"lineage.wf_status must be one of {valid_wf_statuses}, got {self.wf_status!r}")
+        _require_non_negative(self.events_count_used_for_gate, "lineage.events_count_used_for_gate")
+        _require_non_negative(self.min_events_threshold, "lineage.min_events_threshold")
 
 
 @dataclass(frozen=True)

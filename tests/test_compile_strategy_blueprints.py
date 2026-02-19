@@ -1112,7 +1112,7 @@ def test_lineage_spec_has_wf_fields() -> None:
         generated_at_utc="1970-01-01T00:00:00Z",
     )
     assert spec.wf_evidence_hash == ""
-    assert spec.wf_status == "pass"
+    assert spec.wf_status == "pending"
     assert spec.events_count_used_for_gate == 0
     assert spec.min_events_threshold == 0
     spec.validate()  # should not raise
@@ -1125,3 +1125,12 @@ def test_lineage_spec_has_wf_fields() -> None:
     )
     with pytest.raises(ValueError, match="wf_status"):
         bad.validate()
+
+    bad_neg = LineageSpec(
+        source_path="x",
+        compiler_version="v1",
+        generated_at_utc="1970-01-01T00:00:00Z",
+        events_count_used_for_gate=-1,
+    )
+    with pytest.raises(ValueError):
+        bad_neg.validate()
