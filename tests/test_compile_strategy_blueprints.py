@@ -1223,8 +1223,13 @@ def test_compiler_summary_contains_compile_funnel(monkeypatch, tmp_path: Path) -
     assert "written_total" in funnel
     assert "written_active" in funnel
     assert "written_trimmed" in funnel
+    assert "build_fail_non_executable" in funnel
+    assert "build_fail_naive_entry" in funnel
+    assert "build_fail_exception" in funnel
+    assert "behavior_dedup_drop" in funnel
 
     assert "wf_evidence_hash" in summary
+    assert "wf_evidence_source" in summary
     assert "min_events_threshold_used" in summary
     assert summary["min_events_threshold_used"] == 50
 
