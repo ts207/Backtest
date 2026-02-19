@@ -311,7 +311,16 @@ def main() -> int:
 
     phase2_dir = DATA_ROOT / "reports" / "phase2" / args.run_id / event_type
     phase2_candidates_path = phase2_dir / "phase2_candidates.csv"
-    candidates = _load_candidates(phase2_candidates_path)
+    full_candidates = _load_candidates(phase2_candidates_path)
+    
+    # Bridge only evaluates candidates that pass Phase 2 Discovery and Final Gates
+    if not full_candidates.empty:
+        # survivors must pass both the final gate and be discoveries
+        mask = full_candidates["gate_phase2_final"].map(_as_bool) & full_candidates["is_discovery"].map(_as_bool)
+        survivors = full_candidates[mask].copy()
+    else:
+        survivors = pd.DataFrame()
+
     out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "bridge_eval" / args.run_id / event_type
     ensure_dir(out_dir)
     out_candidate_metrics = out_dir / "bridge_candidate_metrics.csv"
@@ -332,7 +341,7 @@ def main() -> int:
         "stressed_cost_multiplier": float(args.stressed_cost_multiplier),
         "min_validation_trades": int(args.min_validation_trades),
     }
-    inputs: List[Dict[str, object]] = [{"path": str(phase2_candidates_path), "rows": None, "start_ts": None, "end_ts": None}]
+    inputs: List[Dict[str, object]] = [{"path": str(phase2_candidates_path), "rows": len(full_candidates), "start_ts": None, "end_ts": None}]
     outputs: List[Dict[str, object]] = []
     manifest = start_manifest("bridge_evaluate_phase2", args.run_id, params, inputs, outputs)
 
@@ -347,7 +356,7 @@ def main() -> int:
                 embargo_days=int(args.embargo_days),
             )]
 
-        if candidates.empty:
+        if survivors.empty:
             empty_metrics = pd.DataFrame(columns=["candidate_id", *BRIDGE_FIELDS, "bridge_fail_reasons"])
             empty_metrics.to_csv(out_candidate_metrics, index=False)
             pd.DataFrame(columns=["candidate_id", "overlay_base_candidate_id", "delta_validation_after_cost_bps", "delta_validation_stressed_after_cost_bps"]).to_csv(out_overlay_metrics, index=False)
@@ -366,7 +375,7 @@ def main() -> int:
                         "",
                         f"- Run ID: `{args.run_id}`",
                         f"- Event type: `{event_type}`",
-                        "- Candidate count: `0`",
+                        "- Candidate count: `0` (no Phase 2 survivors)",
                         "- Tradable count: `0`",
                     ]
                 )
@@ -380,13 +389,13 @@ def main() -> int:
             finalize_manifest(manifest, "success", stats={"candidate_count": 0, "tradable_count": 0})
             return 0
 
-        candidates = _resolve_overlay_bases(candidates, event_type=event_type)
+        survivors = _resolve_overlay_bases(survivors, event_type=event_type)
         metrics_rows: List[Dict[str, object]] = []
         overlay_rows: List[Dict[str, object]] = []
 
         # Base metrics from no_action rows are used for overlay delta scoring.
         base_lookup: Dict[str, Dict[str, float]] = {}
-        for _, row in candidates.iterrows():
+        for _, row in survivors.iterrows():
             candidate_id = str(row.get("candidate_id", "")).strip()
             if not candidate_id:
                 continue
@@ -399,7 +408,7 @@ def main() -> int:
             if condition:
                 base_lookup.setdefault(condition, metrics)
 
-        for _, row in candidates.iterrows():
+        for _, row in survivors.iterrows():
             result, overlay_delta = _evaluate_bridge_row(
                 row,
                 event_type=event_type,
@@ -417,7 +426,7 @@ def main() -> int:
         metrics_df.to_csv(out_candidate_metrics, index=False)
         overlay_df.to_csv(out_overlay_metrics, index=False)
 
-        updated = candidates.copy()
+        updated = full_candidates.copy()
         updated = updated.merge(metrics_df, on="candidate_id", how="left", suffixes=("", "_bridge"))
         # If bridge_fail_reasons clashed with an existing column, consolidate.
         if "bridge_fail_reasons_bridge" in updated.columns:

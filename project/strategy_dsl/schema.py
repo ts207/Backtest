@@ -194,6 +194,7 @@ class LineageSpec:
     wf_status: str = "pending"
     events_count_used_for_gate: int = 0
     min_events_threshold: int = 0
+    cost_config_digest: str = ""
 
     def validate(self) -> None:
         _require_non_empty(self.source_path, "lineage.source_path")

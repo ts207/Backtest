@@ -1,66 +1,43 @@
-# Project Package Guide
+# Backtest: Quantitative Trading Research Platform
 
-`project/` contains the executable runtime used by `project/pipelines/run_all.py`.
+Backtest is a high-performance, event-driven research and backtesting platform specialized for cryptocurrency markets (Binance Perpetual and Spot). It implements a rigorous, multi-phase pipeline designed to discover, validate, and simulate trading strategies with statistical integrity.
 
-## Layout
+## 🚀 Overview
 
-- `pipelines/ingest`: raw market ingestion
-- `pipelines/clean`: cleaned bar/funding datasets
-- `pipelines/features`: feature and context construction
-- `pipelines/research`: phase-1/phase-2 discovery and strategy preparation
-- `pipelines/backtest`: strategy/blueprint execution
-- `pipelines/eval`: walkforward split evaluation
-- `pipelines/report`: final report generation
-- `pipelines/alpha_bundle`: optional parallel signal pipeline
-- `engine/`: runtime execution and pnl plumbing
-- `strategies/`: strategy implementations, adapters, DSL interpreter
-- `strategy_dsl/`: blueprint schema and policy mapping
-- `features/`: reusable feature logic
+Unlike traditional backtesters that simply replay price data, this platform focuses on the **Discovery Lifecycle**:
+1.  **Ingestion & Cleaning**: Normalizing raw exchange data into high-quality "Point-in-Time" (PIT) datasets.
+2.  **Hypothesis Generation**: Detecting market events (e.g., liquidity vacuums, volatility shocks) and generating directional hypotheses.
+3.  **Statistical Validation**: Applying Multiplicity Control (BH-FDR) to filter out lucky discoveries and ensure statistical significance.
+4.  **Economic Evaluation (Bridge)**: Simulating execution costs, slippage, and market impact to find truly tradable edges.
+5.  **Walkforward Backtesting**: Evaluating strategy robustness across non-overlapping time splits and market regimes.
 
-## Data Contract
+## 📂 Project Structure
 
-All runtime artifacts are rooted under `BACKTEST_DATA_ROOT`.
+- `project/`: The core Python source code.
+    - `pipelines/`: Orchestration scripts for the 13+ discovery stages.
+    - `engine/`: The event-driven execution engine (P&L, fills, risk).
+    - `strategies/`: Implementations of trading logic and the DSL interpreter.
+    - `strategy_dsl/`: Schema and logic for deterministic strategy "Blueprints".
+- `spec/`: The **Source of Truth**. YAML files defining features, events, and validation gates.
+- `data/`: (Gitignored) The local artifact root containing the data lake and run reports.
+- `tests/`: Comprehensive test suite ensuring pipeline and engine integrity.
 
-Key locations:
-- Run manifests/logs: `data/runs/<run_id>/...`
-- Lake raw: `data/lake/raw/...`
-- Lake cleaned: `data/lake/cleaned/...`
-- Lake features: `data/lake/features/...`
-- Research reports: `data/reports/<stage>/<run_id>/...`
-- Engine outputs: `data/runs/<run_id>/engine/...`
-- Backtest metrics/trades: `data/lake/trades/backtests/<execution_family>/<run_id>/...`
-- Eval outputs: `data/reports/eval/<run_id>/...`
-- Promotion outputs: `data/reports/promotions/<run_id>/...`
-- Final report outputs: `data/reports/<execution_family>/<run_id>/...`
+## 📖 Documentation Index
 
-## Important Orchestration Defaults (`run_all.py`)
+For someone new to the project, we recommend reading in this order:
 
-- `run_backtest=0`
-- `run_walkforward_eval=0`
-- `run_make_report=0`
-- `run_strategy_blueprint_compiler=1`
-- `run_strategy_builder=1`
+1.  **[Getting Started](docs/GETTING_STARTED.md)**: How to set up your environment and run your first discovery pipeline.
+2.  **[Core Concepts](docs/CONCEPTS.md)**: Understanding Point-in-Time (PIT) logic, Multiplicity, and why we use "Blueprints".
+3.  **[Architecture Guide](docs/ARCHITECTURE.md)**: A deep dive into the multi-stage discovery pipeline and data flow.
+4.  **[Spec-First Design](docs/SPEC_FIRST.md)**: How to add new features or event types by updating YAML specifications.
 
-So discovery runs are not equivalent to full backtest/eval/report runs unless those flags are enabled.
+## 🛠️ Quick Commands
 
-## Minimal Full-Path Enablement
+| Command | Description |
+|:---|:---|
+| `make run` | Ingest + Clean + Build Features |
+| `make discover-edges` | Run full Discovery (Phase 1 + Phase 2) |
+| `make test-fast` | Run quick validation tests |
 
-To force end-to-end execution via orchestrator:
-```bash
---run_edge_candidate_universe 1 \
---run_backtest 1 \
---run_walkforward_eval 1 \
---run_make_report 1
-```
-
-## Strategy DSL Notes
-
-- Blueprints compile to `data/reports/strategy_blueprints/<run_id>/blueprints.jsonl`.
-- The DSL interpreter executes trigger/confirmation/condition logic directly.
-- Unknown trigger/confirmation names are hard-fail validation errors.
-
-## Testing
-
-```bash
-./.venv/bin/pytest -q
-```
+---
+*Backtest is designed for professional quantitative research where reproducibility and statistical rigor are paramount.*

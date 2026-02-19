@@ -87,7 +87,10 @@ def normalize_entry_condition(
     raw = str(condition if condition is not None else "all")
     lowered = raw.strip().lower()
 
-    if lowered in {"", "all"}:
+    if lowered in {"", "all"} or lowered.startswith("all__"):
+        # "all__" prefix allows discovered buckets (e.g., all__severity_bucket_top_10pct) 
+        # to pass through the compiler. For now, they result in no executable nodes
+        # unless explicitly mapped.
         return "all", [], None
 
     if lowered in SESSION_CONDITION_MAP:

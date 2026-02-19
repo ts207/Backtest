@@ -169,7 +169,7 @@ def _parse_liquidation_from_zip(
     raw = _read_csv_from_zip(path)
     if raw.empty:
         return pd.DataFrame(
-            columns=["ts", "symbol", "side", "price", "qty", "notional", "source"]
+            columns=["timestamp", "symbol", "side", "price", "qty", "notional", "source"]
         )
 
     # Normalize to lowercase columns so historical name variants are handled.
@@ -182,12 +182,12 @@ def _parse_liquidation_from_zip(
             break
     if ts_col is None:
         return pd.DataFrame(
-            columns=["ts", "symbol", "side", "price", "qty", "notional", "source"]
+            columns=["timestamp", "symbol", "side", "price", "qty", "notional", "source"]
         )
 
     ts_numeric = pd.to_numeric(raw[ts_col], errors="coerce")
     ts_unit = "ms" if ts_numeric.dropna().abs().median() >= 1_000_000_000_000 else "s"
-    ts = pd.to_datetime(ts_numeric, unit=ts_unit, utc=True, errors="coerce")
+    ts_series = pd.to_datetime(ts_numeric, unit=ts_unit, utc=True, errors="coerce")
 
     side_col = "side" if "side" in raw.columns else None
     side = (
@@ -218,7 +218,7 @@ def _parse_liquidation_from_zip(
 
     out = pd.DataFrame(
         {
-            "ts": ts,
+            "timestamp": ts_series,
             "symbol": str(symbol).upper(),
             "side": side,
             "price": price,
@@ -228,10 +228,10 @@ def _parse_liquidation_from_zip(
         }
     )
 
-    out = out.dropna(subset=["ts", "notional"]).copy()
+    out = out.dropna(subset=["timestamp", "notional"]).copy()
     if out.empty:
         return pd.DataFrame(
-            columns=["ts", "symbol", "side", "price", "qty", "notional", "source"]
+            columns=["timestamp", "symbol", "side", "price", "qty", "notional", "source"]
         )
 
     out["price"] = pd.to_numeric(out["price"], errors="coerce")
@@ -239,13 +239,13 @@ def _parse_liquidation_from_zip(
     out["notional"] = pd.to_numeric(out["notional"], errors="coerce").abs()
     out = out.dropna(subset=["notional"]).copy()
 
-    ensure_utc_timestamp(out["ts"], "ts")
+    ensure_utc_timestamp(out["timestamp"], "timestamp")
     out = (
-        out.sort_values("ts")
-        .drop_duplicates(subset=["ts", "side", "price", "qty", "notional"])
+        out.sort_values("timestamp")
+        .drop_duplicates(subset=["timestamp", "side", "price", "qty", "notional"])
         .reset_index(drop=True)
     )
-    return out[["ts", "symbol", "side", "price", "qty", "notional", "source"]]
+    return out[["timestamp", "symbol", "side", "price", "qty", "notional", "source"]]
 
 
 def _list_available_day_set(
@@ -403,14 +403,14 @@ def _fetch_symbol_binance_daily(
         pd.concat(frames, ignore_index=True)
         if frames
         else pd.DataFrame(
-            columns=["ts", "symbol", "side", "price", "qty", "notional", "source"]
+            columns=["timestamp", "symbol", "side", "price", "qty", "notional", "source"]
         )
     )
     if not data.empty:
-        data = data[(data["ts"] >= start) & (data["ts"] < end_exclusive)].copy()
+        data = data[(data["timestamp"] >= start) & (data["timestamp"] < end_exclusive)].copy()
         data = (
-            data.sort_values("ts")
-            .drop_duplicates(subset=["ts", "side", "price", "qty", "notional"])
+            data.sort_values("timestamp")
+            .drop_duplicates(subset=["timestamp", "side", "price", "qty", "notional"])
             .reset_index(drop=True)
         )
     return data, stats, missing_files
@@ -518,7 +518,7 @@ def main() -> int:
                 if data.empty:
                     part = pd.DataFrame(
                         columns=[
-                            "ts",
+                            "timestamp",
                             "symbol",
                             "side",
                             "price",
@@ -529,7 +529,7 @@ def main() -> int:
                     )
                 else:
                     part = data[
-                        (data["ts"] >= month_start) & (data["ts"] < month_end)
+                        (data["timestamp"] >= month_start) & (data["timestamp"] < month_end)
                     ].copy()
 
                 if part.empty and not int(args.force):

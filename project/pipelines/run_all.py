@@ -20,15 +20,24 @@ from pipelines._lib.spec_utils import get_spec_hashes
 
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 PHASE2_EVENT_CHAIN: List[Tuple[str, str, List[str]]] = [
-    ("vol_shock_relaxation", "analyze_vol_shock_relaxation.py", ["--timeframe", "15m"]),
-    ("liquidity_refill_lag_window", "analyze_liquidity_lag_window.py", []),
+    ("vol_shock_relaxation", "analyze_vol_shock_relaxation.py", ["--timeframe", "5m"]),
+    ("liquidity_refill_lag_window", "analyze_liquidity_refill_lag_window.py", []),
     ("liquidity_absence_window", "analyze_liquidity_absence_window.py", []),
     ("vol_aftershock_window", "analyze_vol_aftershock_window.py", []),
     ("directional_exhaustion_after_forced_flow", "analyze_directional_exhaustion_after_forced_flow.py", []),
     ("cross_venue_desync", "analyze_cross_venue_desync.py", []),
-    ("liquidity_vacuum", "analyze_liquidity_vacuum.py", ["--timeframe", "15m"]),
+    ("liquidity_vacuum", "analyze_liquidity_vacuum.py", ["--timeframe", "5m"]),
     ("funding_extreme_reversal_window", "analyze_funding_extreme_reversal_window.py", []),
     ("range_compression_breakout_window", "analyze_range_compression_breakout_window.py", []),
+    ("funding_episodes", "analyze_funding_episode_events.py", []),
+    ("funding_extreme_onset", "no_op.py", []),
+    ("funding_persistence_window", "no_op.py", []),
+    ("funding_normalization", "no_op.py", []),
+    ("oi_shocks", "analyze_oi_shock_events.py", []),
+    ("oi_spike_positive", "no_op.py", []),
+    ("oi_spike_negative", "no_op.py", []),
+    ("oi_flush", "no_op.py", []),
+    ("LIQUIDATION_CASCADE", "analyze_liquidation_cascade.py", []),
 ]
 _STRICT_RECOMMENDATIONS_CHECKLIST = False
 
@@ -273,7 +282,7 @@ def main() -> int:
     parser.add_argument(
         "--phase2_event_type",
         default="vol_shock_relaxation",
-        choices=["all", *[event for event, _, _ in PHASE2_EVENT_CHAIN]],
+        choices=["all", *[event for event, _, _ in PHASE2_EVENT_CHAIN], "LIQUIDATION_CASCADE"],
     )
     parser.add_argument("--phase2_max_conditions", type=int, default=20)
     parser.add_argument("--phase2_max_actions", type=int, default=9)
@@ -286,6 +295,7 @@ def main() -> int:
     parser.add_argument("--phase2_delay_grid_bars", default="0,4,8,16,30")
     parser.add_argument("--phase2_min_delay_positive_ratio", type=float, default=0.60)
     parser.add_argument("--phase2_min_delay_robustness_score", type=float, default=0.60)
+    parser.add_argument("--phase2_shift_labels_k", type=int, default=0)
     parser.add_argument("--run_bridge_eval_phase2", type=int, default=1)
     parser.add_argument("--bridge_edge_cost_k", type=float, default=2.0)
     parser.add_argument("--bridge_stressed_cost_multiplier", type=float, default=1.5)
@@ -319,6 +329,8 @@ def main() -> int:
     parser.add_argument("--run_recommendations_checklist", type=int, default=1)
     parser.add_argument("--strict_recommendations_checklist", type=int, default=0)
     parser.add_argument("--auto_continue_on_keep_research", type=int, default=0)
+    parser.add_argument("--liq_vol_th", type=float, default=100000.0)
+    parser.add_argument("--oi_drop_th", type=float, default=-500000.0)
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--run_backtest", type=int, default=0)
     parser.add_argument("--clean_engine_artifacts", type=int, default=1)
@@ -347,6 +359,7 @@ def main() -> int:
     parser.add_argument("--blueprints_path", default=None)
     parser.add_argument("--blueprints_top_k", type=int, default=10)
     parser.add_argument("--blueprints_filter_event_type", default="all")
+    parser.add_argument("--atlas_mode", type=int, default=0)
     parser.add_argument("--mode", choices=["research", "production", "certification"], default="research")
 
     args = parser.parse_args()
@@ -407,8 +420,8 @@ def main() -> int:
     if not args.skip_ingest_ohlcv:
         stages.append(
             (
-                "ingest_binance_um_ohlcv_15m",
-                PROJECT_ROOT / "pipelines" / "ingest" / "ingest_binance_um_ohlcv_15m.py",
+                "ingest_binance_um_ohlcv_5m",
+                PROJECT_ROOT / "pipelines" / "ingest" / "ingest_binance_um_ohlcv_5m.py",
                 [
                     "--run_id",
                     run_id,
@@ -447,8 +460,8 @@ def main() -> int:
     if run_spot_pipeline and not args.skip_ingest_spot_ohlcv:
         stages.append(
             (
-                "ingest_binance_spot_ohlcv_15m",
-                PROJECT_ROOT / "pipelines" / "ingest" / "ingest_binance_spot_ohlcv_15m.py",
+                "ingest_binance_spot_ohlcv_5m",
+                PROJECT_ROOT / "pipelines" / "ingest" / "ingest_binance_spot_ohlcv_5m.py",
                 [
                     "--run_id",
                     run_id,
@@ -509,8 +522,8 @@ def main() -> int:
     stages.extend(
         [
             (
-                "build_cleaned_15m",
-                PROJECT_ROOT / "pipelines" / "clean" / "build_cleaned_15m.py",
+                "build_cleaned_5m",
+                PROJECT_ROOT / "pipelines" / "clean" / "build_cleaned_5m.py",
                 [
                     "--run_id",
                     run_id,
@@ -563,7 +576,7 @@ def main() -> int:
                     "--symbols",
                     symbols,
                     "--timeframe",
-                    "15m",
+                    "5m",
                     "--start",
                     start,
                     "--end",
@@ -581,7 +594,7 @@ def main() -> int:
                     "--symbols",
                     symbols,
                     "--timeframe",
-                    "15m",
+                    "5m",
                     "--start",
                     start,
                     "--end",
@@ -597,8 +610,8 @@ def main() -> int:
         stages.extend(
             [
                 (
-                    "build_cleaned_15m_spot",
-                    PROJECT_ROOT / "pipelines" / "clean" / "build_cleaned_15m.py",
+                    "build_cleaned_5m_spot",
+                    PROJECT_ROOT / "pipelines" / "clean" / "build_cleaned_5m.py",
                     [
                         "--run_id",
                         run_id,
@@ -632,19 +645,26 @@ def main() -> int:
         )
 
     if int(args.run_hypothesis_generator):
+        # Stage 1: Global Candidate Template Generation (Knowledge Atlas)
         stages.append(
             (
-                "generate_hypothesis_queue",
-                PROJECT_ROOT / "pipelines" / "research" / "generate_hypothesis_queue.py",
+                "generate_candidate_templates",
+                PROJECT_ROOT / "pipelines" / "research" / "generate_candidate_templates.py",
                 [
-                    "--run_id",
-                    run_id,
-                    "--symbols",
-                    symbols,
-                    "--datasets",
-                    str(args.hypothesis_datasets),
-                    "--max_fused",
-                    str(int(args.hypothesis_max_fused)),
+                    "--backlog", "research_backlog.csv",
+                    "--atlas_dir", "atlas",
+                ],
+            )
+        )
+        # Stage 2: Per-Run Candidate Plan Enumeration (Bounded & Budgeted)
+        stages.append(
+            (
+                "generate_candidate_plan",
+                PROJECT_ROOT / "pipelines" / "research" / "generate_candidate_plan.py",
+                [
+                    "--run_id", run_id,
+                    "--symbols", symbols,
+                    "--atlas_dir", "atlas",
                 ],
             )
         )
@@ -678,6 +698,13 @@ def main() -> int:
                         "--range_window", "24",
                     ]
                 )
+            if script_name == "analyze_liquidation_cascade.py":
+                phase1_args.extend(
+                    [
+                        "--liq_vol_th", str(args.liq_vol_th),
+                        "--oi_drop_th", str(args.oi_drop_th),
+                    ]
+                )
             stages.append(
                 (
                     script_name.removesuffix(".py"),
@@ -702,7 +729,7 @@ def main() -> int:
                         "--event_type",
                         event_type,
                         "--timeframe",
-                        "15m",
+                        "5m",
                     ],
                 )
             )
@@ -711,18 +738,26 @@ def main() -> int:
                 if len(selected_chain) == 1
                 else f"phase2_conditional_hypotheses_{event_type}"
             )
+            candidate_plan_path = DATA_ROOT / "reports" / "hypothesis_generator" / run_id / "candidate_plan.jsonl"
+            phase2_args = [
+                "--run_id",
+                run_id,
+                "--event_type",
+                event_type,
+                "--symbols",
+                symbols,
+                "--shift_labels_k",
+                str(int(args.phase2_shift_labels_k)),
+            ]
+            if candidate_plan_path.exists():
+                phase2_args.extend(["--candidate_plan", str(candidate_plan_path)])
+                phase2_args.extend(["--atlas_mode", str(int(args.atlas_mode))])
+            
             stages.append(
                 (
                     phase2_stage_name,
                     PROJECT_ROOT / "pipelines" / "research" / "phase2_candidate_discovery.py",
-                    [
-                        "--run_id",
-                        run_id,
-                        "--event_type",
-                        event_type,
-                        "--symbols",
-                        symbols,
-                    ],
+                    phase2_args,
                 )
             )
             if int(args.run_bridge_eval_phase2):
@@ -998,7 +1033,7 @@ def main() -> int:
         )
 
     stages_with_config = {
-        "build_cleaned_15m",
+        "build_cleaned_5m",
         "build_features_v1",
         "build_context_features",
         "build_market_context",
@@ -1099,14 +1134,15 @@ def main() -> int:
         if bool(int(getattr(args, _attr, 0))):
             non_production_overrides.append(f"{_stage_name}:{_cli_flag}=1")
     def _has_hypothesis_entries(run_id: str, event_type: str) -> bool:
-        queue_path = DATA_ROOT / "runs" / run_id / "hypothesis_generator" / "hypothesis_queue.jsonl"
+        queue_path = DATA_ROOT / "reports" / "hypothesis_generator" / run_id / "phase1_hypothesis_queue.jsonl"
         if not queue_path.exists():
             return False
         try:
             for line in queue_path.read_text(encoding="utf-8").splitlines():
                 if not line.strip(): continue
                 row = json.loads(line)
-                if str(row.get("event_type", "")).strip() == event_type:
+                targets = row.get("target_phase2_event_types", [])
+                if isinstance(targets, list) and event_type in targets:
                     return True
         except Exception:
             pass

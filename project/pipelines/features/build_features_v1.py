@@ -75,8 +75,14 @@ def _read_optional_time_series(path: Path) -> pd.DataFrame:
     if not files:
         return pd.DataFrame()
     frame = read_parquet(files)
-    if frame.empty or "timestamp" not in frame.columns:
+    if frame.empty:
         return pd.DataFrame()
+    
+    ts_col = "timestamp" if "timestamp" in frame.columns else ("ts" if "ts" in frame.columns else None)
+    if ts_col is None:
+        return pd.DataFrame()
+        
+    frame = frame.rename(columns={ts_col: "timestamp"})
     frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
     frame = frame.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
     return frame
@@ -156,7 +162,7 @@ def _merge_optional_oi_liquidation(
         out["liquidation_count"] = 0.0
 
     out["oi_notional"] = pd.to_numeric(out["oi_notional"], errors="coerce")
-    out["oi_delta_1h"] = out["oi_notional"].diff(4)
+    out["oi_delta_1h"] = out["oi_notional"].diff(12) # 5m bars, 1h = 12 bars
     out["liquidation_notional"] = pd.to_numeric(out["liquidation_notional"], errors="coerce").fillna(0.0)
     out["liquidation_count"] = pd.to_numeric(out["liquidation_count"], errors="coerce").fillna(0.0)
     return out
@@ -171,8 +177,8 @@ def _rolling_zscore(series: pd.Series, window: int, min_periods: int = 24) -> pd
 
 def _load_spot_close_reference(symbol: str, run_id: str) -> pd.DataFrame:
     candidates = [
-        DATA_ROOT / "lake" / "runs" / run_id / "cleaned" / "spot" / symbol / "bars_15m",
-        DATA_ROOT / "lake" / "cleaned" / "spot" / symbol / "bars_15m",
+        DATA_ROOT / "lake" / "runs" / run_id / "cleaned" / "spot" / symbol / "bars_5m",
+        DATA_ROOT / "lake" / "cleaned" / "spot" / symbol / "bars_5m",
     ]
     for candidate in candidates:
         frame = _read_optional_time_series(candidate)
@@ -204,7 +210,7 @@ def _add_basis_features(frame: pd.DataFrame, symbol: str, run_id: str, market: s
             spot_sorted,
             on='timestamp',
             direction='backward',
-            tolerance=pd.Timedelta('15min'),
+            tolerance=pd.Timedelta('5min'),
         )
         coverage = float(out['spot_close'].notna().mean()) if len(out) else 0.0
         out['basis_spot_coverage'] = coverage
@@ -246,7 +252,11 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, handlers=log_handlers, format="%(asctime)s %(levelname)s %(message)s")
 
     config_paths = [str(PROJECT_ROOT / "configs" / "pipeline.yaml")]
-    config_paths.extend(args.config)
+    for raw in args.config:
+        path = Path(str(raw))
+        if not path.is_absolute():
+            path = PROJECT_ROOT / path
+        config_paths.append(str(path))
     config = load_configs(config_paths)
 
     inputs: List[Dict[str, object]] = []
@@ -260,8 +270,8 @@ def main() -> int:
         "source_vendor": "binance",
         "source_exchange": "binance",
         "schema_versions": {
-            "cleaned_bars": "cleaned_bars_15m_v1",
-            "funding": "funding_15m_v1",
+            "cleaned_bars": "cleaned_bars_5m_v1",
+            "funding": "funding_5m_v1",
         },
     }
     stage_name = "build_features_v1" if market == "perp" else "build_features_v1_spot"
@@ -274,12 +284,12 @@ def main() -> int:
         stats["feature_schema_hash"] = feature_schema_hash
         for symbol in symbols:
             cleaned_candidates = [
-                run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", market, symbol, "bars_15m"),
-                DATA_ROOT / "lake" / "cleaned" / market / symbol / "bars_15m",
+                run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", market, symbol, "bars_5m"),
+                DATA_ROOT / "lake" / "cleaned" / market / symbol / "bars_5m",
             ]
             funding_candidates = [
-                run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", market, symbol, "funding_15m"),
-                DATA_ROOT / "lake" / "cleaned" / market / symbol / "funding_15m",
+                run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", market, symbol, "funding_5m"),
+                DATA_ROOT / "lake" / "cleaned" / market / symbol / "funding_5m",
             ]
             cleaned_dir = choose_partition_dir(cleaned_candidates)
             funding_dir = choose_partition_dir(funding_candidates)
@@ -303,7 +313,7 @@ def main() -> int:
                     "provenance": {
                         "vendor": "binance",
                         "exchange": "binance",
-                        "schema_version": "cleaned_bars_15m_v1",
+                        "schema_version": "cleaned_bars_5m_v1",
                         "schema_hash": schema_hash_from_columns(bars.columns.tolist()),
                         "extraction_start": bars_stats.get("start_ts"),
                         "extraction_end": bars_stats.get("end_ts"),
@@ -319,7 +329,7 @@ def main() -> int:
                         "provenance": {
                             "vendor": "binance",
                             "exchange": "binance",
-                            "schema_version": "funding_15m_v1",
+                            "schema_version": "funding_5m_v1",
                             "schema_hash": schema_hash_from_columns(funding.columns.tolist()),
                             "extraction_start": funding_stats.get("start_ts"),
                             "extraction_end": funding_stats.get("end_ts"),
@@ -380,11 +390,11 @@ def main() -> int:
             features["year"] = features["timestamp"].dt.year
             features["month"] = features["timestamp"].dt.month
             validate_feature_schema_columns(
-                dataset_key="features_v1_15m_v1",
+                dataset_key="features_v1_5m_v1",
                 columns=features.columns.drop(["year", "month"]).tolist(),
             )
-            out_dir = run_scoped_lake_path(DATA_ROOT, run_id, "features", market, symbol, "15m", "features_v1")
-            out_dir_compat = DATA_ROOT / "lake" / "features" / market / symbol / "15m" / "features_v1"
+            out_dir = run_scoped_lake_path(DATA_ROOT, run_id, "features", market, symbol, "5m", "features_v1")
+            out_dir_compat = DATA_ROOT / "lake" / "features" / market / symbol / "5m" / "features_v1"
 
             partitions_written: List[str] = []
             partitions_skipped: List[str] = []
