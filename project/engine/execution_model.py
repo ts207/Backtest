@@ -17,12 +17,12 @@ def estimate_transaction_cost_bps(
     idx = turnover.index
     turnover = pd.to_numeric(turnover.reindex(idx), errors="coerce").fillna(0.0).abs()
 
-    base_fee_bps = float(config.get("base_fee_bps", 4.0))
-    base_slippage_bps = float(config.get("base_slippage_bps", 2.0))
-    spread_weight = float(config.get("spread_weight", 0.25))
-    volatility_weight = float(config.get("volatility_weight", 0.25))
-    liquidity_weight = float(config.get("liquidity_weight", 0.25))
-    impact_weight = float(config.get("impact_weight", 0.25))
+    base_fee_bps = float(config.get("base_fee_bps", 0.0))
+    base_slippage_bps = float(config.get("base_slippage_bps", 0.0))
+    spread_weight = float(config.get("spread_weight", 0.0))
+    volatility_weight = float(config.get("volatility_weight", 0.0))
+    liquidity_weight = float(config.get("liquidity_weight", 0.0))
+    impact_weight = float(config.get("impact_weight", 0.0))
     cap_bps = float(config.get("max_cost_bps_cap", 150.0))
 
     spread = pd.to_numeric(frame.get("spread_bps", pd.Series(0.0, index=idx)).reindex(idx), errors="coerce").fillna(0.0).abs()

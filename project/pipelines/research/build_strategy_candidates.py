@@ -1049,6 +1049,19 @@ def main() -> int:
             edge_df.loc[edge_df["selection_score"] <= 0.0, "selection_score"] = (
                 0.65 * edge_df["edge_score"] + 0.35 * edge_df["stability_proxy"]
             )
+            
+            # --- MULTIPLICITY CORRECTION PATCH ---
+            # Apply Bonferroni-like penalty to expectancy if not already adjusted.
+            # Assuming effective independent tests is proportional to row count.
+            n_tests = len(edge_df)
+            if n_tests > 1:
+                penalty_factor = 1.0 / np.log1p(n_tests) # Mild log penalty
+                # Only apply if 'expectancy_after_multiplicity' wasn't rigorously computed upstream
+                mask_unadjusted = (edge_df["expectancy_after_multiplicity"] - edge_df["expectancy_per_trade"]).abs() < 1e-9
+                edge_df.loc[mask_unadjusted, "expectancy_after_multiplicity"] *= penalty_factor
+                edge_df.loc[mask_unadjusted, "selection_score"] *= penalty_factor
+            # --- END PATCH ---
+
             edge_df = edge_df.sort_values(
                 [
                     "event",

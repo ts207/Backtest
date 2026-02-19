@@ -1092,7 +1092,36 @@ def main() -> int:
     for _attr, _stage_name, _cli_flag in _STARTUP_NON_PROD_FLAGS:
         if bool(int(getattr(args, _attr, 0))):
             non_production_overrides.append(f"{_stage_name}:{_cli_flag}=1")
+    def _has_hypothesis_entries(run_id: str, event_type: str) -> bool:
+        queue_path = DATA_ROOT / "runs" / run_id / "hypothesis_generator" / "hypothesis_queue.jsonl"
+        if not queue_path.exists():
+            return False
+        try:
+            for line in queue_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip(): continue
+                row = json.loads(line)
+                if str(row.get("event_type", "")).strip() == event_type:
+                    return True
+        except Exception:
+            pass
+        return False
+
     for idx, (stage, script, base_args) in enumerate(stages, start=1):
+        # Event-specific gating: skip if queue has no entries for this event type.
+        skip_stage = False
+        for prefix in ["phase2_conditional_hypotheses_", "bridge_evaluate_phase2_", "build_event_registry_"]:
+            if stage.startswith(prefix):
+                et = stage.removeprefix(prefix)
+                if not _has_hypothesis_entries(run_id, et):
+                    print(f"[{idx}/{len(stages)}] Skipping stage: {stage} (no hypothesis entries for {et})")
+                    skip_stage = True
+                    # Record a zero-time timing entry to keep manifest aligned.
+                    stage_timings.append((stage, 0.0))
+                break
+        
+        if skip_stage:
+            continue
+
         print(f"[{idx}/{len(stages)}] Starting stage: {stage}")
         started = time.perf_counter()
         ok = _run_stage(stage, script, base_args, run_id)

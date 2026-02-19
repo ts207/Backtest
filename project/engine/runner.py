@@ -130,8 +130,8 @@ def _join_context_features(features: pd.DataFrame, context: pd.DataFrame) -> pd.
     return _apply_context_defaults(joined)
 
 
-def _merge_event_flags(features: pd.DataFrame, event_flags: pd.DataFrame) -> pd.DataFrame:
-    if event_flags.empty:
+def _merge_event_flags(features: pd.DataFrame, event_flags: pd.DataFrame | None) -> pd.DataFrame:
+    if event_flags is None or event_flags.empty:
         return features
     out = features.copy()
     flags = event_flags.copy()
@@ -262,7 +262,7 @@ def _load_symbol_data(
                 flags = flags[flags["timestamp"] >= start_ts].copy()
 
             # --- END PATCH ---
-        if end_ts is not None:
+        if end_ts is not None and flags is not None:
             flags = flags[flags["timestamp"] <= end_ts].copy()
         features = _merge_event_flags(features, flags)
     return bars, features
@@ -298,6 +298,15 @@ def _strategy_returns(
     requested_position_scale = float(params.get("position_scale", 1.0)) if isinstance(params, dict) else 1.0
     if not np.isfinite(requested_position_scale) or requested_position_scale < 0.0:
         raise ValueError(f"Invalid position_scale for {strategy_name}: {requested_position_scale}")
+
+    # --- EXECUTION LATENCY PATCH ---
+    # Shift positions to simulate execution latency (default 1 bar = next open/close).
+    # pos[T] generated at T becomes effective at T+lag.
+    execution_lag = int(params.get("execution_lag_bars", 1)) if isinstance(params, dict) else 1
+    if execution_lag > 0:
+        # Fill with 0 (flat) for the initial bars where signal is unknown.
+        positions = positions.shift(execution_lag).fillna(0).astype(int)
+    # --- END PATCH ---
 
     entry_reason_map: Dict[pd.Timestamp, str] = {}
     exit_reason_map: Dict[pd.Timestamp, str] = {}
@@ -336,11 +345,15 @@ def _strategy_returns(
 
     features_indexed = features.set_index("timestamp")
     features_aligned = features_indexed.reindex(ret.index)
+    
+    # --- OVERLAY BINDING FIX ---
+    # Apply overlays to the current (possibly shifted) positions.
     positions, overlay_stats = _apply_runtime_overlays(
         positions=positions,
         features_aligned=features_aligned,
         overlay_runtime=params.get("overlay_runtime", {}) if isinstance(params, dict) else {},
     )
+    # --- END FIX ---
 
     funding_series = (
         pd.to_numeric(features_indexed.get("funding_rate_scaled", pd.Series(0.0, index=ret.index)).reindex(ret.index), errors="coerce")
@@ -357,8 +370,15 @@ def _strategy_returns(
     scaled_positions = positions.astype(float) * requested_position_scale
     turnover = (scaled_positions - scaled_positions.shift(1).fillna(0.0)).abs()
     execution_cfg = dict(params.get("execution_model", {})) if isinstance(params, dict) and isinstance(params.get("execution_model", {}), dict) else {}
-    execution_cfg.setdefault("base_fee_bps", float(cost_bps) / 2.0)
-    execution_cfg.setdefault("base_slippage_bps", float(cost_bps) / 2.0)
+    
+    # --- COST PRIORITY FIX ---
+    # Allow explicit 0 in execution_model to override cost_bps.
+    if "base_fee_bps" not in execution_cfg:
+        execution_cfg["base_fee_bps"] = float(cost_bps) / 2.0
+    if "base_slippage_bps" not in execution_cfg:
+        execution_cfg["base_slippage_bps"] = float(cost_bps) / 2.0
+    # --- END FIX ---
+    
     frame_for_cost = pd.DataFrame(
         {
             "spread_bps": pd.to_numeric(features_aligned.get("spread_bps", pd.Series(0.0, index=ret.index)), errors="coerce").fillna(0.0),

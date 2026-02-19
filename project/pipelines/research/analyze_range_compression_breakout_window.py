@@ -215,14 +215,14 @@ def main() -> int:
         event_parts.append(ev)
         ctrl_parts.append(ct)
 
-    events = pd.concat(event_parts, ignore_index=True) if event_parts else pd.DataFrame()
-    controls = pd.concat(ctrl_parts, ignore_index=True) if ctrl_parts else pd.DataFrame()
+    events = pd.concat(event_parts, ignore_index=True) if event_parts else pd.DataFrame(columns=["event_id", "symbol", "time_to_tail_move"])
+    controls = pd.concat(ctrl_parts, ignore_index=True) if ctrl_parts else pd.DataFrame(columns=["event_id", "symbol", "time_to_tail_move"])
 
     deltas = pd.DataFrame()
     hazards = pd.DataFrame()
     phase = pd.DataFrame()
     sign = pd.DataFrame()
-    if not events.empty:
+    if not events.empty and not controls.empty and "event_id" in controls.columns:
         merged = events.merge(controls, on=["event_id", "symbol"], how="left", suffixes=("", "_ctrl"))
         deltas = pd.DataFrame(
             {
