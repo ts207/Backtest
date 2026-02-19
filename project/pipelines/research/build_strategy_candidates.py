@@ -1065,6 +1065,15 @@ def main() -> int:
                 per_event_seed_cap = max(1, min(int(args.top_k_per_event), int(args.max_candidates_per_event)))
                 selected = group.head(per_event_seed_cap)
                 for _, row in selected.iterrows():
+                    _raw_type = row.get("candidate_type", "edge")
+                    candidate_type = (
+                        str(_raw_type).strip().lower()
+                        if (_raw_type is not None and str(_raw_type).lower() != "nan")
+                        else "edge"
+                    )
+                    if candidate_type == "overlay":
+                        skipped_overlay_count += 1
+                        continue
                     source_path = Path(str(row.get("source_path", "")))
                     detail = _load_candidate_detail(source_path=source_path, candidate_id=str(row.get("candidate_id", "")))
                     if not detail:
@@ -1075,10 +1084,6 @@ def main() -> int:
                                 "source_path": str(source_path),
                             }
                         )
-                        continue
-                    candidate_type = str(row.get("candidate_type", "edge")).strip().lower()
-                    if candidate_type == "overlay":
-                        skipped_overlay_count += 1
                         continue
                     gate_oos_consistency_strict = _as_bool(
                         detail.get("gate_oos_consistency_strict", row.get("gate_oos_consistency_strict", True))
