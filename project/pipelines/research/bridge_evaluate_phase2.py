@@ -418,7 +418,11 @@ def main() -> int:
         overlay_df.to_csv(out_overlay_metrics, index=False)
 
         updated = candidates.copy()
-        updated = updated.merge(metrics_df.drop(columns=["bridge_fail_reasons"], errors="ignore"), on="candidate_id", how="left", suffixes=("", "_bridge"))
+        updated = updated.merge(metrics_df, on="candidate_id", how="left", suffixes=("", "_bridge"))
+        # If bridge_fail_reasons clashed with an existing column, consolidate.
+        if "bridge_fail_reasons_bridge" in updated.columns:
+            updated["bridge_fail_reasons"] = updated["bridge_fail_reasons_bridge"]
+            updated = updated.drop(columns=["bridge_fail_reasons_bridge"])
         # Keep merged bridge columns canonical.
         for col in BRIDGE_FIELDS:
             bridge_col = f"{col}_bridge"
