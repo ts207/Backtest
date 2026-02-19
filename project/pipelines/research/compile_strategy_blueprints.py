@@ -933,6 +933,16 @@ def main() -> int:
             edge_df = pd.DataFrame()
 
         if not edge_df.empty:
+            if "gate_bridge_tradable" not in edge_df.columns:
+                _msg = (
+                    "gate_bridge_tradable column missing from candidates — bridge stage may not have run "
+                    f"(run_id={args.run_id}, path={edge_path}). "
+                    "All candidates would silently pass the bridge gate. "
+                    "Re-run the bridge scoring stage or use --ignore_checklist 1 to bypass for non-production use."
+                )
+                if not int(args.ignore_checklist):
+                    raise ValueError(_msg)
+                print(f"WARNING: {_msg}", file=sys.stderr)
             if "candidate_id" not in edge_df.columns:
                 edge_df["candidate_id"] = [
                     _candidate_id(row, idx) for idx, row in enumerate(edge_df.to_dict(orient="records"))
