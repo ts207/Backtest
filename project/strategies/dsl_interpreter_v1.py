@@ -2,11 +2,14 @@ from __future__ import annotations
 from strategy_dsl.contract_v1 import validate_feature_references, resolve_trigger_column
 
 
+import logging
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
+
+LOGGER = logging.getLogger(__name__)
 
 from events.registry import REGISTRY_BACKED_SIGNALS
 from strategy_dsl.schema import (
@@ -242,7 +245,16 @@ def _condition_mask_node(merged: pd.DataFrame, node: ConditionNodeSpec) -> pd.Se
     if op in {"zscore_gt", "zscore_lt"}:
         window = int(node.window_bars)
         mean = series.rolling(window, min_periods=window).mean()
-        std = series.rolling(window, min_periods=window).std().replace(0.0, np.nan)
+        raw_std = series.rolling(window, min_periods=window).std()
+        zero_std_count = int((raw_std == 0.0).sum())
+        if zero_std_count:
+            LOGGER.warning(
+                "zscore condition on feature '%s': %d bars have zero std (constant window)"
+                " — condition will evaluate False for those bars",
+                node.feature,
+                zero_std_count,
+            )
+        std = raw_std.replace(0.0, np.nan)
         z = (series - mean) / std
         if op == "zscore_gt":
             return (z > float(node.value)).fillna(False)
