@@ -796,6 +796,7 @@ def _build_blueprint(
     stats: Dict[str, np.ndarray],
     fees_bps: float,
     slippage_bps: float,
+    min_events: int = 0,
 ) -> Blueprint:
     candidate_id = str(row.get("candidate_id", "")).strip() or _candidate_id(row, 0)
     detail = phase2_lookup.get(candidate_id, {})
@@ -854,6 +855,8 @@ def _build_blueprint(
             source_path=str(merged.get("source_path", "")),
             compiler_version=COMPILER_VERSION,
             generated_at_utc=DETERMINISTIC_TS,
+            events_count_used_for_gate=_safe_int(merged.get("n_events", merged.get("sample_size", 0)), 0),
+            min_events_threshold=int(min_events),
         ),
     )
     blueprint.validate()
@@ -1099,6 +1102,7 @@ def main() -> int:
         per_event_rejections: Dict[str, Dict[str, object]] = {}
         selection_records: List[Dict[str, object]] = []
         attempt_records: List[Dict[str, object]] = []
+        selected_for_build_count = 0
 
         for event_type in event_types:
             event_edge_rows = [row for row in edge_rows if str(row.get("event", "")).strip() == event_type]
@@ -1165,10 +1169,11 @@ def main() -> int:
             else:
                 strict_selected_rows = selected
 
+            selected_for_build_count += len(strict_selected_rows)
             stats = _event_stats(run_id=args.run_id, event_type=event_type)
             event_non_exec_errors: List[str] = []
             event_blueprint_count_before = len(blueprints)
-            
+
             for row in strict_selected_rows:
                 cid = str(row.get("candidate_id", "")).strip() or _candidate_id(row, 0)
                 try:
@@ -1181,6 +1186,7 @@ def main() -> int:
                         stats=stats,
                         fees_bps=float(resolved_costs.fee_bps_per_side),
                         slippage_bps=float(resolved_costs.slippage_bps_per_fill),
+                        min_events=int(args.min_events_floor),
                     )
                     blueprints.append(bp)
                     for rec in attempt_records:
@@ -1285,6 +1291,9 @@ def main() -> int:
         lines = [json.dumps(bp.to_dict(), sort_keys=True) for bp in blueprints]
         out_jsonl.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
+        active_count = sum(1 for bp in blueprints if not bp.lineage.wf_status.startswith("trimmed"))
+        trimmed_count = len(blueprints) - active_count
+
         summary = {
             "run_id": args.run_id,
             "compiler_version": COMPILER_VERSION,
@@ -1293,12 +1302,30 @@ def main() -> int:
             "fallback_event_count": int(fallback_count),
             "quality_floor": {
                 "min_robustness_score": QUALITY_MIN_ROBUSTNESS,
-                "min_events": QUALITY_MIN_EVENTS,
+                "min_events": int(args.min_events_floor),
                 "after_cost_expectancy_positive_required": True,
                 "stressed_after_cost_expectancy_positive_required": True,
                 "max_cost_ratio": QUALITY_MAX_COST_RATIO,
                 "strict_cost_fields": bool(int(args.strict_cost_fields)),
             },
+            "compile_funnel": {
+                "selected_for_build": int(selected_for_build_count),
+                "build_success": int(len(blueprints)),
+                "build_fail_non_executable": int(rejected_non_executable_condition_count),
+                "build_fail_naive_entry": int(rejected_naive_entry_count),
+                "build_fail_exception": int(sum(
+                    1 for r in attempt_records if r.get("fail_reason") == "build_exception"
+                )),
+                "behavior_dedup_drop": int(duplicate_stats.get("behavior_duplicate_count", 0)),
+                "wf_trim_zero_trade": int(trim_stats.get("trimmed_zero_trade", 0)),
+                "wf_trim_worst_negative": int(trim_stats.get("trimmed_worst_negative", 0)),
+                "written_total": int(len(blueprints)),
+                "written_active": int(active_count),
+                "written_trimmed": int(trimmed_count),
+            },
+            "wf_evidence_hash": str(wf_evidence_hash),
+            "wf_evidence_source": str(DATA_ROOT / "reports" / "eval" / args.run_id / "walkforward_summary.json"),
+            "min_events_threshold_used": int(args.min_events_floor),
             "historical_trim": trim_stats,
             "rejected_non_executable_condition_count": int(rejected_non_executable_condition_count),
             "rejected_naive_entry_count": int(rejected_naive_entry_count),

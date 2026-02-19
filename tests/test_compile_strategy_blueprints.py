@@ -1163,3 +1163,70 @@ def test_load_walkforward_strategy_metrics_empty_hash_when_missing(monkeypatch, 
     metrics, file_hash = compile_strategy_blueprints._load_walkforward_strategy_metrics("run_no_wf")
     assert metrics == {}
     assert file_hash == ""
+
+
+def test_compiler_stamps_min_events_in_lineage(monkeypatch, tmp_path: Path) -> None:
+    run_id = "dsl_compile_min_events_stamp"
+    _write_inputs(tmp_path=tmp_path, run_id=run_id)
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(compile_strategy_blueprints, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys, "argv",
+        [
+            "compile_strategy_blueprints.py",
+            "--run_id", run_id,
+            "--symbols", "BTCUSDT,ETHUSDT",
+            "--ignore_checklist", "1",
+            "--min_events_floor", "50",
+        ] + ALLOW_NAIVE_ENTRY_FAIL_ARGS,
+    )
+    assert compile_strategy_blueprints.main() == 0
+
+    out_path = tmp_path / "reports" / "strategy_blueprints" / run_id / "blueprints.jsonl"
+    rows = [json.loads(line) for line in out_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    # Filter to active blueprints (wf_status == "pass")
+    active = [r for r in rows if r["lineage"]["wf_status"] == "pass"]
+    assert active, "Expected at least one active blueprint"
+    for row in active:
+        assert row["lineage"]["min_events_threshold"] == 50
+        assert row["lineage"]["events_count_used_for_gate"] > 0
+
+
+def test_compiler_summary_contains_compile_funnel(monkeypatch, tmp_path: Path) -> None:
+    run_id = "dsl_compile_funnel_summary"
+    _write_inputs(tmp_path=tmp_path, run_id=run_id)
+
+    monkeypatch.setenv("BACKTEST_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(compile_strategy_blueprints, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(
+        sys, "argv",
+        [
+            "compile_strategy_blueprints.py",
+            "--run_id", run_id,
+            "--symbols", "BTCUSDT,ETHUSDT",
+            "--ignore_checklist", "1",
+            "--min_events_floor", "50",
+        ] + ALLOW_NAIVE_ENTRY_FAIL_ARGS,
+    )
+    assert compile_strategy_blueprints.main() == 0
+
+    summary_path = tmp_path / "reports" / "strategy_blueprints" / run_id / "blueprints_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+
+    assert "compile_funnel" in summary
+    funnel = summary["compile_funnel"]
+    assert "selected_for_build" in funnel
+    assert "build_success" in funnel
+    assert "wf_trim_zero_trade" in funnel
+    assert "wf_trim_worst_negative" in funnel
+    assert "written_total" in funnel
+    assert "written_active" in funnel
+    assert "written_trimmed" in funnel
+
+    assert "wf_evidence_hash" in summary
+    assert "min_events_threshold_used" in summary
+    assert summary["min_events_threshold_used"] == 50
+
+    # quality_floor.min_events should reflect actual arg, not the constant QUALITY_MIN_EVENTS
+    assert summary["quality_floor"]["min_events"] == 50
