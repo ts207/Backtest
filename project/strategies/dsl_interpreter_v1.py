@@ -1,4 +1,6 @@
 from __future__ import annotations
+from strategy_dsl.contract_v1 import validate_feature_references, resolve_trigger_column
+
 
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
@@ -465,6 +467,7 @@ def _signal_list_mask(frame: pd.DataFrame, signal_names: List[str], blueprint: B
     out = pd.Series(True, index=frame.index, dtype=bool)
     for signal in signal_names:
         out = out & _signal_mask(signal=signal, frame=frame, blueprint=blueprint)
+    validate_feature_references(blueprint)
     return out.fillna(False)
 
 
@@ -761,3 +764,21 @@ class DslInterpreterV1:
             "candidate_id": blueprint.candidate_id,
         }
         return out
+
+def _compute_trigger_coverage(frame, triggers):
+    cols = list(getattr(frame, "columns", []))
+    out = {"triggers": {}, "missing": [], "resolved": {}}
+    for trig in (triggers or []):
+        resolved = resolve_trigger_column(str(trig), cols)
+        out["resolved"][str(trig)] = resolved
+        if resolved is None or resolved not in cols:
+            out["missing"].append(str(trig))
+            out["triggers"][str(trig)] = {"resolved": None, "true_count": 0, "true_rate": 0.0}
+            continue
+        s = frame[resolved]
+        # tolerate 0/1 ints or bools
+        true_count = int((s.astype(bool)).sum())
+        true_rate = float((s.astype(bool)).mean()) if len(s) else 0.0
+        out["triggers"][str(trig)] = {"resolved": resolved, "true_count": true_count, "true_rate": true_rate}
+    out["all_zero"] = all(v.get("true_count", 0) == 0 for v in out["triggers"].values()) if out["triggers"] else True
+    return out
