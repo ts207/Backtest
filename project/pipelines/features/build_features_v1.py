@@ -197,7 +197,17 @@ def _add_basis_features(frame: pd.DataFrame, symbol: str, run_id: str, market: s
 
     spot = _load_spot_close_reference(symbol=symbol, run_id=run_id)
     if not spot.empty:
-        out = out.merge(spot, on="timestamp", how="left")
+        spot_sorted = spot.sort_values('timestamp').reset_index(drop=True)
+        out_sorted = out.sort_values('timestamp').reset_index(drop=True)
+        out = pd.merge_asof(
+            out_sorted,
+            spot_sorted,
+            on='timestamp',
+            direction='backward',
+            tolerance=pd.Timedelta('15min'),
+        )
+        coverage = float(out['spot_close'].notna().mean()) if len(out) else 0.0
+        out['basis_spot_coverage'] = coverage
     else:
         out["spot_close"] = np.nan
 
