@@ -156,8 +156,8 @@ def _tail_report(returns: pd.Series) -> Dict[str, float]:
 
 def _load_symbol_features(symbol: str, run_id: str) -> pd.DataFrame:
     candidates = [
-        run_scoped_lake_path(DATA_ROOT, run_id, "features", "perp", symbol, "15m", "features_v1"),
-        DATA_ROOT / "lake" / "features" / "perp" / symbol / "15m" / "features_v1",
+        run_scoped_lake_path(DATA_ROOT, run_id, "features", "perp", symbol, "5m", "features_v1"),
+        DATA_ROOT / "lake" / "features" / "perp" / symbol / "5m" / "features_v1",
     ]
     features_dir = choose_partition_dir(candidates)
     files = list_parquet_files(features_dir) if features_dir else []

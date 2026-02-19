@@ -316,7 +316,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Analyze Vol Shock -> Relaxation events (event-level, de-overlapped)")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
-    parser.add_argument("--timeframe", default="15m")
+    parser.add_argument("--timeframe", default="5m")
     parser.add_argument("--out_dir", default=None)
     parser.add_argument("--m_controls", type=int, default=5)
     parser.add_argument("--bootstrap_iters", type=int, default=1000)

@@ -20,8 +20,8 @@ from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 
 def _load_symbol_bars(run_id: str, symbol: str, market: str) -> pd.DataFrame:
     candidates = [
-        run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", market, symbol, "bars_15m"),
-        DATA_ROOT / "lake" / "cleaned" / market / symbol / "bars_15m",
+        run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", market, symbol, "bars_5m"),
+        DATA_ROOT / "lake" / "cleaned" / market / symbol / "bars_5m",
     ]
     bars_dir = choose_partition_dir(candidates)
     files = list_parquet_files(bars_dir) if bars_dir else []
@@ -96,7 +96,7 @@ def main() -> int:
                     month_cursor = pd.Timestamp(month_cursor.year, month_cursor.month + 1, 1, tz="UTC")
 
             inputs.append({
-                "path": str(run_scoped_lake_path(DATA_ROOT, args.run_id, "cleaned", args.market, symbol, "bars_15m")),
+                "path": str(run_scoped_lake_path(DATA_ROOT, args.run_id, "cleaned", args.market, symbol, "bars_5m")),
                 "rows": int(len(df)),
                 "start_ts": start_ts.isoformat(),
                 "end_ts": end_ts.isoformat(),

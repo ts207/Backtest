@@ -119,7 +119,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build market-state context features from features_v1")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
-    parser.add_argument("--timeframe", default="15m")
+    parser.add_argument("--timeframe", default="5m")
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
     parser.add_argument("--out_dir", default=None)
@@ -184,7 +184,7 @@ def main() -> int:
                     "provenance": {
                         "vendor": "binance",
                         "exchange": "binance",
-                        "schema_version": "features_v1_15m_v1",
+                        "schema_version": "features_v1_5m_v1",
                         "schema_hash": schema_hash_from_columns(features.columns.tolist()),
                         "extraction_start": features["timestamp"].min().isoformat(),
                         "extraction_end": features["timestamp"].max().isoformat(),

@@ -63,8 +63,8 @@ def _pick_window_column(columns: Iterable[str], prefix: str, fallback: str) -> s
 
 def _load_features(symbol: str, run_id: str) -> pd.DataFrame:
     candidates = [
-        run_scoped_lake_path(DATA_ROOT, run_id, "features", "perp", symbol, "15m", "features_v1"),
-        DATA_ROOT / "lake" / "features" / "perp" / symbol / "15m" / "features_v1",
+        run_scoped_lake_path(DATA_ROOT, run_id, "features", "perp", symbol, "5m", "features_v1"),
+        DATA_ROOT / "lake" / "features" / "perp" / symbol / "5m" / "features_v1",
     ]
     features_dir = choose_partition_dir(candidates)
     files = list_parquet_files(features_dir) if features_dir else []
@@ -1463,7 +1463,7 @@ def main() -> int:
         pooled.to_markdown(index=False) if not pooled.empty else "No rows",
         "",
         "## Matched Baseline Comparison",
-        "Matched non-event controls are sampled within symbol, volatility quartile, and 15m time-of-day slot.",
+        "Matched non-event controls are sampled within symbol, volatility quartile, and 5m time-of-day slot.",
         "Interpretation: absolute hazards describe event geometry; delta hazards (event-baseline) describe excess risk materiality.",
         baseline_compare.to_markdown(index=False) if not baseline_compare.empty else "No rows",
         "",
@@ -1531,6 +1531,8 @@ def main() -> int:
     interaction_stability_df.to_csv(interaction_csv, index=False)
     accel_csv = out_dir / "funding_acceleration_diagnostic.csv"
     accel_diag_df.to_csv(accel_csv, index=False)
+    events_csv = out_dir / "funding_episode_events.csv"
+    events_df.to_csv(events_csv, index=False)
 
     logging.info("Wrote %s", json_path)
     logging.info("Wrote %s", md_path)
@@ -1540,6 +1542,7 @@ def main() -> int:
     logging.info("Wrote %s", transition_csv)
     logging.info("Wrote %s", interaction_csv)
     logging.info("Wrote %s", accel_csv)
+    logging.info("Wrote %s", events_csv)
     return 0
 
 

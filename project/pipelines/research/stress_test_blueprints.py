@@ -55,6 +55,12 @@ def _generate_variants(blueprint: Dict[str, Any]) -> List[Dict[str, Any]]:
                 
     return variants
 
+def _load_returns(engine_dir: Path, strategy_id: str) -> pd.DataFrame:
+    path = engine_dir / f"strategy_returns_{strategy_id}.csv"
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_csv(path)
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Stress test strategy blueprints")
     parser.add_argument("--run_id", required=True)
@@ -81,9 +87,17 @@ def main() -> int:
                 if line.strip():
                     blueprints.append(json.loads(line))
         
+        if not blueprints:
+            print("No blueprints to stress test.")
+            finalize_manifest(manifest, "success", stats={"blueprints": 0})
+            return 0
+
+        blueprint_variants_map = {}
         expanded_blueprints = []
         for bp in blueprints:
-            expanded_blueprints.extend(_generate_variants(bp))
+            vars_for_bp = _generate_variants(bp)
+            blueprint_variants_map[bp["id"]] = [v["id"] for v in vars_for_bp]
+            expanded_blueprints.extend(vars_for_bp)
             
         # Write expanded blueprints
         expanded_path = blueprints_path.parent / "blueprints_expanded.jsonl"
@@ -94,39 +108,69 @@ def main() -> int:
         print(f"Generated {len(expanded_blueprints)} variants from {len(blueprints)} blueprints.")
         
         # Run Backtest on expanded
+        stress_run_id = f"{args.run_id}_stress"
         cmd = [
             sys.executable,
             str(PROJECT_ROOT / "pipelines" / "backtest" / "backtest_strategies.py"),
-            "--run_id", f"{args.run_id}_stress",
+            "--run_id", stress_run_id,
             "--blueprints_path", str(expanded_path),
-            "--symbols", "BTCUSDT", # For stress test, maybe run on 1 symbol to save time? Or all?
-            # User said "Stress neighborhood sweeps... Gate: reject if performance collapses"
-            # Running on all symbols in expansion run is safer.
             "--symbols", "BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,AVAXUSDT,LINKUSDT,MATICUSDT,DOTUSDT",
             "--force", "1" 
         ]
-        # In a real scenario, I'd pass all symbols.
         
         print(f"Running backtest on variants...")
         subprocess.run(cmd, check=True)
         
         # Analyze Results
-        # Read strategy_returns from engine output
-        engine_dir = DATA_ROOT / "runs" / f"{args.run_id}_stress" / "engine"
+        engine_dir = DATA_ROOT / "runs" / stress_run_id / "engine"
         
+        stress_results = []
         pass_count = 0
+        
         for bp in blueprints:
-            # Check original and variants
-            # Simplest logic: Original must pass, variants shouldn't deviate too much?
-            # User says: "reject if performance collapses outside a razor-thin optimum"
-            # This implies if neighbors fail drastically, the original is brittle.
-            pass_count += 1 # Mock pass for now as I can't easily implement full analysis logic in one go without seeing outputs
+            bp_id = bp["id"]
+            variant_ids = blueprint_variants_map[bp_id]
             
-        print(f"Stress test passed for {pass_count} blueprints.")
+            variant_metrics = []
+            for v_id in variant_ids:
+                strategy_id = f"dsl_interpreter_v1__{v_id}"
+                returns = _load_returns(engine_dir, strategy_id)
+                if not returns.empty:
+                    exp = float(returns["pnl"].mean())
+                    variant_metrics.append(exp)
+                else:
+                    variant_metrics.append(-np.inf)
+            
+            orig_exp = variant_metrics[0] if variant_metrics else -np.inf
+            worst_case = float(min(variant_metrics)) if variant_metrics else -np.inf
+            
+            # Neighborhood robustness gate: worst case must be positive
+            # and not a "collapse" (e.g. worst case > 50% of original)
+            is_robust = (worst_case > 0)
+            if orig_exp > 0:
+                 is_robust = is_robust and (worst_case / orig_exp > 0.5)
+            
+            if is_robust:
+                pass_count += 1
+                
+            stress_results.append({
+                "blueprint_id": bp_id,
+                "original_expectancy": orig_exp,
+                "worst_case_expectancy": worst_case,
+                "n_variants": len(variant_metrics),
+                "is_robust": is_robust,
+                "fail_reason": "" if is_robust else "performance_collapse"
+            })
+            
+        stress_df = pd.DataFrame(stress_results)
+        stress_df.to_parquet(blueprints_path.parent / "stress_summary.parquet")
+        
+        print(f"Stress test passed for {pass_count} / {len(blueprints)} blueprints.")
         
         finalize_manifest(manifest, "success", stats={
             "blueprints": len(blueprints),
-            "variants": len(expanded_blueprints)
+            "variants": len(expanded_blueprints),
+            "robust_blueprints": pass_count
         })
         return 0
         

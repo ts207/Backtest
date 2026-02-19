@@ -283,6 +283,7 @@ def _detect_events_with_threshold(
                     "enter_ts": df["timestamp"].iat[enter],
                     "exit_ts": df["timestamp"].iat[exit_idx],
                     "duration_bars": int(duration),
+                    "shock_return": float(df["abs_return"].iat[i]),
                     "max_range_pct": max_range,
                     "t_range_peak": int(t_range_peak),
                     "half_life": int(half_life) if half_life is not None else np.nan,

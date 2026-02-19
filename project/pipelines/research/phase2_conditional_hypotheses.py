@@ -940,7 +940,7 @@ def _attach_event_market_features(
     events: pd.DataFrame,
     run_id: str,
     symbols: List[str],
-    timeframe: str = "15m",
+    timeframe: str = "5m",
 ) -> pd.DataFrame:
     if events.empty:
         return events

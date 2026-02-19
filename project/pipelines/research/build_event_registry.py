@@ -34,7 +34,7 @@ def main() -> int:
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--event_type", default="all", choices=["all", *sorted(EVENT_REGISTRY_SPECS.keys())])
-    parser.add_argument("--timeframe", default="15m")
+    parser.add_argument("--timeframe", default="5m")
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
 

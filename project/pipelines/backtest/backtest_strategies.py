@@ -38,7 +38,7 @@ from strategy_dsl.schema import (
 )
 
 INITIAL_EQUITY = 1_000_000.0
-BARS_PER_YEAR_15M = 365 * 24 * 4
+BARS_PER_YEAR_5M = 365 * 24 * 12
 
 STRATEGY_EXECUTION_FAMILY = {
     "vol_compression_v1": "breakout",
@@ -334,7 +334,7 @@ def _compute_drawdown(equity_curve: pd.Series) -> float:
     return float(drawdown.min()) if not drawdown.empty else 0.0
 
 
-def _annualized_sharpe(returns: pd.Series, periods_per_year: int = BARS_PER_YEAR_15M) -> float:
+def _annualized_sharpe(returns: pd.Series, periods_per_year: int = BARS_PER_YEAR_5M) -> float:
     returns = returns.dropna()
     if returns.empty:
         return 0.0
@@ -556,7 +556,7 @@ def _build_reproducibility_metadata(
     project_root: Path = PROJECT_ROOT,
 ) -> Dict[str, object]:
     stage_files = [
-        "build_cleaned_15m.json",
+        "build_cleaned_5m.json",
         "build_features_v1.json",
         "build_context_features.json",
         "build_market_context.json",

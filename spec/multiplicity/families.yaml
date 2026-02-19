@@ -8,6 +8,21 @@ families:
       - 15m
       - 60m
     max_candidates_per_run: 1000
+  funding_persistence_window:
+    templates:
+      - mean_reversion
+      - continuation
+    horizons:
+      - 5m
+      - 60m
+    max_candidates_per_run: 500
+  oi_flush:
+    templates:
+      - mean_reversion
+    horizons:
+      - 5m
+      - 60m
+    max_candidates_per_run: 500
 
 budget:
   global_max_candidates: 5000

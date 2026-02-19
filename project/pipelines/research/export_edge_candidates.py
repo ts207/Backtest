@@ -19,13 +19,13 @@ from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 
 PHASE2_EVENT_CHAIN = [
-    ("vol_shock_relaxation", "analyze_vol_shock_relaxation.py", ["--timeframe", "15m"]),
+    ("vol_shock_relaxation", "analyze_vol_shock_relaxation.py", ["--timeframe", "5m"]),
     ("liquidity_refill_lag_window", "analyze_liquidity_refill_lag_window.py", []),
     ("liquidity_absence_window", "analyze_liquidity_absence_window.py", []),
     ("vol_aftershock_window", "analyze_vol_aftershock_window.py", []),
     ("directional_exhaustion_after_forced_flow", "analyze_directional_exhaustion_after_forced_flow.py", []),
     ("cross_venue_desync", "analyze_cross_venue_desync.py", []),
-    ("liquidity_vacuum", "analyze_liquidity_vacuum.py", ["--timeframe", "15m"]),
+    ("liquidity_vacuum", "analyze_liquidity_vacuum.py", ["--timeframe", "5m"]),
     ("funding_extreme_reversal_window", "analyze_funding_extreme_reversal_window.py", []),
     ("range_compression_breakout_window", "analyze_range_compression_breakout_window.py", []),
 ]
@@ -324,7 +324,7 @@ def _run_research_chain(
                 "--event_type",
                 event_type,
                 "--timeframe",
-                "15m",
+                "5m",
             ]
             registry_result = subprocess.run(registry_cmd)
             if registry_result.returncode != 0:

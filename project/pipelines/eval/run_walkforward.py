@@ -18,10 +18,11 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from eval.splits import build_time_splits
 from pipelines._lib.io_utils import ensure_dir
+from pipelines._lib.execution_costs import resolve_execution_costs
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 
 INITIAL_EQUITY = 1_000_000.0
-BARS_PER_YEAR_15M = 365 * 24 * 4
+BARS_PER_YEAR_5M = 365 * 24 * 12
 REQUIRED_SPLIT_METRIC_KEYS = ["total_trades", "ending_equity", "sharpe_annualized", "max_drawdown"]
 REQUIRED_STRATEGY_RETURN_COLUMNS = [
     "timestamp",
@@ -169,7 +170,7 @@ def _annualized_sharpe(pnl_series: pd.Series) -> float:
     if not np.isfinite(std) or std <= 0.0:
         return 0.0
     mean = float(pnl_series.mean())
-    return float((mean / std) * np.sqrt(BARS_PER_YEAR_15M))
+    return float((mean / std) * np.sqrt(BARS_PER_YEAR_5M))
 
 
 def _safe_metric_float(value: object, default: float = 0.0) -> float:
@@ -190,7 +191,7 @@ def _annualized_sortino(pnl_series: pd.Series) -> float:
     if not np.isfinite(downside_std) or downside_std <= 0.0:
         return 0.0
     mean = float(pnl_series.mean())
-    return float((mean / downside_std) * np.sqrt(BARS_PER_YEAR_15M))
+    return float((mean / downside_std) * np.sqrt(BARS_PER_YEAR_5M))
 
 
 def _max_drawdown_from_returns(pnl_series: pd.Series) -> float:
@@ -211,7 +212,7 @@ def _annual_return_from_returns(pnl_series: pd.Series) -> float:
     if not np.isfinite(gross) or gross <= 0.0:
         return -1.0
     periods = max(1, int(len(pnl_series)))
-    return float(gross ** (float(BARS_PER_YEAR_15M) / float(periods)) - 1.0)
+    return float(gross ** (float(BARS_PER_YEAR_5M) / float(periods)) - 1.0)
 
 
 def _standardized_metrics_from_returns(pnl_series: pd.Series) -> Dict[str, object]:
@@ -229,11 +230,11 @@ def _standardized_metrics_from_returns(pnl_series: pd.Series) -> Dict[str, objec
     try:
         import empyrical as ep  # Optional dependency from empyrical-reloaded package.
 
-        sharpe = _safe_metric_float(ep.sharpe_ratio(returns, annualization=BARS_PER_YEAR_15M), 0.0)
-        sortino = _safe_metric_float(ep.sortino_ratio(returns, annualization=BARS_PER_YEAR_15M), 0.0)
-        calmar = _safe_metric_float(ep.calmar_ratio(returns, annualization=BARS_PER_YEAR_15M), 0.0)
+        sharpe = _safe_metric_float(ep.sharpe_ratio(returns, annualization=BARS_PER_YEAR_5M), 0.0)
+        sortino = _safe_metric_float(ep.sortino_ratio(returns, annualization=BARS_PER_YEAR_5M), 0.0)
+        calmar = _safe_metric_float(ep.calmar_ratio(returns, annualization=BARS_PER_YEAR_5M), 0.0)
         max_drawdown = _safe_metric_float(ep.max_drawdown(returns), _max_drawdown_from_returns(returns))
-        annual_return = _safe_metric_float(ep.annual_return(returns, annualization=BARS_PER_YEAR_15M), _annual_return_from_returns(returns))
+        annual_return = _safe_metric_float(ep.annual_return(returns, annualization=BARS_PER_YEAR_5M), _annual_return_from_returns(returns))
         return {
             "sharpe": float(sharpe),
             "sortino": float(sortino),
@@ -756,6 +757,14 @@ def main() -> int:
     ensure_dir(out_dir)
     summary_path = out_dir / "walkforward_summary.json"
 
+    resolved_costs = resolve_execution_costs(
+        project_root=PROJECT_ROOT,
+        config_paths=args.config,
+        fees_bps=args.fees_bps,
+        slippage_bps=args.slippage_bps,
+        cost_bps=args.cost_bps,
+    )
+
     params = {
         "run_id": args.run_id,
         "symbols": args.symbols,
@@ -772,6 +781,7 @@ def main() -> int:
         "allow_unexpected_strategy_files": int(args.allow_unexpected_strategy_files),
         "clean_engine_artifacts": int(args.clean_engine_artifacts),
         "config": [str(path) for path in args.config],
+        "execution_cost_config_digest": resolved_costs.config_digest,
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
@@ -973,9 +983,11 @@ def main() -> int:
             "config_passthrough_count": int(len(args.config)),
             "allow_unexpected_strategy_files": bool(int(args.allow_unexpected_strategy_files)),
         }
-        summary = {
-            "run_id": args.run_id,
-            "splits": [w.to_dict() for w in windows],
+            summary = {
+                "run_id": args.run_id,
+                "cost_config_digest": str(params.get("execution_cost_config_digest", "")),
+                "splits": [w.to_dict() for w in windows],
+        
             "per_split_metrics": per_split_metrics,
             "per_strategy_split_metrics": per_strategy_split_metrics,
             "per_strategy_regime_metrics": per_strategy_regime_metrics,

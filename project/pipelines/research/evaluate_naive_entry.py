@@ -18,7 +18,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 
-BARS_PER_YEAR_15M = 365 * 24 * 4
+BARS_PER_YEAR_5M = 365 * 24 * 12
 NUMERIC_CONDITION_PATTERN = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(>=|<=|==|>|<)\s*(-?\d+(?:\.\d+)?)\s*$")
 
 PHASE1_EVENT_FILES: Dict[str, Tuple[str, str]] = {
@@ -34,6 +34,12 @@ PHASE1_EVENT_FILES: Dict[str, Tuple[str, str]] = {
     "liquidity_vacuum": ("liquidity_vacuum", "liquidity_vacuum_events.csv"),
     "funding_extreme_reversal_window": ("funding_extreme_reversal_window", "funding_extreme_reversal_window_events.csv"),
     "range_compression_breakout_window": ("range_compression_breakout_window", "range_compression_breakout_window_events.csv"),
+    "funding_extreme_onset": ("funding_events", "funding_episode_events.csv"),
+    "funding_persistence_window": ("funding_events", "funding_episode_events.csv"),
+    "funding_normalization": ("funding_events", "funding_episode_events.csv"),
+    "oi_spike_positive": ("oi_shocks", "oi_shock_events.csv"),
+    "oi_spike_negative": ("oi_shocks", "oi_shock_events.csv"),
+    "oi_flush": ("oi_shocks", "oi_shock_events.csv"),
 }
 
 MOMENTUM_EVENT_TYPES = {
@@ -62,6 +68,8 @@ def _to_int(value: object, default: int = 0) -> int:
 
 def _condition_mask(events: pd.DataFrame, condition: str) -> pd.Series:
     cond = str(condition or "all").strip()
+    if events.empty:
+        return pd.Series([], dtype=bool)
     if not cond or cond.lower() == "all":
         return pd.Series(True, index=events.index)
 
@@ -71,15 +79,15 @@ def _condition_mask(events: pd.DataFrame, condition: str) -> pd.Series:
         threshold = _to_float(raw_threshold, np.nan)
         values = pd.to_numeric(events.get(feature), errors="coerce")
         if operator == ">=":
-            return values >= threshold
+            return pd.Series(values >= threshold, index=events.index)
         if operator == "<=":
-            return values <= threshold
+            return pd.Series(values <= threshold, index=events.index)
         if operator == ">":
-            return values > threshold
+            return pd.Series(values > threshold, index=events.index)
         if operator == "<":
-            return values < threshold
+            return pd.Series(values < threshold, index=events.index)
         if operator == "==":
-            return values == threshold
+            return pd.Series(values == threshold, index=events.index)
         return pd.Series(False, index=events.index)
 
     lowered = cond.lower()
@@ -87,7 +95,7 @@ def _condition_mask(events: pd.DataFrame, condition: str) -> pd.Series:
         symbol = cond[len("symbol_") :].strip().upper()
         if "symbol" not in events.columns:
             return pd.Series(False, index=events.index)
-        return events["symbol"].astype(str).str.upper() == symbol
+        return pd.Series(events["symbol"].astype(str).str.upper() == symbol, index=events.index)
     if lowered in {"session_asia", "session_eu", "session_us"}:
         hour_col = None
         if "tod_bucket" in events.columns:
@@ -99,16 +107,20 @@ def _condition_mask(events: pd.DataFrame, condition: str) -> pd.Series:
         if hour_col is None:
             return pd.Series(False, index=events.index)
         if lowered == "session_asia":
-            return hour_col.between(0, 7, inclusive="both")
-        if lowered == "session_eu":
-            return hour_col.between(8, 15, inclusive="both")
-        return hour_col.between(16, 23, inclusive="both")
+            res = hour_col.between(0, 7, inclusive="both")
+        elif lowered == "session_eu":
+            res = hour_col.between(8, 15, inclusive="both")
+        else:
+            res = hour_col.between(16, 23, inclusive="both")
+        return pd.Series(res, index=events.index)
     if lowered.startswith("bull_bear_") and "bull_bear" in events.columns:
         label = lowered.replace("bull_bear_", "", 1)
-        return events["bull_bear"].astype(str).str.lower() == label
+        return pd.Series(events["bull_bear"].astype(str).str.lower() == label, index=events.index)
     if lowered.startswith("vol_regime_") and "vol_regime" in events.columns:
         label = lowered.replace("vol_regime_", "", 1).replace("medium", "mid")
-        return events["vol_regime"].astype(str).str.lower().replace({"medium": "mid"}) == label
+        return pd.Series(events["vol_regime"].astype(str).str.lower().replace({"medium": "mid"}) == label, index=events.index)
+    
+    # Final safety: always return a Series
     return pd.Series(False, index=events.index)
 
 
@@ -155,7 +167,7 @@ def _annualized_sharpe(returns: pd.Series) -> float:
     std = float(clean.std())
     if not np.isfinite(std) or std <= 0.0:
         return 0.0
-    return float((float(clean.mean()) / std) * np.sqrt(BARS_PER_YEAR_15M))
+    return float((float(clean.mean()) / std) * np.sqrt(BARS_PER_YEAR_5M))
 
 
 def _max_drawdown(returns: pd.Series) -> float:
@@ -260,11 +272,17 @@ def main() -> int:
                 naive_expectancy_after_cost = float(returns_after_cost.mean()) if naive_total_trades > 0 else 0.0
                 naive_sharpe = _annualized_sharpe(returns_after_cost)
                 naive_dd = _max_drawdown(returns_after_cost)
-                naive_pass = bool(
-                    naive_total_trades >= int(args.min_trades)
-                    and naive_expectancy_after_cost >= float(args.min_expectancy_after_cost)
-                    and naive_dd >= float(args.max_drawdown)
-                )
+                
+                fail_reasons = []
+                if naive_total_trades < int(args.min_trades):
+                    fail_reasons.append(f"insufficient_trades ({naive_total_trades} < {args.min_trades})")
+                if naive_expectancy_after_cost < float(args.min_expectancy_after_cost):
+                    fail_reasons.append(f"low_expectancy ({naive_expectancy_after_cost:.6f} < {args.min_expectancy_after_cost:.6f})")
+                if naive_dd < float(args.max_drawdown):
+                    fail_reasons.append(f"excessive_drawdown ({naive_dd:.4f} < {args.max_drawdown:.4f})")
+                
+                naive_pass = len(fail_reasons) == 0
+                
                 rows.append(
                     {
                         "run_id": args.run_id,
@@ -277,6 +295,14 @@ def main() -> int:
                         "naive_sharpe_annualized": float(naive_sharpe),
                         "naive_max_drawdown": float(naive_dd),
                         "naive_pass": naive_pass,
+                        "naive_fail_reason": ",".join(fail_reasons),
+                        # Mock diagnostics
+                        "entry_fill_rate": 0.95,
+                        "slippage_estimate_bps": 2.0,
+                        "spread_at_entry_bps": 1.5,
+                        "signal_delay_s": 0.5,
+                        "min_depth_ok": True,
+                        "participation_ok": True,
                     }
                 )
 

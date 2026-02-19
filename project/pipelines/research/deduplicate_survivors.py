@@ -29,6 +29,7 @@ def _calculate_jaccard(set_a: set, set_b: set) -> float:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Deduplicate survivors and initialize promotion ledger")
     parser.add_argument("--run_id", required=True)
+    parser.add_argument("--verbose", action="store_true", help="Emit per-candidate debug output")
     args = parser.parse_args()
 
     run_dir = DATA_ROOT / "runs" / args.run_id
@@ -46,12 +47,11 @@ def main() -> int:
         # Add duplicate_of column
         df["duplicate_of"] = None
         deduped_rows = []
-        clusters = [] # List of {cluster_id, members, representative}
+        cluster_records = [] # List of {cluster_id, members, representative}
         
-        # Group by (event_type, rule_template, horizon, sign, symbol)
-        # Note: Added symbol to grouping because we dedup WITHIN a symbol stream usually
-        # unless we want to dedup cross-symbol logic (unlikely for this stage).
-        group_cols = ["event_type", "rule_template", "horizon", "sign", "symbol"]
+        # Group by (event_type, rule_template, horizon, sign)
+        # To identify cross-symbol redundancy or parameter-neighborhood variations
+        group_cols = ["event_type", "rule_template", "horizon", "sign"]
         grouped = df.groupby(group_cols)
         
         cluster_id_counter = 0
@@ -60,14 +60,8 @@ def main() -> int:
         events_cache = {}
 
         for name, group in grouped:
-            if len(group) == 1:
-                deduped_rows.append(group.iloc[0].to_dict())
-                continue
-                
-            # Multiple candidates in same group - check overlap
+            # Sort by rank metric
             candidates = group.to_dict("records")
-            # Sort by rank metric (bridge_expectancy_conservative if avail, else robustness)
-            # Use 'after_cost_expectancy_per_trade' as proxy for bridge_expectancy_conservative if missing
             candidates.sort(key=lambda x: (
                 x.get("gate_bridge_tradable", False),
                 x.get("after_cost_expectancy_per_trade", 0.0),
@@ -80,24 +74,23 @@ def main() -> int:
                     events_cache[event_type] = _load_phase1_events(args.run_id, event_type)
                 except Exception as e:
                     print(f"Warning: Could not load events for {event_type}: {e}")
-                    # Fallback: keep all (safe default) or keep top 1 (aggressive)
-                    # Let's keep all for safety if we can't dedup
                     deduped_rows.extend(candidates)
                     continue
             
             base_events = events_cache[event_type]
-            symbol = name[4]
-            sym_events = base_events[base_events["symbol"] == symbol].copy()
             
             # Compute event sets for each candidate
             candidate_sets = []
             for cand in candidates:
+                symbol = cand.get("symbol")
+                sym_events = base_events[base_events["symbol"] == symbol]
                 mask = _condition_mask(sym_events, cand.get("condition", "all"))
-                # Use event_id if available, else index
                 if "event_id" in sym_events.columns:
                     ids = set(sym_events[mask]["event_id"])
                 else:
                     ids = set(sym_events[mask].index)
+                if args.verbose:
+                    print(f"Candidate {cand['candidate_id']} has {len(ids)} events.")
                 candidate_sets.append(ids)
             
             # Greedy deduplication
@@ -114,13 +107,31 @@ def main() -> int:
                     if overlap > 0.8:
                         cand["duplicate_of"] = kept_cand["candidate_id"]
                         is_dup = True
+                        
+                        # Record cluster member
+                        cluster_records.append({
+                            "cluster_id": f"cluster_{cluster_id_counter}",
+                            "candidate_id": cand["candidate_id"],
+                            "is_representative": False,
+                            "duplicate_of": kept_cand["candidate_id"],
+                            "overlap_score": overlap
+                        })
                         break
                 
                 if not is_dup:
                     kept.append(cand)
                     kept_sets.append(my_set)
                     deduped_rows.append(cand)
-                # We could log clusters here
+                    
+                    # New cluster
+                    cluster_id_counter += 1
+                    cluster_records.append({
+                        "cluster_id": f"cluster_{cluster_id_counter}",
+                        "candidate_id": cand["candidate_id"],
+                        "is_representative": True,
+                        "duplicate_of": None,
+                        "overlap_score": 1.0
+                    })
             
         deduped = pd.DataFrame(deduped_rows)
 
@@ -128,16 +139,34 @@ def main() -> int:
         out_path = run_dir / "survivors_deduped.parquet"
         deduped.to_parquet(out_path)
         
-        # Initialize Promotion Ledger
-        # ... (rest of ledger logic)
+        # Output cluster diagnostic
+        if cluster_records:
+            clusters_df = pd.DataFrame(cluster_records)
+            clusters_df.to_parquet(run_dir / "dedup_clusters.parquet")
+
+        # Initialize Promotion Ledger — derive gate flags from actual columns.
         ledger = deduped.copy()
-        ledger["phase2_pass"] = True
-        ledger["bridge_pass"] = True
+        # gate_phase2_final is the authoritative Phase 2 pass column written by
+        # phase2_candidate_discovery.  Fall back to gate_economic_conservative if
+        # the column was produced under an older schema.
+        if "gate_phase2_final" in ledger.columns:
+            ledger["phase2_pass"] = ledger["gate_phase2_final"].astype(bool)
+        elif "gate_economic_conservative" in ledger.columns:
+            ledger["phase2_pass"] = ledger["gate_economic_conservative"].astype(bool)
+        else:
+            ledger["phase2_pass"] = False  # unknown → conservative default
+
+        if "gate_bridge_tradable" in ledger.columns:
+            ledger["bridge_pass"] = ledger["gate_bridge_tradable"].astype(bool)
+        else:
+            ledger["bridge_pass"] = False  # bridge has not run yet
+
         ledger["blueprint_compiled"] = False
         ledger["stress_pass"] = False
         ledger["walkforward_pass"] = False
-        
-        spec_hashes = get_spec_hashes(PROJECT_ROOT.parent)
+
+        # Hash the spec directory that is the source of truth for this run.
+        spec_hashes = get_spec_hashes(PROJECT_ROOT)
         ledger["spec_version"] = str(spec_hashes)
         
         ledger_path = run_dir / "promotion_ledger.parquet"
@@ -151,6 +180,9 @@ def main() -> int:
         return 0
         
     except Exception as exc:
+        print(f"Deduplication failed with error: {exc}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
         finalize_manifest(manifest, "failed", error=str(exc), stats={})
         return 1
 
