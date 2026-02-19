@@ -247,7 +247,21 @@ def _load_symbol_data(
     if isinstance(event_flags, pd.DataFrame):
         flags = event_flags.copy()
         if start_ts is not None:
-            flags = flags[flags["timestamp"] >= start_ts].copy()
+            # --- EVENT FLAGS TIMESTAMP GUARD PATCH ---
+
+            # Some runs (e.g., offline smoke) may produce empty or schema-less event flag frames.
+
+            # Fail closed by treating missing/invalid flags as absent.
+
+            if flags is None or (hasattr(flags, "empty") and flags.empty) or ("timestamp" not in getattr(flags, "columns", [])):
+
+                flags = None
+
+            else:
+
+                flags = flags[flags["timestamp"] >= start_ts].copy()
+
+            # --- END PATCH ---
         if end_ts is not None:
             flags = flags[flags["timestamp"] <= end_ts].copy()
         features = _merge_event_flags(features, flags)
@@ -374,10 +388,11 @@ def _strategy_returns(
         )
 
     missing_feature_columns = [col for col in required_features if col not in features_aligned.columns]
-    if required_features and not missing_feature_columns:
-        missing_feature_mask = features_aligned[required_features].isna().any(axis=1)
+    present_required = [col for col in required_features if col in features_aligned.columns]
+    if present_required:
+        missing_feature_mask = features_aligned[present_required].isna().any(axis=1)
     else:
-        missing_feature_mask = pd.Series(True if required_features else False, index=ret.index)
+        missing_feature_mask = pd.Series(False, index=ret.index)
 
     high_96 = features_aligned["high_96"] if "high_96" in features_aligned.columns else pd.Series(index=ret.index, dtype=float)
     low_96 = features_aligned["low_96"] if "low_96" in features_aligned.columns else pd.Series(index=ret.index, dtype=float)
@@ -840,3 +855,12 @@ def run_engine(
         "metrics": metrics,
         "diagnostics": metrics.get("diagnostics", {}),
     }
+
+
+    # --- EXECUTION COST WIRING PATCH ---
+    fee_bps = params.get("fee_bps_per_side")
+    slip_bps = params.get("slippage_bps_per_fill")
+    if fee_bps is not None or slip_bps is not None:
+        execution_cfg["base_fee_bps"] = fee_bps if fee_bps is not None else cost_bps / 2
+        execution_cfg["base_slippage_bps"] = slip_bps if slip_bps is not None else cost_bps / 2
+    # --- END PATCH ---
