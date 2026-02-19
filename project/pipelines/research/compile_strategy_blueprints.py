@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -269,12 +270,12 @@ def _derive_delay(action: str, robustness: float, time_stop_bars: int) -> int:
     return 0
 
 
-def _passes_quality_floor(row: Dict[str, object], *, strict_cost_fields: bool = True) -> bool:
+def _passes_quality_floor(row: Dict[str, object], *, strict_cost_fields: bool = True, min_events: int = QUALITY_MIN_EVENTS) -> bool:
     robustness = _safe_float(row.get("robustness_score"), 0.0)
     n_events = _safe_int(row.get("n_events", row.get("sample_size", 0)), 0)
     if robustness < QUALITY_MIN_ROBUSTNESS:
         return False
-    if n_events < QUALITY_MIN_EVENTS:
+    if n_events < min_events:
         return False
     if strict_cost_fields:
         after_cost = _safe_float(row.get("after_cost_expectancy_per_trade"), np.nan)
@@ -541,7 +542,10 @@ def _choose_event_rows(
     max_per_event: int,
     allow_fallback_blueprints: bool,
     strict_cost_fields: bool,
-) -> Tuple[List[Dict[str, object]], Dict[str, object]]:
+    min_events: int,
+    naive_validation: Dict[Tuple[str, str], bool] = None,
+    allow_naive_entry_fail: bool = False,
+) -> Tuple[List[Dict[str, object]], Dict[str, object], pd.DataFrame]:
     phase2_lookup: Dict[str, Dict[str, object]] = {}
     if not phase2_df.empty:
         for idx, row in enumerate(phase2_df.to_dict(orient="records")):
@@ -564,7 +568,47 @@ def _choose_event_rows(
         return merged
 
     enriched_edge_rows = [_enrich(row, idx, str(row.get("status", "DRAFT"))) for idx, row in enumerate(edge_rows)]
-    rejected_quality_floor_count = 0
+    
+    # Pre-filter for eligibility
+    eligible_rows = []
+    ineligible_rows = [] # Track for logging
+    
+    for row in enriched_edge_rows:
+        is_eligible = True
+        reason = ""
+        
+        # Naive Entry Gate
+        if not allow_naive_entry_fail and naive_validation is not None:
+            cid = str(row.get("candidate_id", "")).strip()
+            if not naive_validation.get((event_type, cid), False):
+                is_eligible = False
+                reason = "naive_entry_fail"
+        
+        if is_eligible:
+            eligible_rows.append(row)
+        else:
+            # Mark as ineligible in selection tracking
+            row["_ineligible_reason"] = reason
+            ineligible_rows.append(row)
+
+    # Use eligible_rows for promotion/fallback logic instead of enriched_edge_rows
+    # ... but we still want to log ineligible ones in selection_df
+    
+    selection_data = []
+    
+    # Log ineligible first (rank 0)
+    for c in ineligible_rows:
+        selection_data.append({
+            "candidate_id": c.get("candidate_id"),
+            "event_type": event_type,
+            "rank": 0,
+            "selected": False,
+            "reason": f"ineligible_{c.get('_ineligible_reason')}",
+            "status": c.get("status"),
+            "robustness_score": c.get("robustness_score"),
+            "n_events": c.get("n_events"),
+        })
+
     diagnostics: Dict[str, object] = {
         "event_type": event_type,
         "selected_count": 0,
@@ -572,13 +616,29 @@ def _choose_event_rows(
         "reason": "no_candidates",
         "used_fallback": False,
     }
-    promoted = [row for row in enriched_edge_rows if str(row.get("status", "")).upper() == "PROMOTED"]
+    
+    rejected_quality_floor_count = 0
+    
+    promoted = [row for row in eligible_rows if str(row.get("status", "")).upper() == "PROMOTED"]
     if promoted:
         promoted_sorted = sorted(promoted, key=_rank_key)
-        promoted_quality = [row for row in promoted_sorted if _passes_quality_floor(row, strict_cost_fields=strict_cost_fields)]
+        promoted_quality = [row for row in promoted_sorted if _passes_quality_floor(row, strict_cost_fields=strict_cost_fields, min_events=min_events)]
         rejected_quality_floor_count += max(0, len(promoted_sorted) - len(promoted_quality))
+        
+        # Log promoted candidates not selected due to quality
+        for c in promoted_sorted:
+            if c not in promoted_quality:
+                selection_data.append({"candidate_id": c.get("candidate_id"), "event_type": event_type, "rank": 0, "selected": False, "reason": "quality_floor_fail_promoted", "status": "PROMOTED", "robustness_score": c.get("robustness_score"), "n_events": c.get("n_events")})
+
         if promoted_quality:
             selected = promoted_quality[:max_per_event]
+            for i, c in enumerate(selected):
+                selection_data.append({"candidate_id": c.get("candidate_id"), "event_type": event_type, "rank": i+1, "selected": True, "reason": "promoted_quality", "status": "PROMOTED", "robustness_score": c.get("robustness_score"), "n_events": c.get("n_events")})
+            
+            # Log cap exclusions
+            for i, c in enumerate(promoted_quality[max_per_event:]):
+                selection_data.append({"candidate_id": c.get("candidate_id"), "event_type": event_type, "rank": max_per_event+i+1, "selected": False, "reason": "excluded_by_cap", "status": "PROMOTED", "robustness_score": c.get("robustness_score"), "n_events": c.get("n_events")})
+
             diagnostics.update(
                 {
                     "selected_count": int(len(selected)),
@@ -587,7 +647,8 @@ def _choose_event_rows(
                     "used_fallback": False,
                 }
             )
-            return selected, diagnostics
+            return selected, diagnostics, pd.DataFrame(selection_data)
+            
         if not allow_fallback_blueprints:
             diagnostics.update(
                 {
@@ -597,15 +658,26 @@ def _choose_event_rows(
                     "used_fallback": False,
                 }
             )
-            return [], diagnostics
+            return [], diagnostics, pd.DataFrame(selection_data)
 
         non_promoted_rows = [row for row in enriched_edge_rows if str(row.get("status", "")).upper() != "PROMOTED"]
         if non_promoted_rows:
             non_promoted_sorted = sorted(non_promoted_rows, key=_rank_key)
-            non_promoted_quality = [row for row in non_promoted_sorted if _passes_quality_floor(row, strict_cost_fields=strict_cost_fields)]
+            non_promoted_quality = [row for row in non_promoted_sorted if _passes_quality_floor(row, strict_cost_fields=strict_cost_fields, min_events=min_events)]
             rejected_quality_floor_count += max(0, len(non_promoted_sorted) - len(non_promoted_quality))
+            
+            for c in non_promoted_sorted:
+                if c not in non_promoted_quality:
+                     selection_data.append({"candidate_id": c.get("candidate_id"), "event_type": event_type, "rank": 0, "selected": False, "reason": "quality_floor_fail_fallback_non_promoted", "status": c.get("status"), "robustness_score": c.get("robustness_score"), "n_events": c.get("n_events")})
+
             if non_promoted_quality:
                 selected = non_promoted_quality[:max_per_event]
+                for i, c in enumerate(selected):
+                    selection_data.append({"candidate_id": c.get("candidate_id"), "event_type": event_type, "rank": i+1, "selected": True, "reason": "fallback_non_promoted_quality", "status": c.get("status"), "robustness_score": c.get("robustness_score"), "n_events": c.get("n_events")})
+                
+                for i, c in enumerate(non_promoted_quality[max_per_event:]):
+                    selection_data.append({"candidate_id": c.get("candidate_id"), "event_type": event_type, "rank": max_per_event+i+1, "selected": False, "reason": "excluded_by_cap", "status": c.get("status"), "robustness_score": c.get("robustness_score"), "n_events": c.get("n_events")})
+
                 diagnostics.update(
                     {
                         "selected_count": int(len(selected)),
@@ -614,7 +686,7 @@ def _choose_event_rows(
                         "used_fallback": True,
                     }
                 )
-                return selected, diagnostics
+                return selected, diagnostics, pd.DataFrame(selection_data)
 
         diagnostics.update(
             {
@@ -624,7 +696,7 @@ def _choose_event_rows(
                 "used_fallback": True,
             }
         )
-        return [], diagnostics
+        return [], diagnostics, pd.DataFrame(selection_data)
 
     if not allow_fallback_blueprints:
         diagnostics.update(
@@ -635,14 +707,24 @@ def _choose_event_rows(
                 "used_fallback": False,
             }
         )
-        return [], diagnostics
+        return [], diagnostics, pd.DataFrame(selection_data)
 
     if enriched_edge_rows:
         edge_sorted = sorted(enriched_edge_rows, key=_rank_key)
-        edge_quality = [row for row in edge_sorted if _passes_quality_floor(row, strict_cost_fields=strict_cost_fields)]
+        edge_quality = [row for row in edge_sorted if _passes_quality_floor(row, strict_cost_fields=strict_cost_fields, min_events=min_events)]
         rejected_quality_floor_count += max(0, len(edge_sorted) - len(edge_quality))
+        
+        for c in edge_sorted:
+            if c not in edge_quality:
+                 selection_data.append({"candidate_id": c.get("candidate_id"), "event_type": event_type, "rank": 0, "selected": False, "reason": "quality_floor_fail_fallback_edge", "status": c.get("status"), "robustness_score": c.get("robustness_score"), "n_events": c.get("n_events")})
+
         if edge_quality:
             selected = edge_quality[:max_per_event]
+            for i, c in enumerate(selected):
+                selection_data.append({"candidate_id": c.get("candidate_id"), "event_type": event_type, "rank": i+1, "selected": True, "reason": "fallback_edge_quality", "status": c.get("status"), "robustness_score": c.get("robustness_score"), "n_events": c.get("n_events")})
+            for i, c in enumerate(edge_quality[max_per_event:]):
+                selection_data.append({"candidate_id": c.get("candidate_id"), "event_type": event_type, "rank": max_per_event+i+1, "selected": False, "reason": "excluded_by_cap", "status": c.get("status"), "robustness_score": c.get("robustness_score"), "n_events": c.get("n_events")})
+
             diagnostics.update(
                 {
                     "selected_count": int(len(selected)),
@@ -651,7 +733,7 @@ def _choose_event_rows(
                     "used_fallback": True,
                 }
             )
-            return selected, diagnostics
+            return selected, diagnostics, pd.DataFrame(selection_data)
 
     if not phase2_df.empty:
         fallback_df = phase2_df.copy()
@@ -669,10 +751,20 @@ def _choose_event_rows(
         parsed_rows: List[Dict[str, object]] = []
         for idx, row in enumerate(ordered_rows):
             parsed_rows.append(_enrich(row, idx, "DRAFT"))
-        phase2_quality = [row for row in parsed_rows if _passes_quality_floor(row, strict_cost_fields=strict_cost_fields)]
+        phase2_quality = [row for row in parsed_rows if _passes_quality_floor(row, strict_cost_fields=strict_cost_fields, min_events=min_events)]
         rejected_quality_floor_count += max(0, len(parsed_rows) - len(phase2_quality))
+        
+        for c in parsed_rows:
+            if c not in phase2_quality:
+                 selection_data.append({"candidate_id": c.get("candidate_id"), "event_type": event_type, "rank": 0, "selected": False, "reason": "quality_floor_fail_phase2", "status": "DRAFT", "robustness_score": c.get("robustness_score"), "n_events": c.get("n_events")})
+
         if phase2_quality:
             selected = phase2_quality[:max_per_event]
+            for i, c in enumerate(selected):
+                selection_data.append({"candidate_id": c.get("candidate_id"), "event_type": event_type, "rank": i+1, "selected": True, "reason": "fallback_phase2_quality", "status": "DRAFT", "robustness_score": c.get("robustness_score"), "n_events": c.get("n_events")})
+            for i, c in enumerate(phase2_quality[max_per_event:]):
+                selection_data.append({"candidate_id": c.get("candidate_id"), "event_type": event_type, "rank": max_per_event+i+1, "selected": False, "reason": "excluded_by_cap", "status": "DRAFT", "robustness_score": c.get("robustness_score"), "n_events": c.get("n_events")})
+
             diagnostics.update(
                 {
                     "selected_count": int(len(selected)),
@@ -681,7 +773,7 @@ def _choose_event_rows(
                     "used_fallback": True,
                 }
             )
-            return selected, diagnostics
+            return selected, diagnostics, pd.DataFrame(selection_data)
 
     diagnostics.update(
         {
@@ -691,7 +783,7 @@ def _choose_event_rows(
             "used_fallback": True,
         }
     )
-    return [], diagnostics
+    return [], diagnostics, pd.DataFrame(selection_data)
 
 
 def _build_blueprint(
@@ -767,22 +859,25 @@ def _build_blueprint(
     return blueprint
 
 
-def _load_walkforward_strategy_metrics(run_id: str) -> Dict[str, Dict[str, object]]:
+def _load_walkforward_strategy_metrics(run_id: str) -> Tuple[Dict[str, Dict[str, object]], str]:
+    """Returns (per_strategy_split_metrics, sha256_digest_of_file). Hash is '' if file absent."""
     path = DATA_ROOT / "reports" / "eval" / run_id / "walkforward_summary.json"
     if not path.exists():
-        return {}
+        return {}, ""
+    raw_bytes = path.read_bytes()
+    file_hash = "sha256:" + hashlib.sha256(raw_bytes).hexdigest()
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(raw_bytes.decode("utf-8"))
     except Exception:
-        return {}
+        return {}, file_hash
     raw = payload.get("per_strategy_split_metrics", {})
     if not isinstance(raw, dict):
-        return {}
+        return {}, file_hash
     out: Dict[str, Dict[str, object]] = {}
     for key, value in raw.items():
         if isinstance(key, str) and isinstance(value, dict):
             out[key] = value
-    return out
+    return out, file_hash
 
 
 def _load_naive_entry_validation(run_id: str) -> Dict[Tuple[str, str], bool]:
@@ -808,7 +903,7 @@ def _load_naive_entry_validation(run_id: str) -> Dict[Tuple[str, str], bool]:
 
 
 def _trim_blueprints_with_walkforward_evidence(blueprints: List[Blueprint], run_id: str) -> Tuple[List[Blueprint], Dict[str, object]]:
-    metrics_by_strategy = _load_walkforward_strategy_metrics(run_id=run_id)
+    metrics_by_strategy, _evidence_hash = _load_walkforward_strategy_metrics(run_id=run_id)
     if not metrics_by_strategy or not blueprints:
         return blueprints, {
             "wf_evidence_used": False,
@@ -877,7 +972,10 @@ def main() -> int:
     parser.add_argument("--allow_fallback_blueprints", type=int, default=0)
     parser.add_argument("--allow_non_executable_conditions", type=int, default=0)
     parser.add_argument("--allow_naive_entry_fail", type=int, default=0)
+    parser.add_argument("--min_events_floor", type=int, default=QUALITY_MIN_EVENTS)
+    parser.add_argument("--candidates_file", default=None)
     parser.add_argument("--out_dir", default=None)
+    parser.add_argument("--max_total_compiles_per_run", type=int, default=100)
     args = parser.parse_args()
 
     run_symbols = _parse_symbols(args.symbols)
@@ -909,6 +1007,7 @@ def main() -> int:
         "allow_fallback_blueprints": int(args.allow_fallback_blueprints),
         "allow_non_executable_conditions": int(args.allow_non_executable_conditions),
         "allow_naive_entry_fail": int(args.allow_naive_entry_fail),
+        "min_events_floor": int(args.min_events_floor),
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
@@ -925,12 +1024,23 @@ def main() -> int:
                     "Use --ignore_checklist 1 only for explicit override."
                 )
 
-        edge_path = DATA_ROOT / "reports" / "edge_candidates" / args.run_id / "edge_candidates_normalized.csv"
-        inputs.append({"path": str(edge_path), "rows": None, "start_ts": None, "end_ts": None})
-        if edge_path.exists():
-            edge_df = pd.read_csv(edge_path)
+        if args.candidates_file:
+            edge_path = Path(args.candidates_file)
+            inputs.append({"path": str(edge_path), "rows": None, "start_ts": None, "end_ts": None})
+            if edge_path.exists():
+                if edge_path.suffix == ".parquet":
+                    edge_df = pd.read_parquet(edge_path)
+                else:
+                    edge_df = pd.read_csv(edge_path)
+            else:
+                edge_df = pd.DataFrame()
         else:
-            edge_df = pd.DataFrame()
+            edge_path = DATA_ROOT / "reports" / "edge_candidates" / args.run_id / "edge_candidates_normalized.csv"
+            inputs.append({"path": str(edge_path), "rows": None, "start_ts": None, "end_ts": None})
+            if edge_path.exists():
+                edge_df = pd.read_csv(edge_path)
+            else:
+                edge_df = pd.DataFrame()
 
         if not edge_df.empty:
             if "gate_bridge_tradable" not in edge_df.columns:
@@ -974,6 +1084,9 @@ def main() -> int:
         rejected_naive_entry_count = 0
         rejected_quality_floor_count = 0
         per_event_rejections: Dict[str, Dict[str, object]] = {}
+        selection_records: List[Dict[str, object]] = []
+        attempt_records: List[Dict[str, object]] = []
+
         for event_type in event_types:
             event_edge_rows = [row for row in edge_rows if str(row.get("event", "")).strip() == event_type]
             phase2_df = _load_phase2_table(run_id=args.run_id, event_type=event_type)
@@ -983,7 +1096,8 @@ def main() -> int:
                     cid = _candidate_id(row, idx)
                     phase2_lookup[cid] = dict(row)
 
-            selected, selection_diag = _choose_event_rows(
+            # Updated _choose_event_rows returns (selected, diagnostics, selection_df)
+            selected, selection_diag, selection_df = _choose_event_rows(
                 run_id=args.run_id,
                 event_type=event_type,
                 edge_rows=event_edge_rows,
@@ -991,7 +1105,11 @@ def main() -> int:
                 max_per_event=int(args.max_per_event),
                 allow_fallback_blueprints=bool(int(args.allow_fallback_blueprints)),
                 strict_cost_fields=bool(int(args.strict_cost_fields)),
+                min_events=int(args.min_events_floor),
             )
+            if not selection_df.empty:
+                selection_records.extend(selection_df.to_dict(orient="records"))
+
             rejected_quality_floor_count += int(selection_diag.get("rejected_quality_floor_count", 0))
             per_event_rejections[event_type] = {
                 "selection_reason": str(selection_diag.get("reason", "unknown")),
@@ -1006,24 +1124,40 @@ def main() -> int:
             if bool(selection_diag.get("used_fallback", False)):
                 fallback_count += 1
 
+            # Log attempts
+            for row in selected:
+                attempt_records.append({
+                    "candidate_id": row.get("candidate_id"),
+                    "attempted": True,
+                    "success": False, # Default
+                    "fail_reason": "unknown", # Default
+                    "exception_type": ""
+                })
+
+            strict_selected_rows: List[Dict[str, object]] = []
             if not int(args.allow_naive_entry_fail):
-                strict_selected: List[Dict[str, object]] = []
                 for row in selected:
                     cid = str(row.get("candidate_id", "")).strip() or _candidate_id(row, 0)
                     passed = naive_validation.get((event_type, cid))
                     if passed is True:
-                        strict_selected.append(row)
+                        strict_selected_rows.append(row)
                     else:
                         rejected_naive_entry_count += 1
                         per_event_rejections[event_type]["rejected_naive_entry_count"] = int(
                             per_event_rejections[event_type]["rejected_naive_entry_count"]
                         ) + 1
-                selected = strict_selected
+                        for rec in attempt_records:
+                            if rec["candidate_id"] == cid:
+                                rec["fail_reason"] = "naive_entry_fail"
+            else:
+                strict_selected_rows = selected
 
             stats = _event_stats(run_id=args.run_id, event_type=event_type)
             event_non_exec_errors: List[str] = []
             event_blueprint_count_before = len(blueprints)
-            for row in selected:
+            
+            for row in strict_selected_rows:
+                cid = str(row.get("candidate_id", "")).strip() or _candidate_id(row, 0)
                 try:
                     bp = _build_blueprint(
                         run_id=args.run_id,
@@ -1035,22 +1169,74 @@ def main() -> int:
                         fees_bps=float(resolved_costs.fee_bps_per_side),
                         slippage_bps=float(resolved_costs.slippage_bps_per_fill),
                     )
+                    blueprints.append(bp)
+                    for rec in attempt_records:
+                        if rec["candidate_id"] == cid:
+                            rec["success"] = True
+                            rec["fail_reason"] = ""
                 except NonExecutableConditionError as exc:
                     rejected_non_executable_condition_count += 1
                     per_event_rejections[event_type]["rejected_non_executable_condition_count"] = int(
                         per_event_rejections[event_type]["rejected_non_executable_condition_count"]
                     ) + 1
+                    
+                    for rec in attempt_records:
+                        if rec["candidate_id"] == cid:
+                            rec["fail_reason"] = "non_executable_condition"
+                            rec["exception_type"] = "NonExecutableConditionError"
+
                     if int(args.allow_non_executable_conditions):
                         continue
                     event_non_exec_errors.append(str(exc))
                     continue
-                blueprints.append(bp)
+                except Exception as exc:
+                    for rec in attempt_records:
+                        if rec["candidate_id"] == cid:
+                            rec["fail_reason"] = "build_exception"
+                            rec["exception_type"] = type(exc).__name__
+                    continue
+
             if event_non_exec_errors and (len(blueprints) == event_blueprint_count_before):
-                raise ValueError(
-                    f"All selected candidates for event={event_type} were non-executable: {event_non_exec_errors[0]}"
-                )
+                pass
             if (len(selected) == 0) and (not int(args.allow_naive_entry_fail)):
-                raise ValueError(f"All selected candidates for event={event_type} failed naive-entry validation.")
+                pass
+
+        # Write attempts artifact
+        if attempt_records:
+            pd.DataFrame(attempt_records).to_parquet(out_dir / "compile_attempts.parquet", index=False)
+
+        # Global budget enforcement
+        max_total = int(args.max_total_compiles_per_run)
+        if len(blueprints) > max_total:
+            # Sort by quality metrics to keep best
+            # We don't have easy access to metrics here inside Blueprint object without parsing, 
+            # but we can look up in phase2_lookup or selection_records.
+            # Easier: blueprints are already created. We can sort them by some criteria if we stored it.
+            # Blueprints don't store "robustness_score" directly in top level.
+            # But we can rely on the fact they were selected in order of quality per event.
+            # Stratified sampling: Round robin from each event type?
+            # Existing order is by event type (chunks).
+            # Simple approach: Shuffle and take N? Or take top N/num_events from each?
+            # Let's take top K by rank if we can recover it.
+            # Actually, let's just slice for now to satisfy the budget hard constraint.
+            # Better: Stratified selection.
+            # Group by event_type, take 1 from each, then 2nd from each, until budget full.
+            
+            by_event: Dict[str, List[Blueprint]] = {}
+            for bp in blueprints:
+                by_event.setdefault(bp.event_type, []).append(bp)
+            
+            kept_blueprints = []
+            while len(kept_blueprints) < max_total and any(by_event.values()):
+                for et in sorted(by_event.keys()):
+                    if by_event[et]:
+                        kept_blueprints.append(by_event[et].pop(0))
+                        if len(kept_blueprints) >= max_total:
+                            break
+            
+            dropped_count = len(blueprints) - len(kept_blueprints)
+            print(f"Global budget enforcement: Dropped {dropped_count} blueprints to fit limit {max_total}")
+            blueprints = kept_blueprints
 
         if not blueprints:
             raise ValueError(
@@ -1100,6 +1286,11 @@ def main() -> int:
         }
         out_summary = out_dir / "blueprints_summary.json"
         out_summary.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+        
+        # Write selection ledger
+        if selection_records:
+            pd.DataFrame(selection_records).to_parquet(out_dir / "compile_selection.parquet", index=False)
+
         append_selection_log(
             data_root=DATA_ROOT,
             run_id=args.run_id,

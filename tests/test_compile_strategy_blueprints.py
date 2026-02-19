@@ -1134,3 +1134,26 @@ def test_lineage_spec_has_wf_fields() -> None:
     )
     with pytest.raises(ValueError):
         bad_neg.validate()
+
+
+def test_load_walkforward_strategy_metrics_returns_hash(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(compile_strategy_blueprints, "DATA_ROOT", tmp_path)
+
+    eval_dir = tmp_path / "reports" / "eval" / "run_hash_test"
+    eval_dir.mkdir(parents=True, exist_ok=True)
+    wf_data = {"per_strategy_split_metrics": {}}
+    wf_bytes = json.dumps(wf_data).encode("utf-8")
+    (eval_dir / "walkforward_summary.json").write_bytes(wf_bytes)
+
+    metrics, file_hash = compile_strategy_blueprints._load_walkforward_strategy_metrics("run_hash_test")
+    assert isinstance(metrics, dict)
+    import hashlib
+    expected_hash = "sha256:" + hashlib.sha256(wf_bytes).hexdigest()
+    assert file_hash == expected_hash
+
+
+def test_load_walkforward_strategy_metrics_empty_hash_when_missing(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(compile_strategy_blueprints, "DATA_ROOT", tmp_path)
+    metrics, file_hash = compile_strategy_blueprints._load_walkforward_strategy_metrics("run_no_wf")
+    assert metrics == {}
+    assert file_hash == ""
