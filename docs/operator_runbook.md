@@ -42,7 +42,7 @@ BACKTEST_DATA_ROOT=/home/tstuv/backtest/Backtest/data \
 ./.venv/bin/python project/pipelines/run_all.py \
   --run_id RUN_FULL \
   --symbols BTCUSDT,ETHUSDT \
-  --start 2020-01-01 \
+  --start 2024-01-01 \
   --end 2025-12-31 \
   --run_phase2_conditional 1 \
   --phase2_event_type all \
