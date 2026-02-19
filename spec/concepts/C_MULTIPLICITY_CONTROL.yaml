@@ -1,0 +1,24 @@
+concept_id: C_MULTIPLICITY_CONTROL
+name: Multiplicity Control
+definition: statistical correction layer preventing false discoveries when testing many hypotheses on the same data.
+data_requirements:
+  - dataset: validation_results
+    columns: [p_value, expectancy]
+    granularity: N/A
+    min_history_days: 0
+metrics:
+  - id: q_value
+    name: Q-Value (FDR)
+    formula: p_adj via Benjamini-Hochberg
+  - id: deflated_sharpe
+    name: Deflated Sharpe Ratio
+    formula: PSR adjusted for trial multiplicity
+tests:
+  - id: T_MULT_01
+    objective: FDR Gate
+    criteria: q_value <= 0.05
+artifacts:
+  - type: code
+    path: project/eval/multiplicity.py
+  - type: manifest
+    path: data/lake/reports/validation/multiplicity_report.json

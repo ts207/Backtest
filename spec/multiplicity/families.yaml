@@ -1,0 +1,14 @@
+families:
+  liquidity_vacuum:
+    templates:
+      - mean_reversion
+      - continuation
+    horizons:
+      - 5m
+      - 15m
+      - 60m
+    max_candidates_per_run: 1000
+
+budget:
+  global_max_candidates: 5000
+  global_max_families: 5

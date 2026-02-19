@@ -1,0 +1,26 @@
+feature_family: microstructure
+version: 1.0.0
+base_timeframe: 1m
+inputs:
+  - dataset: perp_ohlcv_1m
+    columns: [close, volume, quote_volume, taker_base_volume]
+  - dataset: tob_1s
+    columns: [bid_price, ask_price, bid_qty, ask_qty]
+features:
+  - name: roll_spread_bps
+    description: Roll measure spread estimate
+    formula: 2 * sqrt(-cov(dp_t, dp_{t-1})) / price * 10000
+    params: {window: 20}
+  - name: amihud_illiquidity
+    description: Ratio of absolute return to dollar volume
+    formula: avg(|return| / dollar_volume)
+    params: {window: 20}
+  - name: vpin_score
+    description: Volume-synchronized probability of informed trading
+    formula: sum|V_buy - V_sell| / Total_Volume
+    params: {window: 5}
+  - name: effective_spread_bps
+    description: Real-time bid-ask spread relative to mid-price
+    formula: (ask - bid) / mid * 10000
+provenance:
+  pit_constraint: "asof <= t0"

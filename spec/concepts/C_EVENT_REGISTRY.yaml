@@ -1,0 +1,27 @@
+concept_id: C_EVENT_REGISTRY
+name: Event Registry
+definition: deterministic, versioned taxonomy of all tradable market situations with formal triggers and labeling rules.
+data_requirements:
+  - dataset: events.parquet
+    columns: [timestamp, symbol, event_type]
+    granularity: event-driven
+    min_history_days: 0
+metrics:
+  - id: prevalence
+    name: Event Prevalence (bps)
+    formula: count(events) / count(bars) * 10000
+  - id: determinism
+    name: Trigger Determinism Ratio
+    formula: reproduced_count / total_count
+tests:
+  - id: T_REG_01
+    objective: No Lookahead
+    criteria: trigger_ts <= data_ts
+  - id: T_REG_02
+    objective: Cooldown Enforcement
+    criteria: min(Δts) >= cooldown
+artifacts:
+  - type: registry_code
+    path: project/events/registry.py
+  - type: table
+    path: data/lake/events/events.parquet

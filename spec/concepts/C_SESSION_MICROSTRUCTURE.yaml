@@ -1,0 +1,24 @@
+concept_id: C_SESSION_MICROSTRUCTURE
+name: Session Microstructure
+definition: Market behavior and liquidity dynamics stratified by global trading sessions (Asia, Europe, US) and their overlaps.
+data_requirements:
+  - dataset: perp_ohlcv_1m
+    columns: [high, low, close, volume]
+    granularity: 1m
+    min_history_days: 60
+metrics:
+  - id: session_range_pct
+    name: Session Range Percentile
+    formula: rank(session_hi - session_lo) / 60
+  - id: session_vol_z
+    name: Session Volume Z-Score
+    formula: (volume - mean(volume_at_hour)) / std(volume_at_hour)
+tests:
+  - id: T_SESS_01
+    objective: Asia Compression
+    criteria: E[NY_range | Asia_range_pct < 0.3] > E[NY_range]
+artifacts:
+  - type: feature_spec
+    path: spec/features/session_features.yaml
+  - type: script
+    path: project/features/context.py

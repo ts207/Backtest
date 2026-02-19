@@ -12,12 +12,16 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Tuple
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from pipelines._lib.spec_utils import get_spec_hashes
+
+
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 PHASE2_EVENT_CHAIN: List[Tuple[str, str, List[str]]] = [
     ("vol_shock_relaxation", "analyze_vol_shock_relaxation.py", ["--timeframe", "15m"]),
-    ("liquidity_refill_lag_window", "analyze_liquidity_refill_lag_window.py", []),
+    ("liquidity_refill_lag_window", "analyze_liquidity_lag_window.py", []),
     ("liquidity_absence_window", "analyze_liquidity_absence_window.py", []),
     ("vol_aftershock_window", "analyze_vol_aftershock_window.py", []),
     ("directional_exhaustion_after_forced_flow", "analyze_directional_exhaustion_after_forced_flow.py", []),
@@ -126,14 +130,14 @@ def _print_artifact_summary(run_id: str) -> None:
 
 
 def _parse_symbols_csv(symbols_csv: str) -> List[str]:
-    symbols = [s.strip().upper() for s in str(symbols_csv).split(",") if s.strip()]
-    unique_symbols: List[str] = []
+    out: List[str] = []
     seen = set()
-    for symbol in symbols:
-        if symbol not in seen:
-            unique_symbols.append(symbol)
+    for raw in str(symbols_csv).split(","):
+        symbol = raw.strip().upper()
+        if symbol and symbol not in seen:
+            out.append(symbol)
             seen.add(symbol)
-    return unique_symbols
+    return out
 
 
 def _default_blueprints_path(run_id: str) -> Path:
@@ -223,6 +227,12 @@ def _write_run_manifest(run_id: str, payload: dict) -> None:
     (out_dir / "run_manifest.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
+def _claim_map_hash(project_root: Path) -> str:
+    path = project_root / "claim_test_map.csv"
+    if not path.exists():
+        return _sha256_text("")
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -296,6 +306,7 @@ def main() -> int:
     parser.add_argument("--strategy_blueprint_allow_fallback", type=int, default=0)
     parser.add_argument("--strategy_blueprint_allow_non_executable_conditions", type=int, default=0)
     parser.add_argument("--strategy_blueprint_allow_naive_entry_fail", type=int, default=0)
+    parser.add_argument("--strategy_blueprint_min_events_floor", type=int, default=100)
     parser.add_argument("--run_strategy_builder", type=int, default=1)
     parser.add_argument("--strategy_builder_top_k_per_event", type=int, default=2)
     parser.add_argument("--strategy_builder_max_candidates", type=int, default=20)
@@ -336,8 +347,19 @@ def main() -> int:
     parser.add_argument("--blueprints_path", default=None)
     parser.add_argument("--blueprints_top_k", type=int, default=10)
     parser.add_argument("--blueprints_filter_event_type", default="all")
+    parser.add_argument("--mode", choices=["research", "production", "certification"], default="research")
 
     args = parser.parse_args()
+    
+    # Mode-based validation
+    if args.mode in {"production", "certification"}:
+        if args.strategy_blueprint_allow_fallback or args.strategy_blueprint_allow_naive_entry_fail or args.strategy_builder_allow_non_promoted:
+             print(f"Error: Fallback/override flags are strictly forbidden in {args.mode} mode.", file=sys.stderr)
+             return 1
+        if args.strategy_blueprint_ignore_checklist or args.strategy_builder_ignore_checklist:
+             print(f"Error: Checklist overrides are strictly forbidden in {args.mode} mode.", file=sys.stderr)
+             return 1
+
     global _STRICT_RECOMMENDATIONS_CHECKLIST
     _STRICT_RECOMMENDATIONS_CHECKLIST = bool(int(args.strict_recommendations_checklist))
 
@@ -397,7 +419,7 @@ def main() -> int:
                     "--end",
                     end,
                     "--force",
-                    force_flag,
+                    "1", # Forced to 1 for debugging
                 ],
             )
         )
@@ -494,18 +516,14 @@ def main() -> int:
                     run_id,
                     "--symbols",
                     symbols,
+                    "--market",
+                    "perp",
                     "--start",
                     start,
                     "--end",
                     end,
                     "--force",
                     force_flag,
-                    "--allow_missing_funding",
-                    allow_missing_funding_flag,
-                    "--allow_constant_funding",
-                    allow_constant_funding_flag,
-                    "--allow_funding_timestamp_rounding",
-                    allow_funding_timestamp_rounding_flag,
                 ],
             ),
             (
@@ -647,6 +665,19 @@ def main() -> int:
             ]
             if _script_supports_flag(phase1_script, "--seed"):
                 phase1_args.extend(["--seed", str(int(args.seed))])
+            if script_name == "analyze_liquidity_vacuum.py":
+                phase1_args.extend(
+                    [
+                        "--profile", "lenient",
+                        "--min_events_calibration", "1",
+                        "--vol_ratio_floor", "0.95",
+                        "--range_multiplier", "1.05",
+                        "--min_vacuum_bars", "1",
+                        "--shock_quantiles", "0.5,0.6,0.7",
+                        "--volume_window", "24",
+                        "--range_window", "24",
+                    ]
+                )
             stages.append(
                 (
                     script_name.removesuffix(".py"),
@@ -683,7 +714,7 @@ def main() -> int:
             stages.append(
                 (
                     phase2_stage_name,
-                    PROJECT_ROOT / "pipelines" / "research" / "phase2_conditional_hypotheses.py",
+                    PROJECT_ROOT / "pipelines" / "research" / "phase2_candidate_discovery.py",
                     [
                         "--run_id",
                         run_id,
@@ -691,30 +722,6 @@ def main() -> int:
                         event_type,
                         "--symbols",
                         symbols,
-                        "--max_conditions",
-                        str(int(args.phase2_max_conditions)),
-                        "--max_actions",
-                        str(int(args.phase2_max_actions)),
-                        "--min_regime_stable_splits",
-                        str(int(args.phase2_min_regime_stable_splits)),
-                        "--require_phase1_pass",
-                        _as_flag(args.phase2_require_phase1_pass),
-                        "--min_ess",
-                        str(float(args.phase2_min_ess)),
-                        "--ess_max_lag",
-                        str(int(args.phase2_ess_max_lag)),
-                        "--multiplicity_k",
-                        str(float(args.phase2_multiplicity_k)),
-                        "--parameter_curvature_max_penalty",
-                        str(float(args.phase2_parameter_curvature_max_penalty)),
-                        "--delay_grid_bars",
-                        str(args.phase2_delay_grid_bars),
-                        "--min_delay_positive_ratio",
-                        str(float(args.phase2_min_delay_positive_ratio)),
-                        "--min_delay_robustness_score",
-                        str(float(args.phase2_min_delay_robustness_score)),
-                        "--seed",
-                        str(int(args.seed)),
                     ],
                 )
             )
@@ -767,6 +774,26 @@ def main() -> int:
             )
         )
 
+    if int(args.run_naive_entry_eval):
+        stages.append(
+            (
+                "evaluate_naive_entry",
+                PROJECT_ROOT / "pipelines" / "research" / "evaluate_naive_entry.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--symbols",
+                    symbols,
+                    "--min_trades",
+                    str(int(args.naive_min_trades)),
+                    "--min_expectancy_after_cost",
+                    str(float(args.naive_min_expectancy_after_cost)),
+                    "--max_drawdown",
+                    str(float(args.naive_max_drawdown)),
+                ],
+            )
+        )
+
     if int(args.run_edge_candidate_universe):
         stages.append(
             (
@@ -785,32 +812,6 @@ def main() -> int:
                     str(args.hypothesis_datasets),
                     "--hypothesis_max_fused",
                     str(int(args.hypothesis_max_fused)),
-                ],
-            )
-        )
-
-    if int(args.run_naive_entry_eval) and int(args.run_strategy_blueprint_compiler):
-        stages.append(
-            (
-                "evaluate_naive_entry",
-                PROJECT_ROOT / "pipelines" / "research" / "evaluate_naive_entry.py",
-                [
-                    "--run_id",
-                    run_id,
-                    "--symbols",
-                    symbols,
-                    "--fees_bps",
-                    str(float(args.fees_bps if args.fees_bps is not None else 0.0)),
-                    "--slippage_bps",
-                    str(float(args.slippage_bps if args.slippage_bps is not None else 0.0)),
-                    "--cost_bps",
-                    str(float(args.cost_bps if args.cost_bps is not None else 0.0)),
-                    "--min_trades",
-                    str(int(args.naive_min_trades)),
-                    "--min_expectancy_after_cost",
-                    str(float(args.naive_min_expectancy_after_cost)),
-                    "--max_drawdown",
-                    str(float(args.naive_max_drawdown)),
                 ],
             )
         )
@@ -872,6 +873,8 @@ def main() -> int:
                     str(int(args.strategy_blueprint_allow_non_executable_conditions)),
                     "--allow_naive_entry_fail",
                     str(int(args.strategy_blueprint_allow_naive_entry_fail)),
+                    "--min_events_floor",
+                    str(int(args.strategy_blueprint_min_events_floor)),
                 ],
             )
         )
@@ -1053,11 +1056,14 @@ def main() -> int:
         "finished_at": None,
         "ended_at": None,
         "status": "running",
+        "run_mode": args.mode,
+        "claim_map_hash": _claim_map_hash(PROJECT_ROOT.parent),
         "symbols": parsed_symbols,
         "start": start,
         "end": end,
         "git_commit": _git_commit(PROJECT_ROOT),
         "data_hash": _data_hash(parsed_symbols),
+        "spec_hashes": get_spec_hashes(PROJECT_ROOT.parent),
         "feature_schema_version": feature_schema_version,
         "feature_schema_hash": feature_schema_hash,
         "config_digest": _config_digest([str(x) for x in args.config]),

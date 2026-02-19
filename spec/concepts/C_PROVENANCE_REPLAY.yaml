@@ -1,0 +1,24 @@
+concept_id: C_PROVENANCE_REPLAY
+name: Deterministic Replay / Provenance
+definition: requirement that every research result is perfectly reproducible from versioned inputs, code, and config.
+data_requirements:
+  - dataset: run_manifest.json
+    columns: [dataset_hash, code_commit, config_hash, rng_seed]
+    granularity: per run
+    min_history_days: 0
+metrics:
+  - id: match_rate
+    name: Reproducibility Match Rate
+    formula: count(matching_bytes) / total_bytes
+tests:
+  - id: T_PROV_01
+    objective: Manifest Integrity
+    criteria: valid SHA and hashes present
+  - id: T_PROV_02
+    objective: Replay Match
+    criteria: 100% hash match on re-run
+artifacts:
+  - type: logic
+    path: project/pipelines/_lib/run_manifest.py
+  - type: manifest
+    path: data/runs/<run_id>/run_manifest.json

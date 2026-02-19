@@ -1,0 +1,26 @@
+concept_id: C_INVARIANTS
+name: Invariants
+definition: structural constraints and relationships (e.g., parity) used as sanity checks and mispricing anchors.
+data_requirements:
+  - dataset: perp_ohlcv_1m
+    columns: [close]
+    granularity: 1m
+    min_history_days: 30
+  - dataset: spot_ohlcv_1m
+    columns: [close]
+    granularity: 1m
+    min_history_days: 30
+metrics:
+  - id: parity_dev
+    name: Parity Deviation
+    formula: abs(perp - spot_with_carry)
+  - id: tri_arb
+    name: Triangular Arbitrage Index
+    formula: (rate1 * rate2) / rate3
+tests:
+  - id: T_INV_01
+    objective: Parity Bounds
+    criteria: basis within carry bounds > 90%
+artifacts:
+  - type: code
+    path: project/engine/execution_model.py

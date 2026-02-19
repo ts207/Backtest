@@ -1,0 +1,11 @@
+gate_e1:
+  min_prevalence_10k: 1.0
+  max_prevalence_10k: 500.0
+  min_join_rate: 0.99
+  max_clustering_5b: 0.20
+
+gate_v1_phase2:
+  max_q_value: 0.05
+  min_after_cost_expectancy_bps: 0.1
+  require_sign_stability: true
+  min_sample_size: 50

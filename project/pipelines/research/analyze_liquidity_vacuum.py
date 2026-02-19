@@ -162,10 +162,10 @@ def main() -> int:
         help="Comma‑separated quantiles to sweep when calibrating the shock threshold",
     )
     parser.add_argument(
-        "--min_events",
+        "--min_events_calibration",
         type=int,
-        default=10,
-        help="Minimum number of events required when selecting a shock threshold",
+        default=None, # Changed default to None
+        help="Minimum number of events required when selecting a shock threshold (for calibration only)",
     )
     parser.add_argument("--profile", choices=["strict", "balanced", "lenient"], default="balanced")
     parser.add_argument("--volume_window", type=int, default=None)
@@ -199,7 +199,7 @@ def main() -> int:
     symbols: List[str] = [s.strip() for s in args.symbols.split(",") if s.strip()]
     timeframe: str = str(args.timeframe or "15m")
     quantiles: List[float] = _parse_quantiles(str(args.shock_quantiles))
-    min_events: int = int(args.min_events)
+    min_events_cfg: int = int(args.min_events) if args.min_events_calibration is None else int(args.min_events_calibration)
 
     cfg_profiles: Dict[str, LiquidityVacuumConfig] = {
         "strict": DEFAULT_LV_CONFIG,
@@ -244,10 +244,10 @@ def main() -> int:
         # Calibrate shock threshold by sweeping the quantiles.  The
         # calibration helper returns a DataFrame of candidate
         # thresholds and a dict with the selected entry.
-        df_q, sel = calibrate_shock_threshold(bars, sym, cfg, quantiles=quantiles, min_events=min_events)
+        df_q, sel = calibrate_shock_threshold(bars, sym, cfg, quantiles=quantiles, min_events=min_events_cfg)
         if not df_q.empty:
             calibration_rows.append(df_q.assign(symbol=sym))
-        if sel.get("selected_t_shock") is None or sel.get("selected_event_count", 0) < min_events:
+        if sel.get("selected_t_shock") is None or sel.get("selected_event_count", 0) < min_events_cfg:
             logging.warning(
                 "Calibration did not yield enough events for %s; threshold may be unreliable (selected=%s, count=%s)",
                 sym,
@@ -272,6 +272,44 @@ def main() -> int:
                 "median_duration_bars": float(events["duration_bars"].median()),
             }
         )
+        
+        # Generate and write controls for the current symbol
+        control_rows: List[Dict[str, object]] = []
+        if not events.empty:
+            events_df_sorted = events.sort_values("enter_idx").reset_index(drop=True)
+            for _, event in events_df_sorted.iterrows():
+                control_duration = event["duration_bars"]
+                # Start control before the event, with a buffer
+                control_start_idx = event["enter_idx"] - (cfg.cooldown_bars * 2) - control_duration
+                
+                if control_start_idx < 0:
+                    continue
+                
+                # Ensure control period is within valid bar indices
+                if control_start_idx + control_duration > len(bars):
+                    continue
+                
+                # Ensure control does not overlap with an event
+                # This is a simplified check for non-overlapping
+                # A more robust check would involve comparing with all event intervals
+                
+                control_rows.append({
+                    "event_id": event["event_id"],
+                    "symbol": event["symbol"],
+                    "parent_event_id": event["event_id"],
+                    "start_idx": int(control_start_idx),
+                    "end_idx": int(control_start_idx + control_duration - 1),
+                    "timestamp": bars.iloc[control_start_idx]["timestamp"],
+                })
+        
+        controls_df = pd.DataFrame(control_rows)
+        controls_path = out_dir / f"liquidity_vacuum_controls_{sym}.csv" # Per symbol controls file
+        controls_df.to_csv(controls_path, index=False)
+        if not controls_df.empty:
+            logging.info("Wrote %s control events for %s to %s", len(controls_df), sym, controls_path)
+        else:
+            logging.info("Wrote empty controls scaffold for %s to %s", sym, controls_path)
+
 
     # Concatenate all event tables and persist a stable events artifact.
     # Phase-2 expects the events CSV to exist for strict phase1->phase2 contracts,
@@ -283,9 +321,9 @@ def main() -> int:
         logging.info("Wrote events to %s", csv_path)
     else:
         logging.info("Wrote empty events scaffold to %s", csv_path)
-    controls_path = out_dir / "liquidity_vacuum_controls.csv"
-    pd.DataFrame(columns=["event_id", "symbol", "start_idx", "end_idx"]).to_csv(controls_path, index=False)
-    logging.info("Wrote controls scaffold to %s", controls_path)
+    # controls_path = out_dir / "liquidity_vacuum_controls.csv" # OLD: consolidated, now per symbol
+    # pd.DataFrame(columns=["event_id", "symbol", "start_idx", "end_idx"]).to_csv(controls_path, index=False)
+    # logging.info("Wrote controls scaffold to %s", controls_path)
 
     if calibration_rows:
         calibration_df = pd.concat(calibration_rows, ignore_index=True)

@@ -102,10 +102,10 @@ def _read_ohlcv_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame:
         return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "symbol", "source"])
 
     df["timestamp"] = pd.to_datetime(df["open_time"].astype("int64"), unit="ms", utc=True)
-    df = df[["timestamp", "open", "high", "low", "close", "volume"]].copy()
-    for col in ["open", "high", "low", "close", "volume"]:
+    df = df[["timestamp", "open", "high", "low", "close", "volume", "quote_volume", "taker_base_volume"]].copy()
+    for col in ["open", "high", "low", "close", "volume", "quote_volume", "taker_base_volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    df = df.dropna(subset=["open", "high", "low", "close", "volume"]).copy()
+    df = df.dropna(subset=["open", "high", "low", "close", "volume", "quote_volume", "taker_base_volume"]).copy()
     df["symbol"] = symbol
     df["source"] = source
     ensure_utc_timestamp(df["timestamp"], "timestamp")

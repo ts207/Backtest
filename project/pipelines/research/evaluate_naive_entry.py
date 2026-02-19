@@ -226,11 +226,12 @@ def main() -> int:
         rows: List[Dict[str, object]] = []
         for event_dir in event_dirs:
             event_type = event_dir.name
-            candidates_path = event_dir / "phase2_candidates.csv"
+            candidates_path = event_dir / "phase2_candidates_raw.parquet"
             if not candidates_path.exists():
                 raise FileNotFoundError(f"Missing phase2 candidate file for event_type={event_type}: {candidates_path}")
-            candidates = pd.read_csv(candidates_path)
+            candidates = pd.read_parquet(candidates_path)
             if candidates.empty:
+                logging.info(f"No candidates found for event_type={event_type} at {candidates_path}")
                 continue
             events = _load_phase1_events(args.run_id, event_type)
             inputs.append({"path": str(candidates_path), "rows": int(len(candidates)), "start_ts": None, "end_ts": None})
@@ -239,7 +240,10 @@ def main() -> int:
             for idx, row in candidates.iterrows():
                 candidate_id = str(row.get("candidate_id", "")).strip() or f"{event_type}_candidate_{idx}"
                 condition = str(row.get("condition", "all"))
-                mask = _condition_mask(events, condition).fillna(False)
+                mask = _condition_mask(events, condition)
+                if isinstance(mask, (bool, np.bool_)):
+                    mask = pd.Series(mask, index=events.index)
+                mask = mask.fillna(False)
                 candidate_events = events[mask].copy()
                 fallback_expectancy = _to_float(
                     row.get(

@@ -1235,3 +1235,20 @@ def test_compiler_summary_contains_compile_funnel(monkeypatch, tmp_path: Path) -
 
     # quality_floor.min_events should reflect actual arg, not the constant QUALITY_MIN_EVENTS
     assert summary["quality_floor"]["min_events"] == 50
+
+
+def test_active_blueprints_filter_excludes_trimmed() -> None:
+    """Verify the downstream filter pattern works correctly."""
+    blueprints = [
+        {"id": "bp1", "candidate_id": "c1", "lineage": {"wf_status": "pass"}},
+        {"id": "bp2", "candidate_id": "c2", "lineage": {"wf_status": "trimmed_zero_trade"}},
+        {"id": "bp3", "candidate_id": "c3", "lineage": {"wf_status": "trimmed_worst_negative"}},
+        {"id": "bp4", "candidate_id": "c4", "lineage": {}},  # missing wf_status → treated as pass
+        {"id": "bp5", "candidate_id": "c5"},                 # missing lineage entirely → treated as pass
+    ]
+    active = [
+        bp for bp in blueprints
+        if not bp.get("lineage", {}).get("wf_status", "pass").startswith("trimmed")
+    ]
+    ids = {bp["id"] for bp in active}
+    assert ids == {"bp1", "bp4", "bp5"}

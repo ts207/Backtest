@@ -1,0 +1,24 @@
+concept_id: C_CONTEXT_DELTAS
+name: Context Deltas
+definition: measurement of state changes (trajectories) in market environment variables leading up to an event.
+data_requirements:
+  - dataset: perp_ohlcv_1m
+    columns: [all]
+    granularity: 1m
+    min_history_days: 30
+metrics:
+  - id: vol_accel
+    name: Volatility Acceleration
+    formula: rv_1h / rv_24h
+  - id: basis_v
+    name: Basis Velocity
+    formula: (basis_t - basis_{t-h}) / h
+tests:
+  - id: T_DELTA_01
+    objective: Feature Causality
+    criteria: all(input_ts <= t0)
+artifacts:
+  - type: feature_spec
+    path: spec/features/context_deltas.yaml
+  - type: table
+    path: data/lake/features/deltas/

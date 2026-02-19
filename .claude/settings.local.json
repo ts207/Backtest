@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(source:*)",
+      "Bash(pytest:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(grep:*)",
+      "Bash(python3:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(/home/tstuv/backtest/Backtest/tests/test_non_prod_override_recording.py:*)",
+      "Bash(.venv/bin/python -m pytest:*)",
+      "Bash(.venv/bin/pip show:*)",
+      "Bash(.venv/bin/pip list:*)",
+      "Bash(.venv/bin/pip index versions:*)",
+      "Bash(gh api:*)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(git stash:*)"
+    ]
+  },
+  "enabledPlugins": {
+    "superpowers@superpowers-marketplace": false
+  },
+  "spinnerTipsEnabled": false,
+  "prefersReducedMotion": true
+}

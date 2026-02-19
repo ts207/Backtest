@@ -1,0 +1,30 @@
+concept_id: C_VOLATILITY_STATE_TRANSITIONS
+name: Volatility State Transitions
+definition: "cyclical alternation between market states: compression, expansion, exhaustion, reset."
+data_requirements:
+  - dataset: perp_ohlcv_1m
+    columns: [high, low, close]
+    granularity: 1m
+    min_history_days: 90
+metrics:
+  - id: realized_vol_bps
+    name: Realized Volatility (bps)
+    formula: std(log_returns) * sqrt(periods_per_year) * 10000
+  - id: atr_percentile
+    name: ATR Percentile
+    formula: rank(atr_20) / count(atr_20) over 1y
+  - id: vol_compression_flag
+    name: Volatility Compression Flag
+    formula: atr_percentile < 0.20
+tests:
+  - id: T_VOL_01
+    objective: Volatility Clustering
+    criteria: autocorrelation(realized_vol_bps, 1) > 0.4
+  - id: T_VOL_02
+    objective: Compression Lead
+    criteria: E[expansion | compression] > 1.5 * E[expansion]
+artifacts:
+  - type: feature_spec
+    path: spec/features/volatility.yaml
+  - type: script
+    path: project/pipelines/alpha_bundle/build_regime_filter.py

@@ -1,0 +1,25 @@
+concept_id: C_EVENT_DEFINITIONS
+name: Event Definitions
+definition: technical implementation of triggers, thresholds, and dependencies for every registry event type.
+dependencies: [C_DATA_SCHEMA, C_EVENT_REGISTRY]
+data_requirements:
+  - dataset: feature_vectors
+    columns: [all]
+    granularity: 1m
+    min_history_days: 0
+metrics:
+  - id: frequency
+    name: Event Frequency
+    formula: count(events) / days
+  - id: co_occurrence
+    name: Co-occurrence Rate
+    formula: overlap(event_A, event_B) / count(event_A)
+tests:
+  - id: T_EDEF_01
+    objective: Non-Degeneracy
+    criteria: count(events) >= 50
+artifacts:
+  - type: registry_code
+    path: project/events/registry.py
+  - type: logic
+    path: project/pipelines/research/build_event_registry.py

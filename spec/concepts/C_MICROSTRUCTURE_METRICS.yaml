@@ -1,0 +1,40 @@
+concept_id: C_MICROSTRUCTURE_METRICS
+name: Microstructure Metrics
+definition: Quantitative measures of market liquidity, transaction costs, and trade toxicity.
+data_requirements:
+  - dataset: perp_ohlcv_1m
+    columns: [close, volume, quote_volume]
+    granularity: 1m
+    min_history_days: 30
+  - dataset: tob_1s
+    columns: [bid_price, ask_price, bid_qty, ask_qty]
+    granularity: 1s
+    min_history_days: 7
+metrics:
+  - id: roll_spread_bps
+    name: Roll Spread (bps)
+    formula: 2 * sqrt(-cov(dp_t, dp_{t-1})) / price * 10000
+  - id: vpin_score
+    name: VPIN
+    formula: sum|V_buy - V_sell| / Total_Volume over buckets
+  - id: amihud_illiquidity
+    name: Amihud Illiquidity
+    formula: avg(|return| / dollar_volume)
+tests:
+  - id: T_MICRO_01
+    objective: Positive Spread
+    criteria: roll_spread_bps > 0
+    threshold: 0.50
+  - id: T_MICRO_02
+    objective: Volatility Correlation
+    criteria: abs(corr(vpin_score, realized_vol))
+    threshold: 0.1
+  - id: T_MICRO_03
+    objective: Impact Sensitivity
+    criteria: amihud_high_vol / amihud_low_vol
+    threshold: 0.5
+artifacts:
+  - type: feature_spec
+    path: spec/features/microstructure.yaml
+  - type: table
+    path: data/lake/features/perp/{symbol}/1m/microstructure/

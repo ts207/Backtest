@@ -1,0 +1,38 @@
+concept_id: C_LIQUIDITY_MEAN_REVERSION
+name: Liquidity Mean Reversion
+definition: tendency of market prices to revert to a mean or fair value anchor after a temporary dislocation caused by liquidity shocks.
+data_requirements:
+  - dataset: perp_ohlcv_1m
+    columns: [close, volume]
+    granularity: 1m
+    min_history_days: 14
+  - dataset: tob_1s
+    columns: [bid_price, ask_price]
+    granularity: 1s
+    min_history_days: 7
+  - dataset: basis_1m
+    columns: [basis_bps]
+    granularity: 1m
+    min_history_days: 7
+metrics:
+  - id: basis_zscore
+    name: Basis Z-Score
+    formula: (basis_bps - rolling_mean(basis_bps, 24h)) / rolling_std(basis_bps, 24h)
+  - id: vwap_deviation_bps
+    name: VWAP Deviation (bps)
+    formula: (price - vwap_1h) / vwap_1h * 10000
+  - id: depth_imbalance
+    name: Depth Imbalance
+    formula: bid_depth / (bid_depth + ask_depth)
+tests:
+  - id: T_REVERT_01
+    objective: Basis Reversion
+    criteria: prob(revert_within_30m | basis_spike > 3) > 0.7
+  - id: T_REVERT_02
+    objective: Fade Expectancy
+    criteria: sum(fade_pnl) > 0
+artifacts:
+  - type: feature_spec
+    path: spec/features/liquidity_reversion.yaml
+  - type: event_registry
+    path: project/events/registry.py

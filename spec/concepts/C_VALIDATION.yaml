@@ -1,0 +1,25 @@
+concept_id: C_VALIDATION
+name: Validation & Statistical Controls
+definition: formal process of converting conditional returns into valid edges using cross-validation and regime partitioning.
+dependencies: [C_EVENT_DEFINITIONS, C_MULTIPLICITY_CONTROL]
+data_requirements:
+  - dataset: events.parquet
+    columns: [all]
+    granularity: event-driven
+    min_history_days: 365
+metrics:
+  - id: after_cost_expectancy
+    name: After-Cost Expectancy
+    formula: mean(returns - total_costs)
+  - id: stability_score
+    name: Regime Stability Score
+    formula: sum(E[ret | regime_i] > 0) / count(regimes)
+tests:
+  - id: T_VAL_01
+    objective: Edge Contract
+    criteria: expectancy > 0 in 3+ regimes
+artifacts:
+  - type: pipeline
+    path: project/pipelines/research/phase2_conditional_hypotheses.py
+  - type: report
+    path: data/lake/reports/validation/candidate_ranking.csv

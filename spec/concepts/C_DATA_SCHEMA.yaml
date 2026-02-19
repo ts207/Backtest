@@ -1,0 +1,23 @@
+concept_id: C_DATA_SCHEMA
+name: Universal Labeling Schema
+definition: minimal schema for PIT features, forward labels, and events ensuring cross-symbol consistency.
+dependencies: [C_DATA_CONTRACTS]
+data_requirements:
+  - dataset: cleaned_bars
+    columns: [open, high, low, close, volume]
+    granularity: 1m
+    min_history_days: 0
+metrics:
+  - id: null_rate
+    name: Null Rate
+    formula: count(nulls) / total_rows
+  - id: schema_hash
+    name: Schema Hash
+    formula: sha256(ordered_column_names_and_types)
+tests:
+  - id: T_SCH_01
+    objective: Core Column Presence
+    criteria: has(timestamp, symbol, run_id)
+artifacts:
+  - type: schema_file
+    path: project/schemas/feature_schema_v1.json

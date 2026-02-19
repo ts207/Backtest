@@ -1,0 +1,31 @@
+concept_id: C_TREND_EXHAUSTION
+name: Trend Exhaustion
+definition: identification of mature trends likely to reverse or consolidate using age, slope decay, and OI behavior.
+data_requirements:
+  - dataset: perp_ohlcv_15m
+    columns: [close, volume]
+    granularity: 15m
+    min_history_days: 120
+  - dataset: um_open_interest_hist
+    columns: [sum_open_interest]
+    granularity: 5m
+    min_history_days: 60
+metrics:
+  - id: trend_age
+    name: Trend Age (bars)
+    formula: count(consecutive bars above/below EMA)
+  - id: oi_z
+    name: OI Change Z-Score
+    formula: (ΔOI - mean(ΔOI)) / std(ΔOI)
+  - id: directional_streak
+    name: Directional Streak
+    formula: count(consecutive signs of returns)
+tests:
+  - id: T_TREND_01
+    objective: Streak Reversal
+    criteria: prob(reversal | streak >= 5) > 0.6
+artifacts:
+  - type: feature_spec
+    path: spec/features/trend_exhaustion.yaml
+  - type: table
+    path: data/lake/reports/trend_maturity_stats.csv

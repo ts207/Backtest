@@ -1,0 +1,28 @@
+concept_id: C_PORTFOLIO
+name: Portfolio / Allocation / Risk
+definition: management of multiple strategy equity curves to achieve a target risk profile via deterministic risk gates.
+dependencies: [C_STRATEGY_BACKTEST, C_CAPACITY_CONSTRAINTS]
+data_requirements:
+  - dataset: equity_curves.parquet
+    columns: [strategy_id, pnl]
+    granularity: 1m
+    min_history_days: 365
+metrics:
+  - id: portfolio_sharpe
+    name: Portfolio Sharpe
+    formula: ann_mean(sum(pnl_i)) / ann_std(sum(pnl_i))
+  - id: turnover
+    name: Daily Turnover
+    formula: sum(abs(notional_traded)) / NAV
+tests:
+  - id: T_PORT_01
+    objective: Exposure Caps
+    criteria: risk_contribution_i < 0.25
+  - id: T_PORT_03
+    objective: Correlation Cap
+    criteria: mean(pairwise_corr) < 0.4
+artifacts:
+  - type: logic
+    path: project/pipelines/report/capital_allocation.py
+  - type: table
+    path: data/lake/reports/portfolio/daily_stats.json

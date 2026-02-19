@@ -1,0 +1,32 @@
+concept_id: C_CONTEXT_INTERACTIONS
+name: Context Interaction
+definition: study of edges manifesting only when multiple independent conditions align (e.g., low vol + session open).
+dependencies: [C_EVENT_REGISTRY, C_VOLATILITY_STATE_TRANSITIONS, C_SESSION_MICROSTRUCTURE]
+data_requirements:
+  - dataset: perp_ohlcv_1m
+    columns: [all]
+    granularity: 1m
+    min_history_days: 180
+  - dataset: event_flags
+    columns: [all]
+    granularity: 15m
+    min_history_days: 180
+metrics:
+  - id: interaction_lift
+    name: Interaction Lift
+    formula: E[ret | A, B] / E[ret | A]
+  - id: concordance
+    name: Regime Concordance
+    formula: average agreement across N proxies
+tests:
+  - id: T_INT_01
+    objective: Synergistic Signal
+    criteria: sharpe(A+B) > 2 * sharpe(A)
+  - id: T_INT_03
+    objective: Sample Sufficiency
+    criteria: count(samples_per_bucket) >= 30
+artifacts:
+  - type: script
+    path: project/pipelines/research/phase2_conditional_hypotheses.py
+  - type: report
+    path: data/lake/reports/interactions/lift_analysis.parquet

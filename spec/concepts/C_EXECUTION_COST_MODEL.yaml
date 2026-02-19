@@ -1,0 +1,24 @@
+concept_id: C_EXECUTION_COST_MODEL
+name: Execution / Cost Model
+definition: deterministic model of explicit fees and implicit frictions (spread, slippage, impact) using implementation shortfall.
+data_requirements:
+  - dataset: tob_1s
+    columns: [bid_price, ask_price, bid_qty, ask_qty]
+    granularity: 1s
+    min_history_days: 7
+metrics:
+  - id: shortfall
+    name: Implementation Shortfall
+    formula: sum(q * (p_exec - p_arr)) + fees
+  - id: impact_bps
+    name: Market Impact
+    formula: c * sigma * sqrt(Q / ADV)
+tests:
+  - id: T_COST_01
+    objective: Non-Linearity Check
+    criteria: impact(2Q) < 2 * impact(Q)
+artifacts:
+  - type: code
+    path: project/engine/execution_model.py
+  - type: spec
+    path: spec/cost_model.yaml

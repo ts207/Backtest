@@ -1,0 +1,31 @@
+concept_id: C_ML_TRADING_MODELS
+name: ML Trading Models
+definition: application of learning models for regime detection or meta-labeling while adhering to strict PIT constraints.
+data_requirements:
+  - dataset: feature_vectors
+    columns: [all]
+    granularity: 1m
+    min_history_days: 365
+  - dataset: forward_labels
+    columns: [ret_fwd, mae, mfe]
+    granularity: multi-horizon
+    min_history_days: 365
+metrics:
+  - id: auc_roc
+    name: AUC-ROC
+    formula: area under precision-recall curve
+  - id: overfit_ratio
+    name: Overfit Ratio
+    formula: is_sharpe / oos_sharpe
+tests:
+  - id: T_ML_01
+    objective: Leakage Guard
+    criteria: performance ~ 0 on randomized timestamps
+  - id: T_ML_02
+    objective: Economic Edge
+    criteria: lift(ML_filter) > 1.2
+artifacts:
+  - type: pipeline
+    path: project/pipelines/research/phase2_conditional_hypotheses.py
+  - type: model_storage
+    path: data/lake/models/

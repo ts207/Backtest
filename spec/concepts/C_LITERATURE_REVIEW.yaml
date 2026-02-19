@@ -1,0 +1,24 @@
+concept_id: C_LITERATURE_REVIEW
+name: Literature Review / Meta-Analysis
+definition: synthesis of external research to identify new mechanisms and validate existing Atlas assumptions.
+data_requirements:
+  - dataset: fragments.jsonl
+    columns: [text, locator, strength]
+    granularity: N/A
+    min_history_days: 0
+metrics:
+  - id: evidence_strength
+    name: Evidence Strength Ratio
+    formula: count(strength == high) / count(claims)
+  - id: conversion_rate
+    name: Claim-to-Code Rate
+    formula: count(operationalized_claims) / total_claims
+tests:
+  - id: T_LIT_01
+    objective: Claim Traceability
+    criteria: has_locator(claim) == True
+artifacts:
+  - type: atlas_md
+    path: knowledge_atlas (3).md
+  - type: fragments_jsonl
+    path: fragments (1).jsonl

@@ -1,0 +1,30 @@
+concept_id: C_MARKET_EFFICIENCY
+name: Market Efficiency
+definition: dynamic degree to which market prices reflect all available information, often violating random walk assumptions.
+data_requirements:
+  - dataset: perp_ohlcv_1m
+    columns: [close, volume]
+    granularity: 1m
+    min_history_days: 180
+metrics:
+  - id: variance_ratio
+    name: Variance Ratio
+    formula: Var(r_kh) / (k * Var(r_h))
+  - id: hurst_exponent
+    name: Hurst Exponent
+    formula: rescaled range analysis (R/S) over lookback
+  - id: return_autocorr
+    name: Return Autocorrelation
+    formula: corr(r_t, r_{t-1})
+tests:
+  - id: T_EFF_01
+    objective: Random Walk Check
+    criteria: variance_ratio in [0.9, 1.1]
+  - id: T_EFF_02
+    objective: Anomaly Persistence
+    criteria: E[returns | H > 0.6] > baseline
+artifacts:
+  - type: script
+    path: project/eval/efficiency_tests.py
+  - type: table
+    path: data/lake/reports/market_health/efficiency_v1.parquet

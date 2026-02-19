@@ -1,0 +1,32 @@
+concept_id: C_STRATEGY_BACKTEST
+name: Strategy Backtesting
+definition: long-horizon simulation of candidate edges incorporating parameter sweeps and microstructure stress tests.
+dependencies: [C_VALIDATION, C_EXECUTION_COST_MODEL]
+data_requirements:
+  - dataset: blueprints.jsonl
+    columns: [all]
+    granularity: N/A
+    min_history_days: 0
+  - dataset: cleaned_1m
+    columns: [all]
+    granularity: 1m
+    min_history_days: 730
+metrics:
+  - id: backtest_sharpe
+    name: Backtest Sharpe
+    formula: ann_mean / ann_std
+  - id: max_dd
+    name: Max Drawdown (%)
+    formula: max(peak - trough) / peak
+tests:
+  - id: T_BTEST_01
+    objective: Neighborhood Robustness
+    criteria: 80% of neighborhood must be profitable
+  - id: T_BTEST_02
+    objective: Stress Survival
+    criteria: Sharpe > 0 under 3x spread stress
+artifacts:
+  - type: engine
+    path: project/pipelines/backtest/backtest_strategies.py
+  - type: table
+    path: data/lake/reports/backtest/equity_curves.parquet

@@ -1,0 +1,27 @@
+concept_id: C_DATA_CONTRACTS
+name: Venue Data Contracts
+definition: formal specification of venue-specific mechanics and data schemas ensuring correct translation into the research data plane.
+data_requirements:
+  - dataset: perp_ohlcv_1m
+    columns: [all]
+    granularity: 1m
+    min_history_days: 0
+metrics:
+  - id: conformance_rate
+    name: Schema Conformance Rate
+    formula: count(valid_rows) / total_rows
+  - id: monotonicity
+    name: Timestamp Monotonicity
+    formula: count(ts_t > ts_{t-1}) / total_rows
+tests:
+  - id: T_CON_01
+    objective: OHLCV Schema
+    criteria: all non-null core fields
+  - id: T_CON_02
+    objective: Funding Grid
+    criteria: timestamps match UTC 0, 8, 16
+artifacts:
+  - type: schema
+    path: project/schemas/feature_schema_v1.json
+  - type: logic
+    path: project/pipelines/_lib/sanity.py
