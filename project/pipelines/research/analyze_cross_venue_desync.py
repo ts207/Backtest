@@ -60,7 +60,7 @@ def _load_feature_frame(run_id: str, symbol: str, market: str, timeframe: str = 
 
     close = frame["close"].astype(float)
     if "ret_1" not in frame.columns:
-        frame["ret_1"] = close.pct_change(fill_method=None)
+        frame["ret_1"] = close.pct_change()
     if "logret_1" not in frame.columns:
         frame["logret_1"] = np.log(close).diff()
     if "rv" not in frame.columns:

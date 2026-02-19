@@ -1,3 +1,8 @@
+"""Funding alignment contract:
+Funding timestamps must represent settlement applied to exposure held in the PRIOR interval.
+Funding series must therefore already be aligned to bar index T where position.shift(1) applies.
+"""
+
 from __future__ import annotations
 
 from typing import Dict
@@ -98,3 +103,12 @@ def compute_pnl(
         borrow_rate=borrow_rate,
     )
     return components["pnl"]
+
+
+def _assert_funding_alignment(pos, funding):
+    # funding must not reference future exposure
+    if len(pos) and len(funding):
+        # funding cannot create pnl when no prior position existed
+        prior_pos = pos.shift(1).fillna(0)
+        illegal = (prior_pos == 0) & (funding != 0)
+        assert not illegal.any(), "Funding alignment violation: funding applied without prior exposure"

@@ -40,7 +40,7 @@ def _load_feature_frame(run_id: str, symbol: str, timeframe: str = "15m") -> pd.
     frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
     frame = frame.sort_values("timestamp").reset_index(drop=True)
     close = frame["close"].astype(float)
-    frame["ret_1"] = close.pct_change(fill_method=None)
+    frame["ret_1"] = close.pct_change()
     frame["logret_1"] = np.log(close).diff()
     frame["rv"] = frame["rv_96"].astype(float) if "rv_96" in frame.columns else frame["logret_1"].rolling(96, min_periods=32).std()
     frame["tail_move"] = frame["ret_1"].abs()

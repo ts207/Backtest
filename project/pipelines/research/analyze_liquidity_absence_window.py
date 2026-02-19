@@ -41,7 +41,7 @@ def _load_feature_frame(run_id: str, symbol: str, timeframe: str = "15m") -> pd.
     frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
     frame = frame.sort_values("timestamp").reset_index(drop=True)
     close = frame["close"].astype(float)
-    frame["ret_1"] = close.pct_change(fill_method=None)
+    frame["ret_1"] = close.pct_change()
     frame["logret_1"] = np.log(close).diff()
     if "rv_96" in frame.columns:
         frame["rv"] = frame["rv_96"].astype(float)
