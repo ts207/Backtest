@@ -39,22 +39,22 @@ QUALITY_MIN_EVENTS = 100
 QUALITY_MAX_COST_RATIO = 0.60
 TRIM_WF_WORST_K = 1
 
-SESSION_CONDITION_MAP: Dict[str, Tuple[float, float]] = {
-    "session_asia": (0.0, 7.0),
-    "session_eu": (8.0, 15.0),
-    "session_us": (16.0, 23.0),
+SESSION_CONDITION_MAP: Dict[str, Tuple[int, int]] = {
+    "session_asia": (0, 7),
+    "session_eu": (8, 15),
+    "session_us": (16, 23),
 }
 
-BULL_BEAR_CONDITION_MAP: Dict[str, float] = {
-    "bull_bear_bull": 1.0,
-    "bull_bear_bear": -1.0,
+BULL_BEAR_CONDITION_MAP: Dict[str, int] = {
+    "bull_bear_bull": 1,
+    "bull_bear_bear": -1,
 }
 
-VOL_REGIME_CONDITION_MAP: Dict[str, float] = {
-    "vol_regime_low": 0.0,
-    "vol_regime_mid": 1.0,
-    "vol_regime_medium": 1.0,
-    "vol_regime_high": 2.0,
+VOL_REGIME_CONDITION_MAP: Dict[str, int] = {
+    "vol_regime_low": 0,
+    "vol_regime_mid": 1,
+    "vol_regime_medium": 1,
+    "vol_regime_high": 2,
 }
 
 
