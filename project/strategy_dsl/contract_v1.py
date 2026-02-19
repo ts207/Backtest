@@ -155,3 +155,124 @@ def is_executable_condition(
         return True
     except NonExecutableConditionError:
         return False
+
+
+# ---- Feature allowlist/denylist (runtime safety) ----
+# The DSL must never reference research-only or future-looking columns.
+# Enforcement is intentionally conservative: unknown feature names are rejected.
+ALLOWED_FEATURE_PREFIXES = (
+    "vol_", "range_", "ret_", "rvol_", "atr_", "basis_", "spread_", "quote_vol_", "volume_", "oi_", "liq_",
+    "fp_", "mc_", "session_", "regime_", "bb_", "z_", "event_", "flag_", "symbol_"
+)
+
+# Explicitly disallow common forward return/outcome tokens and training labels.
+DISALLOWED_FEATURE_PATTERNS = (
+    r"(^|_)fwd(_|$)",
+    r"(^|_)forward(_|$)",
+    r"(^|_)future(_|$)",
+    r"(^|_)label(_|$)",
+    r"(^|_)target(_|$)",
+    r"(^|_)y(_|$)",
+    r"(^|_)outcome(_|$)",
+    r"return_after_costs",   # research metric
+    r"mfe", r"mae",          # research-only unless explicitly surfaced
+)
+
+def _is_allowed_feature_name(name: str) -> bool:
+    if not isinstance(name, str) or not name:
+        return False
+    # denylist first
+    for pat in DISALLOWED_FEATURE_PATTERNS:
+        if re.search(pat, name, flags=re.IGNORECASE):
+            return False
+    # allowlist prefixes
+    return name.startswith(ALLOWED_FEATURE_PREFIXES)
+
+def validate_feature_references(blueprint: dict) -> None:
+    """
+    Validate that a blueprint references only allowed feature names.
+    Covers:
+      - condition_nodes[*].feature
+      - executable condition strings of the form "<feature> <op> <value>"
+    """
+    # condition_nodes
+    entry = blueprint.get("entry", {}) or {}
+    nodes = entry.get("condition_nodes") or []
+    for n in nodes:
+        feat = (n or {}).get("feature")
+        if feat is None:
+            continue
+        if not _is_allowed_feature_name(str(feat)):
+            raise ValueError(f"Disallowed feature reference in condition_nodes: {feat}")
+
+    # executable strings (best-effort parse)
+    conds = entry.get("conditions") or []
+    for c in conds:
+        if not isinstance(c, str):
+            continue
+        m = re.match(r"^\s*([A-Za-z0-9_\.]+)\s*(>=|<=|==|!=|>|<)\s*[-+0-9\.eE]+\s*$", c)
+        if m:
+            feat = m.group(1)
+            if not _is_allowed_feature_name(feat):
+                raise ValueError(f"Disallowed feature reference in condition string: {feat}")
+
+
+def resolve_trigger_column(trigger: str, available_columns: list[str]) -> str | None:
+    """Resolve a trigger name to an actual boolean column in the runtime frame.
+
+    Resolution order (deterministic):
+      1) exact match
+      2) common prefix/suffix variations:
+         - add/remove 'event_' prefix
+         - add/remove 'flag_' prefix
+         - add/remove '_flag' suffix
+      3) lower/upper tolerant match (exact token, not substring)
+    Returns resolved column name or None.
+    """
+    if not isinstance(trigger, str) or not trigger.strip():
+        return None
+    trig = trigger.strip()
+    cols = list(available_columns or [])
+    if trig in cols:
+        return trig
+
+    candidates = []
+    base = trig
+    # strip known prefixes
+    for pref in ("event_", "flag_"):
+        if base.startswith(pref):
+            base = base[len(pref):]
+
+    # build deterministic candidate list
+    variants = [
+        trig,
+        base,
+        f"event_{base}",
+        f"flag_{base}",
+        f"{base}_flag",
+        f"event_{base}_flag",
+        f"flag_{base}_flag",
+    ]
+    # also try toggling suffix for original
+    if trig.endswith("_flag"):
+        variants.append(trig[:-5])
+    else:
+        variants.append(trig + "_flag")
+
+    seen=set()
+    for v in variants:
+        if v and v not in seen:
+            candidates.append(v); seen.add(v)
+
+    for v in candidates:
+        if v in cols:
+            return v
+
+    # case-tolerant exact token match
+    cols_l = {c.lower(): c for c in cols if isinstance(c, str)}
+    if trig.lower() in cols_l:
+        return cols_l[trig.lower()]
+    for v in candidates:
+        if v.lower() in cols_l:
+            return cols_l[v.lower()]
+    return None
