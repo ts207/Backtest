@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import json
 import os
@@ -902,10 +903,19 @@ def _load_naive_entry_validation(run_id: str) -> Dict[Tuple[str, str], bool]:
     return out
 
 
-def _trim_blueprints_with_walkforward_evidence(blueprints: List[Blueprint], run_id: str) -> Tuple[List[Blueprint], Dict[str, object]]:
-    metrics_by_strategy, _evidence_hash = _load_walkforward_strategy_metrics(run_id=run_id)
+def _annotate_blueprints_with_walkforward_evidence(
+    blueprints: List[Blueprint],
+    run_id: str,
+    evidence_hash: str,
+) -> Tuple[List[Blueprint], Dict[str, object]]:
+    """Annotate blueprints with WF status. All blueprints returned; underperformers flagged in lineage."""
+    metrics_by_strategy, _ = _load_walkforward_strategy_metrics(run_id=run_id)
     if not metrics_by_strategy or not blueprints:
-        return blueprints, {
+        annotated = [
+            dataclasses.replace(bp, lineage=dataclasses.replace(bp.lineage, wf_status="pass", wf_evidence_hash=evidence_hash))
+            for bp in blueprints
+        ]
+        return annotated, {
             "wf_evidence_used": False,
             "trim_split": "validation",
             "trimmed_zero_trade": 0,
@@ -934,27 +944,30 @@ def _trim_blueprints_with_walkforward_evidence(blueprints: List[Blueprint], run_
         elif stressed < 0.0:
             negative_rows.append((stressed, bp_id))
 
-    drop_ids: set[str] = set(zero_trade_ids)
+    trim_ids: set[str] = set(zero_trade_ids)
     negative_rows = sorted(negative_rows, key=lambda row: (row[0], row[1]))
-    drop_ids.update(bp_id for _, bp_id in negative_rows[:TRIM_WF_WORST_K])
-    if not drop_ids:
-        return blueprints, {
-            "wf_evidence_used": True,
-            "trim_split": "validation",
-            "trimmed_zero_trade": 0,
-            "trimmed_worst_negative": 0,
-            "wf_trimmed_all": False,
-            "dropped_blueprint_ids": [],
-        }
+    worst_negative_ids: set[str] = {bp_id for _, bp_id in negative_rows[:TRIM_WF_WORST_K]}
+    trim_ids.update(worst_negative_ids)
 
-    trimmed = [bp for bp in blueprints if bp.id not in drop_ids]
-    return trimmed, {
+    annotated: List[Blueprint] = []
+    for bp in blueprints:
+        if bp.id in zero_trade_ids:
+            wf_status = "trimmed_zero_trade"
+        elif bp.id in worst_negative_ids:
+            wf_status = "trimmed_worst_negative"
+        else:
+            wf_status = "pass"
+        new_lineage = dataclasses.replace(bp.lineage, wf_status=wf_status, wf_evidence_hash=evidence_hash)
+        annotated.append(dataclasses.replace(bp, lineage=new_lineage))
+
+    trimmed_count = sum(1 for bp in annotated if bp.lineage.wf_status.startswith("trimmed"))
+    return annotated, {
         "wf_evidence_used": True,
         "trim_split": "validation",
-        "trimmed_zero_trade": int(sum(1 for bp_id in drop_ids if bp_id in zero_trade_ids)),
-        "trimmed_worst_negative": int(sum(1 for bp_id in drop_ids if bp_id not in zero_trade_ids)),
-        "wf_trimmed_all": bool(len(trimmed) == 0 and len(drop_ids) > 0),
-        "dropped_blueprint_ids": sorted(drop_ids),
+        "trimmed_zero_trade": int(sum(1 for bp_id in trim_ids if bp_id in zero_trade_ids)),
+        "trimmed_worst_negative": int(sum(1 for bp_id in trim_ids if bp_id in worst_negative_ids)),
+        "wf_trimmed_all": bool(trimmed_count == len(annotated) and trimmed_count > 0),
+        "dropped_blueprint_ids": sorted(trim_ids),
     }
 
 
@@ -1243,15 +1256,30 @@ def main() -> int:
                 "No blueprints were produced from promoted evidence. "
                 "Use --allow_fallback_blueprints 1 only for explicit non-production fallback."
             )
-        blueprints, trim_stats = _trim_blueprints_with_walkforward_evidence(blueprints=blueprints, run_id=args.run_id)
-        if not blueprints:
-            if bool(trim_stats.get("wf_trimmed_all", False)):
-                raise ValueError("Walkforward trimming removed all blueprints; strict mode fails closed.")
-            raise ValueError("No blueprints remained after compile filters.")
+
+        # Load WF evidence hash (used for annotation)
+        _, wf_evidence_hash = _load_walkforward_strategy_metrics(run_id=args.run_id)
+
+        # Dedupe first, then annotate with WF status
         blueprints, duplicate_stats = _dedupe_blueprints_by_behavior(blueprints)
         blueprints = sorted(blueprints, key=lambda b: (b.event_type, b.candidate_id, b.id))
         if not blueprints:
             raise ValueError("No blueprints remained after behavior-level deduplication.")
+
+        blueprints, trim_stats = _annotate_blueprints_with_walkforward_evidence(
+            blueprints=blueprints,
+            run_id=args.run_id,
+            evidence_hash=wf_evidence_hash,
+        )
+        active_blueprints = [bp for bp in blueprints if not bp.lineage.wf_status.startswith("trimmed")]
+        if not active_blueprints:
+            if bool(trim_stats.get("wf_trimmed_all", False)):
+                # Write all-trimmed blueprints for audit before failing
+                out_jsonl = out_dir / "blueprints.jsonl"
+                lines = [json.dumps(bp.to_dict(), sort_keys=True) for bp in blueprints]
+                out_jsonl.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+                raise ValueError("Walkforward trimming flagged all blueprints; strict mode fails closed.")
+            raise ValueError("No blueprints remained after compile filters.")
 
         out_jsonl = out_dir / "blueprints.jsonl"
         lines = [json.dumps(bp.to_dict(), sort_keys=True) for bp in blueprints]

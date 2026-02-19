@@ -363,10 +363,11 @@ def test_compiler_trims_zero_trade_blueprint_from_walkforward(monkeypatch, tmp_p
     assert compile_strategy_blueprints.main() == 0
 
     out_path = tmp_path / "reports" / "strategy_blueprints" / run_id / "blueprints.jsonl"
-    rows = [json.loads(line) for line in out_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    ids = {row["candidate_id"] for row in rows}
-    assert "all__delay_8" not in ids
-    assert "all__delay_30" in ids
+    all_rows = [json.loads(line) for line in out_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    trimmed = [r for r in all_rows if r["lineage"]["wf_status"].startswith("trimmed")]
+    active = [r for r in all_rows if r["lineage"]["wf_status"] == "pass"]
+    assert any(r["candidate_id"] == "all__delay_8" for r in trimmed)
+    assert any(r["candidate_id"] == "all__delay_30" for r in active)
 
 
 def test_compiler_rejects_negative_after_cost_expectancy_under_strict_defaults(monkeypatch, tmp_path: Path) -> None:
@@ -532,10 +533,11 @@ def test_compiler_walkforward_trim_uses_validation_split_only(monkeypatch, tmp_p
     )
     assert compile_strategy_blueprints.main() == 0
     out_path = tmp_path / "reports" / "strategy_blueprints" / run_id / "blueprints.jsonl"
-    rows = [json.loads(line) for line in out_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    ids = {row["candidate_id"] for row in rows}
-    assert "c1" not in ids
-    assert "c2" in ids
+    all_rows = [json.loads(line) for line in out_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    c1_row = next(r for r in all_rows if r["candidate_id"] == "c1")
+    c2_row = next(r for r in all_rows if r["candidate_id"] == "c2")
+    assert c1_row["lineage"]["wf_status"] == "trimmed_worst_negative"
+    assert c2_row["lineage"]["wf_status"] == "pass"
 
 
 def test_compile_blueprint_lineage_source_path_is_run_scoped() -> None:
@@ -1053,6 +1055,10 @@ def test_compiler_walkforward_trim_all_fails_closed(monkeypatch, tmp_path: Path)
         + ALLOW_NAIVE_ENTRY_FAIL_ARGS,
     )
     assert compile_strategy_blueprints.main() == 1
+    out_path = tmp_path / "reports" / "strategy_blueprints" / run_id / "blueprints.jsonl"
+    if out_path.exists():
+        all_rows = [json.loads(line) for line in out_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        assert all(r["lineage"]["wf_status"].startswith("trimmed") for r in all_rows)
 
 
 def test_compiler_requires_naive_entry_validation_by_default(monkeypatch, tmp_path: Path) -> None:
