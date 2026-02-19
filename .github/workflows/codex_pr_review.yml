@@ -27,7 +27,7 @@ jobs:
           fetch-depth: 1
 
       - name: Run Codex review
-        uses: openai/codex-action@main
+        uses: openai/codex-action@dbe3d52c04f09b8b5712c97eae07e413dff25442 # pinned 2026-02-19
         with:
           openai_api_key: ${{ secrets.OPENAI_API_KEY }}
           prompt: ".github/codex/prompts/pr-review.md"
