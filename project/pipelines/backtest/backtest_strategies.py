@@ -702,6 +702,8 @@ def main() -> int:
     parser.add_argument("--fees_bps", type=float, default=None)
     parser.add_argument("--slippage_bps", type=float, default=None)
     parser.add_argument("--cost_bps", type=float, default=None)
+    parser.add_argument("--fail_on_zero_trigger_coverage", type=int, default=0)
+    parser.add_argument("--write_trigger_coverage", type=int, default=1)
     parser.add_argument("--strategies", default=None)
     parser.add_argument("--blueprints_path", default=None)
     parser.add_argument("--blueprints_top_k", type=int, default=10)
@@ -797,7 +799,8 @@ def main() -> int:
                 blueprint_ids.append(bp.id)
             params["strategies"] = list(strategies)
 
-        trades_dir = DATA_ROOT / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id
+        execution_family = 'dsl' if blueprint_mode else _execution_family_for_strategies(strategies)
+        trades_dir = DATA_ROOT / 'lake' / 'trades' / 'backtests' / str(execution_family) / run_id
         trades_dir.mkdir(parents=True, exist_ok=True)
 
         if not args.force and (trades_dir / "metrics.json").exists():
@@ -828,6 +831,7 @@ def main() -> int:
                 overlays=overlays,
             )
             base_strategy_params["execution_model"] = dict(resolved_costs.execution_model)
+            base_strategy_params["fail_on_zero_trigger_coverage"] = int(args.fail_on_zero_trigger_coverage)
             for strategy_name in list(strategy_params_by_name.keys()):
                 strategy_params_by_name[strategy_name] = {
                     **strategy_params_by_name[strategy_name],
@@ -1027,3 +1031,50 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+    # --- COST DECOMPOSITION PATCH ---
+    if "dynamic_cost_bps" in frame.columns:
+        total_cost = (frame["turnover"] * frame["dynamic_cost_bps"] / 10000.0).sum()
+        dynamic_extra = max(0.0, total_cost - (fees + slippage + impact))
+        cost_decomposition["dynamic_slippage"] = dynamic_extra
+        cost_decomposition["net_alpha"] = gross - total_cost + funding - borrow
+    # --- END PATCH ---
+
+
+def _write_trigger_coverage(run_dir: Path, results: list, enabled: int = 1):
+    """Persist DSL trigger coverage diagnostics (best-effort).
+
+    Writes: <run_dir>/engine/trigger_coverage.json
+    Structure:
+      {
+        "by_strategy": { "<strategy_name>": { "blueprint_id": ..., "coverage": {...} }, ... },
+        "missing_any": [...],
+        "all_zero_strategies": [...]
+      }
+    """
+    if not int(enabled):
+        return
+    out = {"by_strategy": {}, "missing_any": [], "all_zero_strategies": []}
+    missing_set = set()
+    for r in results or []:
+        # StrategyResult compatibility: tolerate dict-like and object-like
+        name = getattr(r, "strategy_name", None) or (r.get("strategy_name") if isinstance(r, dict) else None) or "unknown"
+        diag = getattr(r, "diagnostics", None) or (r.get("diagnostics") if isinstance(r, dict) else {}) or {}
+        dsl = diag.get("dsl", {}) if isinstance(diag, dict) else {}
+        cov = dsl.get("trigger_coverage")
+        if cov is None:
+            continue
+        blueprint_id = None
+        meta = getattr(r, "strategy_metadata", None) or (r.get("strategy_metadata") if isinstance(r, dict) else {}) or {}
+        blueprint_id = meta.get("blueprint_id") if isinstance(meta, dict) else None
+        out["by_strategy"][name] = {"blueprint_id": blueprint_id, "coverage": cov}
+        for m in cov.get("missing", []) if isinstance(cov, dict) else []:
+            missing_set.add(str(m))
+        if isinstance(cov, dict) and cov.get("all_zero", False):
+            out["all_zero_strategies"].append(name)
+
+    out["missing_any"] = sorted(missing_set)
+    run_dir = Path(run_dir)
+    (run_dir / "engine").mkdir(parents=True, exist_ok=True)
+    (run_dir / "engine" / "trigger_coverage.json").write_text(json.dumps(out, indent=2, sort_keys=True))

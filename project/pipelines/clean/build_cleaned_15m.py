@@ -87,6 +87,14 @@ def _align_funding(bars: pd.DataFrame, funding: pd.DataFrame) -> Tuple[pd.DataFr
         right_on="funding_event_ts",
         direction="backward",
     )
+    # --- FUNDING SEMANTICS FIX PATCH ---
+    # Convert interval funding (e.g. 8h) into per-bar funding for 15m grid.
+    if "funding_rate_scaled" in merged.columns:
+        interval_hours = 8  # default; inferred funding interval
+        bars_per_event = int((interval_hours * 60) / 15)
+        merged["funding_rate_event_scaled"] = merged["funding_rate_scaled"]
+        merged["funding_rate_scaled"] = merged["funding_rate_scaled"] / bars_per_event
+    # --- END PATCH ---
     merged["funding_missing"] = merged["funding_rate_scaled"].isna()
     missing_pct = float(merged["funding_missing"].mean()) if len(merged) else 0.0
     return merged[["timestamp", "funding_event_ts", "funding_rate_scaled", "funding_missing"]], missing_pct

@@ -105,7 +105,7 @@ def test_backtest_main_writes_cost_decomposition_and_reproducibility(monkeypatch
     )
     assert bts.main() == 0
 
-    metrics_path = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id / "metrics.json"
+    metrics_path = tmp_path / "lake" / "trades" / "backtests" / "breakout" / run_id / "metrics.json"
     payload = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert "cost_decomposition" in payload
     assert "reproducibility" in payload
@@ -213,7 +213,7 @@ strategy_families:
 
     assert bts.main() == 0
 
-    metrics_path = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id / "metrics.json"
+    metrics_path = tmp_path / "lake" / "trades" / "backtests" / expected_family / run_id / "metrics.json"
     payload = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert payload["metadata"]["execution_family"] == expected_family
     assert payload["metadata"]["strategy_ids"] == [strategy_id]

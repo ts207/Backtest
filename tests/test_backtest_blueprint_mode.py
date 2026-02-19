@@ -162,7 +162,7 @@ def test_backtest_blueprint_mode_uses_file_order_top_k(monkeypatch, tmp_path: Pa
     assert captured["kwargs"]["strategies"] == ["dsl_interpreter_v1__bp_one"]
     strategy_params = captured["kwargs"]["params_by_strategy"]["dsl_interpreter_v1__bp_one"]
     assert strategy_params["position_scale"] == 1.0
-    metrics_path = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / run_id / "metrics.json"
+    metrics_path = tmp_path / "lake" / "trades" / "backtests" / "dsl" / run_id / "metrics.json"
     payload = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert payload["metadata"]["execution_mode"] == "blueprint"
     assert payload["metadata"]["blueprint_ids"] == ["bp_one"]

@@ -467,7 +467,6 @@ def _signal_list_mask(frame: pd.DataFrame, signal_names: List[str], blueprint: B
     out = pd.Series(True, index=frame.index, dtype=bool)
     for signal in signal_names:
         out = out & _signal_mask(signal=signal, frame=frame, blueprint=blueprint)
-    validate_feature_references(blueprint)
     return out.fillna(False)
 
 

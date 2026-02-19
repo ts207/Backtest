@@ -618,6 +618,37 @@ def _load_split_pnl_series_strict(
     return combined.sort_index() if not combined.empty else pd.Series(dtype=float)
 
 
+
+
+def _infer_backtest_family_dir(*, strategies: str, blueprints_path: str | None) -> str:
+    # Mirrors backtest_strategies.py output layout.
+    if blueprints_path:
+        return "dsl"
+    items = [s.strip() for s in str(strategies).split(",") if s.strip()]
+    families = set()
+    for strategy_id in items:
+        if strategy_id.startswith("dsl_interpreter_v1__"):
+            families.add("dsl")
+            continue
+        if strategy_id.startswith("vol_compression_v1"):
+            families.add("breakout")
+            continue
+        if strategy_id.startswith("funding_extreme_reversal_v1"):
+            families.add("carry")
+            continue
+        if strategy_id.startswith("cross_venue_desync_v1"):
+            families.add("spread")
+            continue
+        if strategy_id.startswith("liquidity_") or strategy_id.startswith("forced_flow_exhaustion_v1"):
+            families.add("mean_reversion")
+            continue
+        families.add("unknown")
+    if len(families) == 1:
+        return next(iter(families))
+    if not families:
+        return "unknown"
+    return "hybrid"
+
 def _build_backtest_cmd(
     *,
     split_run_id: str,
@@ -685,6 +716,7 @@ def main() -> int:
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
     parser.add_argument("--embargo_days", type=int, default=0)
+    parser.add_argument("--allow_zero_trigger_coverage", type=int, default=0)
     parser.add_argument("--train_frac", type=float, default=0.6)
     parser.add_argument("--validation_frac", type=float, default=0.2)
     parser.add_argument("--force", type=int, default=1)
@@ -797,7 +829,8 @@ def main() -> int:
             if rc != 0:
                 raise RuntimeError(f"Backtest failed for split={split.label} run_id={split_run_id}")
 
-            metrics_path = DATA_ROOT / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / split_run_id / "metrics.json"
+            family_dir = _infer_backtest_family_dir(strategies=str(args.strategies), blueprints_path=(str(args.blueprints_path) if args.blueprints_path else None))
+            metrics_path = DATA_ROOT / 'lake' / 'trades' / 'backtests' / family_dir / split_run_id / 'metrics.json'
             metrics = _load_split_metrics_strict(metrics_path, split_label=split.label, split_run_id=split_run_id)
             per_strategy_metrics, strategy_set_diag = _load_per_strategy_split_metrics_strict(
                 split_run_id=split_run_id,
@@ -975,3 +1008,12 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# --- Trigger coverage aggregation (best-effort) ---
+def _copy_trigger_coverage(data_root, split_run_id, wf_out_dir):
+    import shutil, os
+    src = Path(data_root) / "runs" / split_run_id / "engine" / "trigger_coverage.json"
+    if src.exists():
+        dst = Path(wf_out_dir) / f"trigger_coverage__{split_run_id}.json"
+        shutil.copyfile(src, dst)

@@ -47,7 +47,7 @@ def test_run_walkforward_writes_summary_with_per_split_and_test_metrics(monkeypa
         assert "--config" in cmd
         assert cmd.count("--config") == 2
         split_run_id = cmd[cmd.index("--run_id") + 1]
-        metrics_dir = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / split_run_id
+        metrics_dir = tmp_path / "lake" / "trades" / "backtests" / "breakout" / split_run_id
         metrics_dir.mkdir(parents=True, exist_ok=True)
         engine_dir = tmp_path / "runs" / split_run_id / "engine"
         engine_dir.mkdir(parents=True, exist_ok=True)
@@ -118,7 +118,7 @@ def test_walkforward_emits_standardized_metrics_payload(monkeypatch, tmp_path: P
 
     def _fake_split_backtest(cmd: list[str]) -> int:
         split_run_id = cmd[cmd.index("--run_id") + 1]
-        metrics_dir = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / split_run_id
+        metrics_dir = tmp_path / "lake" / "trades" / "backtests" / "breakout" / split_run_id
         metrics_dir.mkdir(parents=True, exist_ok=True)
         engine_dir = tmp_path / "runs" / split_run_id / "engine"
         engine_dir.mkdir(parents=True, exist_ok=True)
@@ -217,7 +217,7 @@ def test_run_walkforward_fails_when_metrics_key_missing(monkeypatch, tmp_path: P
 
     def _fake_split_backtest(cmd: list[str]) -> int:
         split_run_id = cmd[cmd.index("--run_id") + 1]
-        metrics_dir = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / split_run_id
+        metrics_dir = tmp_path / "lake" / "trades" / "backtests" / "breakout" / split_run_id
         metrics_dir.mkdir(parents=True, exist_ok=True)
         payload = {
             "total_trades": 10,
@@ -260,7 +260,7 @@ def test_run_walkforward_fails_when_no_strategy_returns(monkeypatch, tmp_path: P
 
     def _fake_split_backtest(cmd: list[str]) -> int:
         split_run_id = cmd[cmd.index("--run_id") + 1]
-        metrics_dir = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / split_run_id
+        metrics_dir = tmp_path / "lake" / "trades" / "backtests" / "breakout" / split_run_id
         metrics_dir.mkdir(parents=True, exist_ok=True)
         _write_metrics(metrics_dir, trades=30)
         (tmp_path / "runs" / split_run_id / "engine").mkdir(parents=True, exist_ok=True)
@@ -294,7 +294,7 @@ def test_run_walkforward_fails_when_declared_strategy_file_missing(monkeypatch, 
 
     def _fake_split_backtest(cmd: list[str]) -> int:
         split_run_id = cmd[cmd.index("--run_id") + 1]
-        metrics_dir = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / split_run_id
+        metrics_dir = tmp_path / "lake" / "trades" / "backtests" / "breakout" / split_run_id
         metrics_dir.mkdir(parents=True, exist_ok=True)
         _write_metrics(metrics_dir, trades=30)
         engine_dir = tmp_path / "runs" / split_run_id / "engine"
@@ -346,7 +346,7 @@ def test_walkforward_blueprint_mode_enforces_expected_strategy_ids(monkeypatch, 
 
     def _fake_split_backtest(cmd: list[str]) -> int:
         split_run_id = cmd[cmd.index("--run_id") + 1]
-        metrics_dir = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / split_run_id
+        metrics_dir = tmp_path / "lake" / "trades" / "backtests" / "breakout" / split_run_id
         metrics_dir.mkdir(parents=True, exist_ok=True)
         _write_metrics(metrics_dir, trades=30)
         engine_dir = tmp_path / "runs" / split_run_id / "engine"
@@ -387,7 +387,7 @@ def test_walkforward_allows_unexpected_when_override_enabled(monkeypatch, tmp_pa
 
     def _fake_split_backtest(cmd: list[str]) -> int:
         split_run_id = cmd[cmd.index("--run_id") + 1]
-        metrics_dir = tmp_path / "lake" / "trades" / "backtests" / "vol_compression_expansion_v1" / split_run_id
+        metrics_dir = tmp_path / "lake" / "trades" / "backtests" / "breakout" / split_run_id
         metrics_dir.mkdir(parents=True, exist_ok=True)
         _write_metrics(metrics_dir, trades=30)
         engine_dir = tmp_path / "runs" / split_run_id / "engine"
