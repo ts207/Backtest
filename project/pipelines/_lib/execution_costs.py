@@ -83,3 +83,5 @@ def _is_floatable(value: object) -> bool:
         return True
     except (TypeError, ValueError):
         return False
+
+

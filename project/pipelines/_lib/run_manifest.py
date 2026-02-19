@@ -128,3 +128,11 @@ def finalize_manifest(
         json.dump(manifest, f, indent=2, sort_keys=True)
     temp_path.replace(out_path)
     return manifest
+
+
+def enrich_manifest_with_env(manifest: dict):
+    import platform, sys, os
+    manifest["python_version"] = sys.version
+    manifest["platform"] = platform.platform()
+    manifest["env_snapshot"] = {k: os.environ.get(k) for k in ["BACKTEST_DATA_ROOT"]}
+    return manifest

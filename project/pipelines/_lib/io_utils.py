@@ -119,3 +119,8 @@ def write_parquet(df: pd.DataFrame, path: Path) -> Tuple[Path, str]:
     df.to_csv(temp_path, index=False)
     temp_path.replace(csv_path)
     return csv_path, "csv"
+
+
+def sorted_glob(paths):
+    import glob
+    return sorted(glob.glob(paths))

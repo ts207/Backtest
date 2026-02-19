@@ -12,6 +12,21 @@ import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
+
+
+def _detect_backtest_family_dir(*, run_id: str) -> str:
+    root = DATA_ROOT / "lake" / "trades" / "backtests"
+    if not root.exists():
+        return "vol_compression_expansion_v1"
+    candidates = sorted([p for p in root.iterdir() if p.is_dir() and (p / run_id / "metrics.json").exists()])
+    if not candidates:
+        return "vol_compression_expansion_v1"
+    # Prefer DSL if available, otherwise deterministic first.
+    for p in candidates:
+        if p.name == "dsl":
+            return p.name
+    return candidates[0].name
+
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.config import load_configs
@@ -246,7 +261,7 @@ def main() -> int:
 
     try:
         backtests_root = DATA_ROOT / "lake" / "trades" / "backtests"
-        preferred_strategy = "vol_compression_expansion_v1"
+        preferred_strategy = _detect_backtest_family_dir(run_id=run_id)
         trades_dir = backtests_root / preferred_strategy / run_id
         used_backtest_fallback = False
         if not (trades_dir / "metrics.json").exists():
@@ -345,7 +360,7 @@ def main() -> int:
         inputs.append({"path": str(metrics_path), "rows": 1, "start_ts": None, "end_ts": None})
         inputs.append({"path": str(trades_dir), "rows": len(trades), "start_ts": None, "end_ts": None})
 
-        report_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "vol_compression_expansion_v1" / run_id
+        report_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / 'reports' / preferred_strategy / run_id
         report_dir.mkdir(parents=True, exist_ok=True)
         report_path = report_dir / "summary.md"
 
@@ -668,3 +683,12 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def reconcile_blueprint_counts(summary, blueprints):
+    # Ensure funnel summary reflects actual compiled artifacts
+    summary["compiled_bases"] = len(blueprints)
+    summary["compiled_overlays"] = sum(
+        1 for b in blueprints if b.get("overlays")
+    )
+    return summary
