@@ -1073,6 +1073,21 @@ def main() -> int:
     checklist_decision: str | None = None
     auto_continue_reason = ""
     non_production_overrides: List[str] = []
+    # Record non-production bypass flags passed explicitly at startup so the
+    # manifest audit trail captures every gate override, not just those injected
+    # by auto-continue logic.
+    _STARTUP_NON_PROD_FLAGS: List[tuple] = [
+        ("strategy_blueprint_allow_fallback", "compile_strategy_blueprints", "--allow_fallback_blueprints"),
+        ("strategy_blueprint_allow_naive_entry_fail", "compile_strategy_blueprints", "--allow_naive_entry_fail"),
+        ("strategy_blueprint_allow_non_executable_conditions", "compile_strategy_blueprints", "--allow_non_executable_conditions"),
+        ("strategy_builder_allow_non_promoted", "build_strategy_candidates", "--allow_non_promoted"),
+        ("walkforward_allow_unexpected_strategy_files", "run_walkforward", "--allow_unexpected_strategy_files"),
+        ("promotion_allow_fallback_evidence", "promote_blueprints", "--allow_fallback_evidence"),
+        ("report_allow_backtest_artifact_fallback", "make_report", "--allow_backtest_artifact_fallback"),
+    ]
+    for _attr, _stage_name, _cli_flag in _STARTUP_NON_PROD_FLAGS:
+        if bool(int(getattr(args, _attr, 0))):
+            non_production_overrides.append(f"{_stage_name}:{_cli_flag}=1")
     for idx, (stage, script, base_args) in enumerate(stages, start=1):
         print(f"[{idx}/{len(stages)}] Starting stage: {stage}")
         started = time.perf_counter()
@@ -1177,3 +1192,9 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def _assert_artifact_exists(path, stage):
+    import os
+    if not os.path.exists(path):
+        raise RuntimeError(f"Skip requested but artifact missing for stage: {stage} -> {path}")
