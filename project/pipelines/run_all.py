@@ -1048,6 +1048,7 @@ def main() -> int:
         "run_id": run_id,
         "started_at": _utc_now_iso(),
         "finished_at": None,
+        "ended_at": None,
         "status": "running",
         "symbols": parsed_symbols,
         "start": start,
@@ -1097,6 +1098,7 @@ def main() -> int:
         print(f"[{idx}/{len(stages)}] Finished stage: {stage} ({elapsed_sec:.1f}s)")
         if not ok:
             run_manifest["finished_at"] = _utc_now_iso()
+            run_manifest["ended_at"] = run_manifest["finished_at"]
             run_manifest["status"] = "failed"
             run_manifest["failed_stage"] = stage
             run_manifest["stage_timings_sec"] = {name: round(duration, 3) for name, duration in stage_timings}
@@ -1145,6 +1147,7 @@ def main() -> int:
                     ]
                     first_blocked = blocked_stage_names[0] if blocked_stage_names else "execution_stages"
                     run_manifest["finished_at"] = _utc_now_iso()
+                    run_manifest["ended_at"] = run_manifest["finished_at"]
                     run_manifest["status"] = "failed"
                     run_manifest["failed_stage"] = "checklist_gate"
                     run_manifest["execution_blocked_by_checklist"] = True
@@ -1179,6 +1182,7 @@ def main() -> int:
     print(f"Pipeline run completed: {run_id}")
     _print_artifact_summary(run_id)
     run_manifest["finished_at"] = _utc_now_iso()
+    run_manifest["ended_at"] = run_manifest["finished_at"]
     run_manifest["status"] = "success"
     run_manifest["stage_timings_sec"] = {name: round(duration, 3) for name, duration in stage_timings}
     run_manifest["checklist_decision"] = checklist_decision
