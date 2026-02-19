@@ -190,11 +190,18 @@ class LineageSpec:
     source_path: str
     compiler_version: str
     generated_at_utc: str
+    wf_evidence_hash: str = ""
+    wf_status: str = "pass"
+    events_count_used_for_gate: int = 0
+    min_events_threshold: int = 0
 
     def validate(self) -> None:
         _require_non_empty(self.source_path, "lineage.source_path")
         _require_non_empty(self.compiler_version, "lineage.compiler_version")
         _require_non_empty(self.generated_at_utc, "lineage.generated_at_utc")
+        valid_wf_statuses = {"pass", "trimmed_zero_trade", "trimmed_worst_negative", "pending"}
+        if self.wf_status not in valid_wf_statuses:
+            raise ValueError(f"lineage.wf_status must be one of {valid_wf_statuses}, got {self.wf_status!r}")
 
 
 @dataclass(frozen=True)
