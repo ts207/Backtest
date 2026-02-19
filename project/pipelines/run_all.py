@@ -82,7 +82,8 @@ def _load_checklist_decision(run_id: str) -> str | None:
         return None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as e:
+        print(f"[warn] failed to load checklist JSON at {path}: {e}", file=sys.stderr)
         return None
     if not isinstance(payload, dict):
         return None
@@ -153,7 +154,8 @@ def _git_commit(project_root: Path) -> str:
             ["git", "-C", str(project_root), "rev-parse", "HEAD"],
             text=True,
         ).strip()
-    except Exception:
+    except Exception as e:
+        print(f"[warn] failed to resolve git commit hash: {e}", file=sys.stderr)
         return "unknown"
 
 
@@ -166,7 +168,8 @@ def _config_digest(config_paths: List[str]) -> str:
         if path.exists():
             try:
                 payload = path.read_text(encoding="utf-8")
-            except Exception:
+            except Exception as e:
+                print(f"[warn] failed to read config file {path}: {e}", file=sys.stderr)
                 payload = ""
             chunks.append(f"{path}:{payload}")
         else:

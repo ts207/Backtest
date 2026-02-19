@@ -42,7 +42,8 @@ def allocate_position_scales(
     for key in ordered:
         idx = raw_positions_by_strategy[key].index
         aligned_index = idx if aligned_index is None else aligned_index.union(idx)
-    assert aligned_index is not None
+    if aligned_index is None:
+        raise ValueError("aligned_index must not be None")
 
     requested: Dict[str, pd.Series] = {}
     for key in ordered:
