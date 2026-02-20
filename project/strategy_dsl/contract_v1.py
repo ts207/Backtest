@@ -35,6 +35,12 @@ VOL_REGIME_CONDITION_MAP = {
     "vol_regime_high": 2,
 }
 
+CARRY_STATE_CONDITION_MAP = {
+    "carry_pos": 1,
+    "carry_neutral": 0,
+    "carry_neg": -1,
+}
+
 _NUMERIC_CONDITION_PATTERN = re.compile(
     r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(>=|<=|==|>|<)\s*(-?\d+(?:\.\d+)?)\s*$"
 )
@@ -87,7 +93,10 @@ def normalize_entry_condition(
     raw = str(condition if condition is not None else "all")
     lowered = raw.strip().lower()
 
-    if lowered in {"", "all"}:
+    if lowered in {"", "all"} or lowered.startswith("all__"):
+        # "all__" prefix allows discovered buckets (e.g., all__severity_bucket_top_10pct) 
+        # to pass through the compiler. For now, they result in no executable nodes
+        # unless explicitly mapped.
         return "all", [], None
 
     if lowered in SESSION_CONDITION_MAP:
@@ -111,6 +120,14 @@ def normalize_entry_condition(
         return (
             lowered,
             [ConditionNodeSpec(feature="vol_regime_code", operator="==", value=code)],
+            None,
+        )
+
+    if lowered in CARRY_STATE_CONDITION_MAP:
+        code = float(CARRY_STATE_CONDITION_MAP[lowered])
+        return (
+            lowered,
+            [ConditionNodeSpec(feature="carry_state_code", operator="==", value=code)],
             None,
         )
 
