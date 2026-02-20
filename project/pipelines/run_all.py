@@ -379,9 +379,20 @@ def main() -> int:
 
     args = parser.parse_args()
     
+    # B1: Unconditional ban — fallback blueprints bypass BH-FDR and can never appear in evaluation.
+    if args.strategy_blueprint_allow_fallback:
+        print(
+            "EVALUATION GUARD [INV_NO_FALLBACK_IN_MEASUREMENT]: "
+            "--strategy_blueprint_allow_fallback=1 is unconditionally banned. "
+            "Fallback blueprints bypass BH-FDR and cannot appear in evaluation artifacts. "
+            "Remediation: set spec/gates.yaml gate_v1_fallback.promotion_eligible_regardless_of_fdr: false.",
+            file=sys.stderr,
+        )
+        return 1
+
     # Mode-based validation
     if args.mode in {"production", "certification"}:
-        if args.strategy_blueprint_allow_fallback or args.strategy_blueprint_allow_naive_entry_fail or args.strategy_builder_allow_non_promoted:
+        if args.strategy_blueprint_allow_naive_entry_fail or args.strategy_builder_allow_non_promoted:
              print(f"Error: Fallback/override flags are strictly forbidden in {args.mode} mode.", file=sys.stderr)
              return 1
         if args.strategy_blueprint_ignore_checklist or args.strategy_builder_ignore_checklist:

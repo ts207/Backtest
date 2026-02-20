@@ -1,0 +1,153 @@
+concept_id: C_EVALUATION_MODE
+name: Evaluation Mode
+definition: >
+  A boolean gate that controls whether claim-level lift and OOS artifacts
+  may be produced. When evaluation_mode is True, all required invariants
+  defined in the active hypothesis spec have passed and claim artifacts are
+  permitted. When any invariant fails, evaluation_mode is False and only
+  exploratory (non-claim) artifacts may be written. This creates a hard
+  separation between "diagnostics we can always produce" and "outputs that
+  constitute a hypothesis test result."
+
+  The core principle: it is illegal to produce lift/OOS claim artifacts
+  while operating in an invalid statistical state. The system cannot
+  "patch forever" while still emitting numbers that look like test results.
+
+semantics:
+  evaluation_mode_true:
+    meaning: "All invariants verified. Claim artifacts may be produced."
+    permitted_artifacts: [lift_claim_report, oos_claim_report, exploratory_*]
+
+  evaluation_mode_false:
+    meaning: "One or more invariants failed. Claim artifacts are blocked."
+    permitted_artifacts: [exploratory_* only]
+    claim_artifacts: blocked
+    note: >
+      Blocking is not silent. evaluation_guard.py raises EvaluationModeViolation
+      listing every failed invariant with its remediation steps.
+
+artifact_classes:
+  claim_artifacts:
+    suffix_pattern: "_claim_report"
+    examples:
+      - data/reports/ablation/{run_id}/lift_claim_report.parquet
+      - data/reports/walkforward/{run_id}/oos_claim_report.json
+    used_for: go/no-go decisions on the 60-day run hypothesis
+    gated_by: evaluation_mode
+
+  exploratory_artifacts:
+    suffix_pattern: "_summary | _report (without _claim_report)"
+    examples:
+      - data/reports/ablation/{run_id}/lift_summary.csv
+      - data/reports/ablation/{run_id}/ablation_report.parquet
+    used_for: diagnostic monitoring only — not hypothesis decisions
+    always_produced: true
+
+invariant_sources:
+  primary: spec/hypotheses/lift_state_conditioned_v1.yaml
+  secondary:
+    - spec/gates.yaml
+    - spec/multiplicity/families.yaml
+  note: >
+    The active hypothesis spec owns the canonical list of required_invariants.
+    C_EVALUATION_MODE defines the enforcement mechanism;
+    the hypothesis spec defines what must be true.
+
+required_invariants:
+  # Summary list — authoritative definitions live in the hypothesis spec.
+  - id: INV_NO_FALLBACK_IN_MEASUREMENT
+    summary: "All blueprints in OOS set have promotion_track == standard"
+  - id: INV_BH_APPLIED_TO_LIFT
+    summary: "Ablation report contains lift_q_value column (BH-corrected within group)"
+  - id: INV_SYMBOL_STRATIFIED_FAMILY
+    summary: "Phase2 family_id is prefixed by symbol (per-symbol FDR)"
+  - id: INV_EMBARGO_NONZERO
+    summary: "Walk-forward embargo_days >= 1"
+  - id: INV_HYPOTHESIS_REGISTERED
+    summary: "Active hypothesis spec exists at spec/hypotheses/lift_state_conditioned_v1.yaml"
+  - id: INV_COST_DIGEST_UNIFORM
+    summary: "All included groups share the same cost_config_digest"
+
+enforcement:
+  module: project/pipelines/_lib/evaluation_guard.py
+  entry_point: check_evaluation_mode(...)
+  return_type: EvaluationModeResult
+  raises_on_blocked: EvaluationModeViolation
+
+  called_from:
+    - module: eval/ablation.py
+      call_site: before writing lift_claim_report.parquet
+      invariants_checked: [INV_NO_FALLBACK_IN_MEASUREMENT, INV_BH_APPLIED_TO_LIFT,
+                           INV_SYMBOL_STRATIFIED_FAMILY, INV_HYPOTHESIS_REGISTERED,
+                           INV_COST_DIGEST_UNIFORM]
+
+    - module: eval/run_walkforward.py
+      call_site: before writing oos_claim_report.json
+      invariants_checked: [INV_NO_FALLBACK_IN_MEASUREMENT, INV_SYMBOL_STRATIFIED_FAMILY,
+                           INV_EMBARGO_NONZERO, INV_HYPOTHESIS_REGISTERED,
+                           INV_COST_DIGEST_UNIFORM]
+
+  failure_behavior:
+    mode: raise
+    exception: EvaluationModeViolation
+    message_includes: [failed_invariant_id, failure_reason, remediation_steps]
+    also: writes evaluation_mode_result to run_manifest before raising
+
+run_manifest_fields:
+  evaluation_mode:
+    type: bool
+    meaning: "True iff all required_invariants passed"
+  evaluation_mode_checked_at:
+    type: ISO8601 timestamp
+  evaluation_mode_invariant_results:
+    type: list
+    schema:
+      - id: str
+      - passed: bool
+      - failure_reason: str | null
+      - remediation: str | null
+
+metrics:
+  - id: invariants_passed_count
+    name: Invariants Passed Count
+    formula: "sum(inv.passed for inv in required_invariants)"
+  - id: evaluation_mode_active
+    name: Evaluation Mode Active
+    formula: "all(inv.passed for inv in required_invariants)"
+    type: bool
+
+tests:
+  - id: T_EMODE_01
+    objective: Blocks claim artifacts when any invariant fails
+    criteria: >
+      If any required_invariant fails, evaluation_guard raises EvaluationModeViolation.
+      ablation.py must not write lift_claim_report.parquet.
+      run_walkforward.py must not write oos_claim_report.json.
+
+  - id: T_EMODE_02
+    objective: Exploratory artifacts are always produced regardless of evaluation_mode
+    criteria: >
+      lift_summary.csv and ablation_report.parquet are written even when
+      evaluation_mode is False.
+
+  - id: T_EMODE_03
+    objective: evaluation_mode result is recorded in run manifest
+    criteria: >
+      run_manifest["evaluation_mode"] is present and reflects the actual
+      invariant check result for every run that calls check_evaluation_mode.
+
+  - id: T_EMODE_04
+    objective: Invariant failures are actionable
+    criteria: >
+      EvaluationModeViolation message for each failed invariant includes
+      the invariant id, why it failed, and the remediation string from the spec.
+
+artifacts:
+  - type: code
+    path: project/pipelines/_lib/evaluation_guard.py
+  - type: spec
+    path: spec/hypotheses/lift_state_conditioned_v1.yaml
+  - type: manifest_field
+    path: data/runs/<run_id>/run_manifest.json
+
+dependencies: [C_MULTIPLICITY_CONTROL, C_VALIDATION, C_PROVENANCE_REPLAY]
