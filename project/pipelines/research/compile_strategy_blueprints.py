@@ -12,6 +12,7 @@ from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
+import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
@@ -76,6 +77,14 @@ PHASE1_EVENT_FILES: Dict[str, Tuple[str, str]] = {
     "funding_extreme_reversal_window": ("funding_extreme_reversal_window", "funding_extreme_reversal_window_events.csv"),
     "range_compression_breakout_window": ("range_compression_breakout_window", "range_compression_breakout_window_events.csv"),
 }
+
+
+def _load_gates_spec() -> Dict[str, Any]:
+    path = PROJECT_ROOT.parent / "spec" / "gates.yaml"
+    if not path.exists():
+        return {}
+    with open(path, "r") as f:
+        return yaml.safe_load(f)
 
 
 def _safe_float(value: object, default: float = 0.0) -> float:
@@ -535,6 +544,24 @@ def _rank_key(row: Dict[str, object]) -> Tuple[float, float, float, float, str]:
     )
 
 
+def _passes_fallback_gate(row: Dict[str, object], gates: Dict[str, Any]) -> bool:
+    if not gates:
+        return False
+    min_t = _safe_float(gates.get("min_t_stat"), 2.5)
+    min_expectancy = _safe_float(gates.get("min_after_cost_expectancy_bps"), 1.0)
+    min_samples = _safe_int(gates.get("min_sample_size"), 100)
+    
+    # Map from Phase 2 columns
+    t_stat = _safe_float(row.get("t_stat"), _safe_float(row.get("expectancy", 0) / (row.get("p_value", 1) + 1e-9))) # Proxy if missing
+    after_cost = _safe_float(row.get("after_cost_expectancy_per_trade"), 0.0) * 10000.0 # to bps
+    samples = _safe_int(row.get("n_events", row.get("sample_size", 0)), 0)
+    
+    if t_stat < min_t: return False
+    if after_cost < min_expectancy: return False
+    if samples < min_samples: return False
+    return True
+
+
 def _choose_event_rows(
     run_id: str,
     event_type: str,
@@ -546,12 +573,16 @@ def _choose_event_rows(
     min_events: int,
     naive_validation: Dict[Tuple[str, str], bool] = None,
     allow_naive_entry_fail: bool = False,
+    mode: str = "discovery",
 ) -> Tuple[List[Dict[str, object]], Dict[str, object], pd.DataFrame]:
     phase2_lookup: Dict[str, Dict[str, object]] = {}
     if not phase2_df.empty:
         for idx, row in enumerate(phase2_df.to_dict(orient="records")):
             cid = _candidate_id(row, idx)
             phase2_lookup[cid] = dict(row)
+
+    full_gates = _load_gates_spec()
+    gates = full_gates.get("gate_v1_fallback", {})
 
     def _enrich(row: Dict[str, object], idx: int, status_default: str) -> Dict[str, object]:
         cid = str(row.get("candidate_id", "")).strip() or _candidate_id(row, idx)
@@ -570,6 +601,10 @@ def _choose_event_rows(
 
     enriched_edge_rows = [_enrich(row, idx, str(row.get("status", "DRAFT"))) for idx, row in enumerate(edge_rows)]
     
+    # If no edge rows but phase2_df exists, use phase2_df as primary source
+    if not enriched_edge_rows and not phase2_df.empty:
+        enriched_edge_rows = [_enrich(row, idx, "DRAFT") for idx, row in enumerate(phase2_df.to_dict(orient="records"))]
+    
     # Pre-filter for eligibility
     eligible_rows = []
     ineligible_rows = [] # Track for logging
@@ -578,8 +613,22 @@ def _choose_event_rows(
         is_eligible = True
         reason = ""
         
+        # Mode-based filtering
+        is_disc = _as_bool(row.get("rejected", False)) or _as_bool(row.get("is_discovery", False))
+        is_fall = _passes_fallback_gate(row, gates)
+        
+        if mode == "discovery" and not is_disc:
+            is_eligible = False
+            reason = "not_discovery"
+        elif mode == "fallback" and not is_fall:
+            is_eligible = False
+            reason = "fallback_gate_fail"
+        elif mode == "both" and not (is_disc or is_fall):
+            is_eligible = False
+            reason = "neither_disc_nor_fallback"
+
         # Naive Entry Gate
-        if not allow_naive_entry_fail and naive_validation is not None:
+        if is_eligible and not allow_naive_entry_fail and naive_validation is not None:
             cid = str(row.get("candidate_id", "")).strip()
             if not naive_validation.get((event_type, cid), False):
                 is_eligible = False
@@ -621,6 +670,7 @@ def _choose_event_rows(
     rejected_quality_floor_count = 0
     
     promoted = [row for row in eligible_rows if str(row.get("status", "")).upper() == "PROMOTED"]
+    print(f"DEBUG: promoted={len(promoted)}")
     if promoted:
         promoted_sorted = sorted(promoted, key=_rank_key)
         promoted_quality = [row for row in promoted_sorted if _passes_quality_floor(row, strict_cost_fields=strict_cost_fields, min_events=min_events)]
@@ -661,7 +711,8 @@ def _choose_event_rows(
             )
             return [], diagnostics, pd.DataFrame(selection_data)
 
-        non_promoted_rows = [row for row in enriched_edge_rows if str(row.get("status", "")).upper() != "PROMOTED"]
+        non_promoted_rows = [row for row in eligible_rows if str(row.get("status", "")).upper() != "PROMOTED"]
+        print(f"DEBUG: non_promoted_rows={len(non_promoted_rows)}")
         if non_promoted_rows:
             non_promoted_sorted = sorted(non_promoted_rows, key=_rank_key)
             non_promoted_quality = [row for row in non_promoted_sorted if _passes_quality_floor(row, strict_cost_fields=strict_cost_fields, min_events=min_events)]
@@ -710,8 +761,8 @@ def _choose_event_rows(
         )
         return [], diagnostics, pd.DataFrame(selection_data)
 
-    if enriched_edge_rows:
-        edge_sorted = sorted(enriched_edge_rows, key=_rank_key)
+    if eligible_rows:
+        edge_sorted = sorted(eligible_rows, key=_rank_key)
         edge_quality = [row for row in edge_sorted if _passes_quality_floor(row, strict_cost_fields=strict_cost_fields, min_events=min_events)]
         rejected_quality_floor_count += max(0, len(edge_sorted) - len(edge_quality))
         
@@ -731,46 +782,6 @@ def _choose_event_rows(
                     "selected_count": int(len(selected)),
                     "rejected_quality_floor_count": int(rejected_quality_floor_count),
                     "reason": "fallback_edge_quality",
-                    "used_fallback": True,
-                }
-            )
-            return selected, diagnostics, pd.DataFrame(selection_data)
-
-    if not phase2_df.empty:
-        fallback_df = phase2_df.copy()
-        for col in ("robustness_score", "profit_density_score"):
-            if col not in fallback_df.columns:
-                fallback_df[col] = 0.0
-        if "candidate_id" not in fallback_df.columns:
-            fallback_df["candidate_id"] = [
-                _candidate_id(row, idx) for idx, row in enumerate(fallback_df.to_dict(orient="records"))
-            ]
-        ordered_rows = fallback_df.sort_values(
-            by=["robustness_score", "profit_density_score", "candidate_id"],
-            ascending=[False, False, True],
-        ).to_dict(orient="records")
-        parsed_rows: List[Dict[str, object]] = []
-        for idx, row in enumerate(ordered_rows):
-            parsed_rows.append(_enrich(row, idx, "DRAFT"))
-        phase2_quality = [row for row in parsed_rows if _passes_quality_floor(row, strict_cost_fields=strict_cost_fields, min_events=min_events)]
-        rejected_quality_floor_count += max(0, len(parsed_rows) - len(phase2_quality))
-        
-        for c in parsed_rows:
-            if c not in phase2_quality:
-                 selection_data.append({"candidate_id": c.get("candidate_id"), "event_type": event_type, "rank": 0, "selected": False, "reason": "quality_floor_fail_phase2", "status": "DRAFT", "robustness_score": c.get("robustness_score"), "n_events": c.get("n_events")})
-
-        if phase2_quality:
-            selected = phase2_quality[:max_per_event]
-            for i, c in enumerate(selected):
-                selection_data.append({"candidate_id": c.get("candidate_id"), "event_type": event_type, "rank": i+1, "selected": True, "reason": "fallback_phase2_quality", "status": "DRAFT", "robustness_score": c.get("robustness_score"), "n_events": c.get("n_events")})
-            for i, c in enumerate(phase2_quality[max_per_event:]):
-                selection_data.append({"candidate_id": c.get("candidate_id"), "event_type": event_type, "rank": max_per_event+i+1, "selected": False, "reason": "excluded_by_cap", "status": "DRAFT", "robustness_score": c.get("robustness_score"), "n_events": c.get("n_events")})
-
-            diagnostics.update(
-                {
-                    "selected_count": int(len(selected)),
-                    "rejected_quality_floor_count": int(rejected_quality_floor_count),
-                    "reason": "fallback_phase2_quality",
                     "used_fallback": True,
                 }
             )
@@ -992,6 +1003,7 @@ def main() -> int:
     parser.add_argument("--candidates_file", default=None)
     parser.add_argument("--out_dir", default=None)
     parser.add_argument("--max_total_compiles_per_run", type=int, default=100)
+    parser.add_argument("--mode", choices=["discovery", "fallback", "both"], default="discovery", help="Promotion track selection mode")
     args = parser.parse_args()
 
     run_symbols = _parse_symbols(args.symbols)
@@ -1024,6 +1036,7 @@ def main() -> int:
         "allow_non_executable_conditions": int(args.allow_non_executable_conditions),
         "allow_naive_entry_fail": int(args.allow_naive_entry_fail),
         "min_events_floor": int(args.min_events_floor),
+        "mode": args.mode,
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
@@ -1113,7 +1126,6 @@ def main() -> int:
                     cid = _candidate_id(row, idx)
                     phase2_lookup[cid] = dict(row)
 
-            # Updated _choose_event_rows returns (selected, diagnostics, selection_df)
             selected, selection_diag, selection_df = _choose_event_rows(
                 run_id=args.run_id,
                 event_type=event_type,
@@ -1123,6 +1135,7 @@ def main() -> int:
                 allow_fallback_blueprints=bool(int(args.allow_fallback_blueprints)),
                 strict_cost_fields=bool(int(args.strict_cost_fields)),
                 min_events=int(args.min_events_floor),
+                mode=args.mode,
             )
             if not selection_df.empty:
                 selection_records.extend(selection_df.to_dict(orient="records"))
