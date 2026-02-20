@@ -87,7 +87,7 @@ EVENT_REGISTRY_SPECS: Dict[str, EventRegistrySpec] = {
     "funding_extreme_onset": EventRegistrySpec(
         event_type="funding_extreme_onset",
         reports_dir="funding_events",
-        events_file="funding_episode_events.csv", # Wait, script writes funding_episode_events.json?
+        events_file="funding_episode_events.csv",
         signal_column="funding_extreme_onset_event",
     ),
     "funding_persistence_window": EventRegistrySpec(
@@ -125,18 +125,6 @@ EVENT_REGISTRY_SPECS: Dict[str, EventRegistrySpec] = {
         reports_dir="liquidation_cascade",
         events_file="liquidation_cascade_events.csv",
         signal_column="liquidation_cascade_event",
-    ),
-    "LIQUIDATION_CASCADE": EventRegistrySpec(
-        event_type="LIQUIDATION_CASCADE",
-        reports_dir="LIQUIDATION_CASCADE",
-        events_file="LIQUIDATION_CASCADE_events.csv",
-        signal_column="liquidation_cascade_event",
-    ),
-    "liquidity_vacuum": EventRegistrySpec(
-        event_type="liquidity_vacuum",
-        reports_dir="liquidity_vacuum",
-        events_file="liquidity_vacuum_events.csv",
-        signal_column="liquidity_vacuum_event",
     ),
 }
 
