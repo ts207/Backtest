@@ -379,9 +379,20 @@ def main() -> int:
 
     args = parser.parse_args()
     
+    # B1: Unconditional ban — fallback blueprints bypass BH-FDR and can never appear in evaluation.
+    if args.strategy_blueprint_allow_fallback:
+        print(
+            "EVALUATION GUARD [INV_NO_FALLBACK_IN_MEASUREMENT]: "
+            "--strategy_blueprint_allow_fallback=1 is unconditionally banned. "
+            "Fallback blueprints bypass BH-FDR and cannot appear in evaluation artifacts. "
+            "Remediation: set spec/gates.yaml gate_v1_fallback.promotion_eligible_regardless_of_fdr: false.",
+            file=sys.stderr,
+        )
+        return 1
+
     # Mode-based validation
     if args.mode in {"production", "certification"}:
-        if args.strategy_blueprint_allow_fallback or args.strategy_blueprint_allow_naive_entry_fail or args.strategy_builder_allow_non_promoted:
+        if args.strategy_blueprint_allow_naive_entry_fail or args.strategy_builder_allow_non_promoted:
              print(f"Error: Fallback/override flags are strictly forbidden in {args.mode} mode.", file=sys.stderr)
              return 1
         if args.strategy_blueprint_ignore_checklist or args.strategy_builder_ignore_checklist:
@@ -1213,25 +1224,14 @@ def main() -> int:
             run_manifest["checklist_decision"] = checklist_decision
             if checklist_decision == "KEEP_RESEARCH" and execution_requested:
                 if bool(int(args.auto_continue_on_keep_research)):
-                    for pending_stage, _, pending_args in stages[idx:]:
-                        if pending_stage == "compile_strategy_blueprints":
-                            _upsert_cli_flag(pending_args, "--ignore_checklist", "1")
-                            _upsert_cli_flag(pending_args, "--allow_fallback_blueprints", "1")
-                            non_production_overrides.append(
-                                "compile_strategy_blueprints:--ignore_checklist=1,--allow_fallback_blueprints=1"
-                            )
-                        elif pending_stage == "build_strategy_candidates":
-                            _upsert_cli_flag(pending_args, "--ignore_checklist", "1")
-                            _upsert_cli_flag(pending_args, "--allow_non_promoted", "1")
-                            non_production_overrides.append(
-                                "build_strategy_candidates:--ignore_checklist=1,--allow_non_promoted=1"
-                            )
-                    auto_continue_applied = True
-                    auto_continue_reason = (
-                        "checklist decision KEEP_RESEARCH with execution requested; "
-                        "injected compiler/builder non-production overrides"
+                    # B1: Hard fail if auto_continue would inject fallback override.
+                    print(
+                        "EVALUATION GUARD [INV_NO_FALLBACK_IN_MEASUREMENT]: "
+                        "--auto_continue_on_keep_research is blocked from injecting --allow_fallback_blueprints. "
+                        "Fallback blueprints are strictly forbidden in this environment.",
+                        file=sys.stderr,
                     )
-                    print("Auto-continue activated for execution stages due to checklist KEEP_RESEARCH.")
+                    return 1
                 else:
                     blocked_stage_names = [
                         pending_stage

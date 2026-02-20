@@ -965,7 +965,16 @@ def _attach_event_market_features(
         features = read_parquet(list_parquet_files(features_src)) if features_src else pd.DataFrame()
         bars_src = choose_partition_dir(bars_candidates)
         bars = read_parquet(list_parquet_files(bars_src)) if bars_src else pd.DataFrame()
-        if features.empty and bars.empty:
+
+        # Load market_state context
+        context_candidates = [
+            run_scoped_lake_path(DATA_ROOT, run_id, "context", "market_state", symbol, timeframe),
+            DATA_ROOT / "lake" / "context" / "market_state" / symbol / timeframe,
+        ]
+        context_src = choose_partition_dir(context_candidates)
+        market_state = read_parquet(list_parquet_files(context_src)) if context_src else pd.DataFrame()
+
+        if features.empty and bars.empty and market_state.empty:
             continue
 
         if "timestamp" in features.columns:
@@ -997,6 +1006,12 @@ def _attach_event_market_features(
                         feat[col] = feat[col].where(feat[col].notna(), feat[bar_col])
                     feat = feat.drop(columns=[bar_col])
 
+        # Merge market_state
+        state_cols = ["timestamp", "vol_regime", "vol_regime_code", "carry_state", "carry_state_code"]
+        state_view = market_state[[col for col in state_cols if col in market_state.columns]].copy()
+        if not state_view.empty:
+            feat = feat.merge(state_view, on="timestamp", how="outer")
+
         feat["symbol"] = str(symbol).upper()
         feat["enter_ts"] = pd.to_datetime(feat["timestamp"], utc=True, errors="coerce")
         feat = feat.dropna(subset=["enter_ts"]).drop_duplicates(subset=["symbol", "enter_ts"], keep="last")
@@ -1010,6 +1025,10 @@ def _attach_event_market_features(
             "close",
             "high",
             "low",
+            "vol_regime",
+            "vol_regime_code",
+            "carry_state",
+            "carry_state_code",
         ]
         feat = feat[[col for col in keep_cols if col in feat.columns]]
         context_rows.append(feat)
@@ -1019,7 +1038,7 @@ def _attach_event_market_features(
 
     context = pd.concat(context_rows, ignore_index=True).drop_duplicates(subset=["symbol", "enter_ts"], keep="last")
     merged = out.merge(context, on=["symbol", "enter_ts"], how="left", suffixes=("", "_ctx"))
-    for col in ["spread_bps", "atr_14", "quote_volume", "funding_rate_scaled", "close", "high", "low"]:
+    for col in ["spread_bps", "atr_14", "quote_volume", "funding_rate_scaled", "close", "high", "low", "vol_regime", "vol_regime_code", "carry_state", "carry_state_code"]:
         ctx_col = f"{col}_ctx"
         if ctx_col in merged.columns:
             if col not in merged.columns:

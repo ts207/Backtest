@@ -128,6 +128,15 @@ def _expected_blueprint_strategy_ids(
     cli_symbols: List[str],
 ) -> List[str]:
     raw_rows = _load_blueprints_raw(blueprints_path)
+    # B1: Hard fail if ANY blueprint being processed has promotion_track=fallback_only.
+    for row in raw_rows:
+        lineage = row.get("lineage", {})
+        if isinstance(lineage, dict) and str(lineage.get("promotion_track", "standard")) == "fallback_only":
+            raise ValueError(
+                f"EVALUATION GUARD [INV_NO_FALLBACK_IN_MEASUREMENT]: "
+                f"Blueprint {row.get('id')} has promotion_track='fallback_only'. "
+                "Fallback blueprints bypass BH-FDR and cannot appear in evaluation artifacts."
+            )
     cli_set = {str(symbol).strip().upper() for symbol in cli_symbols if str(symbol).strip()}
     out: List[str] = []
     seen = set()

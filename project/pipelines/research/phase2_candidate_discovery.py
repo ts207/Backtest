@@ -397,6 +397,55 @@ def main():
     except pd.errors.EmptyDataError:
         events_df = pd.DataFrame()
 
+    # Load and merge market_state to support conditioning
+    if not events_df.empty and "symbol" in events_df.columns:
+        if "enter_ts" not in events_df.columns:
+             for col in ["timestamp", "anchor_ts", "event_ts"]:
+                 if col in events_df.columns:
+                     events_df["enter_ts"] = events_df[col]
+                     break
+        
+        if "enter_ts" in events_df.columns:
+            events_df["enter_ts"] = pd.to_datetime(events_df["enter_ts"], utc=True, errors="coerce")
+            
+            merged_dfs = []
+            unique_symbols = events_df["symbol"].dropna().unique()
+            
+            for sym in unique_symbols:
+                sym_events = events_df[events_df["symbol"] == sym].copy()
+                
+                ms_path = run_scoped_lake_path(DATA_ROOT, args.run_id, "context", "market_state", sym, "5m.parquet")
+                if not ms_path.exists():
+                     ms_path = DATA_ROOT / "lake" / "context" / "market_state" / sym / "5m.parquet"
+                
+                if ms_path.exists():
+                    try:
+                        ms_df = pd.read_parquet(ms_path)
+                        if "timestamp" in ms_df.columns:
+                            ms_df["timestamp"] = pd.to_datetime(ms_df["timestamp"], utc=True, errors="coerce")
+                            if "symbol" in ms_df.columns:
+                                ms_df = ms_df.drop(columns=["symbol"])
+                            
+                            sym_events = sym_events.sort_values("enter_ts")
+                            ms_df = ms_df.sort_values("timestamp")
+                            
+                            sym_events = pd.merge_asof(
+                                sym_events, 
+                                ms_df, 
+                                left_on="enter_ts", 
+                                right_on="timestamp", 
+                                by=None, 
+                                direction="backward",
+                                tolerance=pd.Timedelta("1h")
+                            )
+                    except Exception as e:
+                        log.warning(f"Failed to load/merge market_state for {sym}: {e}")
+                
+                merged_dfs.append(sym_events)
+            
+            if merged_dfs:
+                events_df = pd.concat(merged_dfs, ignore_index=True)
+
     # 3. Candidate Generation (Family = event_type × rule × horizon × condition)
     results = []
     
@@ -452,6 +501,7 @@ def main():
                         cond_label = f"{col}_{val}"
             
             if len(bucket_events) < min_samples:
+                # print(f"DEBUG: Insufficient samples for {cond_label}: {len(bucket_events)}")
                 continue
                 
             features_df = _load_features(args.run_id, symbol)

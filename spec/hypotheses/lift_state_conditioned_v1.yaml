@@ -1,0 +1,365 @@
+# ==============================================================================
+# PRE-REGISTERED HYPOTHESIS: STATE-CONDITIONED ENTRY LIFT
+# ==============================================================================
+# This file is the authoritative claim contract for the 60-day validation run.
+# It MUST be committed before any 60-day run artifact is produced.
+# Any change to this file after run_start_date invalidates the claim.
+# Enforcement: evaluation_guard.py checks this file is present and unmodified
+# before writing lift_claim_report.parquet or oos_claim_report.json.
+# ==============================================================================
+
+hypothesis_id: H_LIFT_STATE_CONDITIONED_V1
+version: 1
+registered_at: "2026-02-20"
+status: active   # active | expired | superseded | invalidated
+
+claim:
+  statement: >
+    State-conditioned entries — entries filtered at event time by vol_regime
+    and/or carry_state — deliver a statistically significant positive lift in
+    after-cost expectancy over unconditional entries for the same event type,
+    rule template, and horizon.
+  quantitative_target:
+    metric: lift_bps
+    threshold_bps: 10.0
+    direction: greater_than   # one-sided claim: conditioning must IMPROVE, not merely differ
+
+
+# ------------------------------------------------------------------------------
+# METRIC DEFINITION
+# Precise definition of what "lift" means — ambiguity here invalidates the run.
+# ------------------------------------------------------------------------------
+metric_definitions:
+  lift_bps:
+    formula: "after_cost_expectancy_conditioned_bps - after_cost_expectancy_baseline_bps"
+    measurement_basis: after_cost
+    # "after_cost" means: raw trade return minus fees, slippage, and funding carry.
+    # Gross returns (before cost) must NOT be used for the primary claim.
+    # cost_config_digest must match the digest locked in blueprints.jsonl lineage.
+
+    scope: per_group
+    # A "group" is the tuple: (symbol, event_type, rule_template, horizon).
+    # Lift is computed PER GROUP, not portfolio-wide, not pooled across symbols.
+    # This is the most conservative valid scope: each group is independent.
+
+    baseline_definition:
+      condition_key: "all"
+      meaning: >
+        The unconditional entry — all events of this type regardless of regime
+        state at entry time. The baseline must use the same cost config and the
+        same event detection parameters as the conditioned variants.
+      minimum_events: 500
+
+    conditioned_definition:
+      condition_key: any condition_key != "all"
+      examples: [vol_regime_high, vol_regime_low, carry_pos, carry_neg]
+      minimum_events: 200
+
+    exclusion_rules:
+      # Groups that fail these rules are labeled included_in_claim: false.
+      # They do NOT count as "no lift". They are "insufficient data".
+      - condition: "n_baseline_events < 500"
+        label: excluded_insufficient_baseline
+      - condition: "n_conditioned_events < 200"
+        label: excluded_insufficient_conditioned
+      - condition: "promotion_track != 'standard'"
+        label: excluded_fallback_track
+        # CRITICAL: fallback_only blueprints are ALWAYS excluded from the claim.
+        # The FDR guarantee only holds for standard-track discoveries.
+      - condition: "lift_q_value > 0.10"
+        label: excluded_not_significant
+
+
+# ------------------------------------------------------------------------------
+# STATISTICAL TEST DESIGN
+# ------------------------------------------------------------------------------
+statistical_test:
+  null_hypothesis: "lift_bps <= 0"
+  alternative_hypothesis: "lift_bps > 0"
+  sidedness: one_sided
+  # Rationale: we pre-specify the direction (conditioning improves entries).
+  # A two-sided test would require pre-registration of a "degradation" claim too.
+
+  alpha: 0.05
+  # This is the per-group alpha BEFORE multiplicity correction across groups.
+  # After BH correction within each group, the effective threshold is q <= 0.10.
+
+  multiplicity_correction:
+    method: benjamini_hochberg
+    applied_at: within_group
+    # BH is applied across all conditions tested WITHIN a single (symbol, event,
+    # rule, horizon) group. Each group is an independent family.
+    # Conditions across groups are NOT pooled into a single family.
+    family_unit: "conditions within one (symbol, event_type, rule_template, horizon) group"
+    max_q_value: 0.10
+    # More permissive than phase2 gate (q=0.05) because ablation is exploratory
+    # within an already-FDR-controlled discovery set.
+
+  confidence_interval:
+    method: block_bootstrap
+    block_unit: event_sequence
+    # A "block" is a contiguous sequence of events from the same symbol and
+    # calendar week. This preserves autocorrelation structure within weeks.
+    n_resamples: 1000
+    ci_level: 0.90
+    # 90% CI corresponds to a one-sided 5% test — consistent with alpha=0.05.
+    pass_criterion: "ci_low_90 > 0"
+    # The lower bound of the 90% CI must be strictly positive for the group
+    # to be counted as a confirmed lift.
+
+  test_statistic: "mean(conditioned_returns - costs) - mean(baseline_returns - costs)"
+  # Computed per event in the conditioned set, NOT on aggregated expectancy.
+  # This preserves the full distribution for bootstrapping.
+
+
+# ------------------------------------------------------------------------------
+# SCOPE
+# All dimensions of the measurement universe, locked at registration.
+# ------------------------------------------------------------------------------
+scope:
+  symbols: [BTCUSDT, ETHUSDT, SOLUSDT]
+  conditioning_features: [vol_regime, carry_state]
+  promotion_track_filter: standard
+  # ONLY blueprints with lineage.promotion_track == "standard" are included.
+  # This is equivalent to: only BH-FDR-controlled discoveries enter the claim.
+
+  event_types_included: all_active
+  # All 11 active event types as of registration date.
+  # Stubs (no_op.py analyzers) are excluded automatically by event count gate.
+
+  run_date_range:
+    start: "2026-02-21"   # day after registration
+    end: null             # set when 60-day run is launched
+    duration_days: 60
+    # The start date enforces the peeking policy: no data before registration
+    # can be used in the primary claim measurement.
+
+  cost_config_digest_required: true
+  # All included groups must share the same cost_config_digest.
+  # Mixed digests invalidate cost comparability across groups.
+
+
+# ------------------------------------------------------------------------------
+# PEEKING POLICY
+# Defines what is and is not permitted during the 60-day run.
+# ------------------------------------------------------------------------------
+peeking_policy:
+  policy: no_early_stopping
+  rationale: >
+    The 60-day window is fixed. The sample size was chosen to achieve
+    80% power to detect a 10 bps lift at alpha=0.05 assuming n=200 events
+    per conditioned group. Early stopping inflates the type-I error rate.
+
+  permitted_during_run:
+    - id: PEEK_DRAWDOWN
+      action: drawdown monitoring
+      consequence: triggers risk throttle overlay only — no hypothesis conclusion
+    - id: PEEK_DAILY_PNL
+      action: daily P&L monitoring
+      consequence: monitoring only — no conclusion drawn before day 60
+    - id: PEEK_EVENT_COUNT
+      action: check event counts per group
+      consequence: can flag groups likely to fail sample constraints — no lift conclusion
+
+  prohibited_during_run:
+    - id: PROHIBIT_EARLY_POSITIVE
+      action: stopping early after observing positive lift signal
+      consequence: invalidates claim — recorded as protocol violation in run_manifest
+    - id: PROHIBIT_FEATURE_CHANGE
+      action: adding or modifying conditioning features mid-run
+      consequence: invalidates claim for all affected groups
+    - id: PROHIBIT_EVENT_TYPE_CHANGE
+      action: adding new event types to the active list mid-run
+      consequence: invalidates claim — new types may only appear in a subsequent run
+    - id: PROHIBIT_COST_CHANGE
+      action: changing cost_config mid-run
+      consequence: invalidates cost_config_digest match — all groups excluded
+
+  interim_analysis_protocol:
+    allowed: false
+    exception: >
+      If an interim analysis is required due to extraordinary circumstances
+      (e.g., catastrophic drawdown > 20%), it must be logged with a pre-specified
+      O'Brien-Fleming alpha-spending function BEFORE any data is examined.
+      Contact: log entry in run_manifest["interim_analysis_log"].
+
+
+# ------------------------------------------------------------------------------
+# REQUIRED INVARIANTS
+# These are checked by evaluation_guard.py before any _claim_report artifact
+# is written. If any invariant fails, artifact production is blocked.
+# ------------------------------------------------------------------------------
+required_invariants:
+  - id: INV_NO_FALLBACK_IN_MEASUREMENT
+    description: >
+      All blueprints in the OOS measurement set must have
+      lineage.promotion_track == "standard". Fallback-only blueprints
+      bypassed BH-FDR and have uncontrolled false discovery rates.
+    check:
+      type: blueprints_jsonl_field
+      field: lineage.promotion_track
+      operator: all_equal
+      value: standard
+    remediation: >
+      Option A: Set gates.yaml:gate_v1_fallback.promotion_eligible_regardless_of_fdr: false
+      Option B: Filter blueprints_path to exclude fallback_only before backtest.
+    failure_blocks: [lift_claim_report, oos_claim_report]
+
+  - id: INV_BH_APPLIED_TO_LIFT
+    description: >
+      The ablation lift report must contain a lift_q_value column produced
+      by BH adjustment within each (symbol, event, rule, horizon) group.
+      Without this, the reported lift_bps values have uncontrolled type-I error.
+    check:
+      type: parquet_column_exists
+      path: "data/reports/ablation/{run_id}/ablation_report.parquet"
+      column: lift_q_value
+    remediation: "Apply _bh_adjust(p_values_per_group) in eval/ablation.py before writing output."
+    failure_blocks: [lift_claim_report]
+
+  - id: INV_SYMBOL_STRATIFIED_FAMILY
+    description: >
+      Phase 2 family_id must be prefixed with the symbol, ensuring BH-FDR
+      is applied independently per symbol. Cross-symbol pooling gives
+      heterogeneous power and uncontrolled per-symbol FDR.
+    check:
+      type: phase2_report_field
+      path: "data/reports/phase2/{run_id}"
+      field: family_id
+      pattern: "^(BTCUSDT|ETHUSDT|SOLUSDT)_"
+    remediation: >
+      In phase2_candidate_discovery.py lines 542 and 638, change:
+        family_id = f"{event_type}_{rule}_{horizon}_{cond_label}"
+      to:
+        family_id = f"{symbol}_{event_type}_{rule}_{horizon}_{cond_label}"
+    failure_blocks: [lift_claim_report, oos_claim_report]
+
+  - id: INV_EMBARGO_NONZERO
+    description: >
+      Walk-forward evaluation must use embargo_days >= 1. With embargo=0,
+      autocorrelation from persistent regime states bleeds across train/validation
+      boundaries and inflates OOS Sharpe.
+    check:
+      type: walkforward_config
+      field: embargo_days
+      operator: gte
+      value: 1
+    remediation: "Set --embargo_days default to 1 in eval/run_walkforward.py."
+    failure_blocks: [oos_claim_report]
+
+  - id: INV_HYPOTHESIS_REGISTERED
+    description: >
+      This spec file must exist with status == "active" before any claim
+      artifact is produced. Existence of the file at a committed git hash
+      prior to run_start_date is the registration record.
+    check:
+      type: spec_file_active
+      path: "spec/hypotheses/lift_state_conditioned_v1.yaml"
+      field: status
+      value: active
+    remediation: "This file must exist. Do not modify status after run_start_date."
+    failure_blocks: [lift_claim_report, oos_claim_report]
+
+  - id: INV_COST_DIGEST_UNIFORM
+    description: >
+      All included groups in the lift measurement must share the same
+      cost_config_digest. Mixed digests mean different cost assumptions
+      were used across groups, making lift comparisons invalid.
+    check:
+      type: blueprints_jsonl_field
+      field: lineage.cost_config_digest
+      operator: all_equal_within_run
+    remediation: "Re-run all discovery stages with the same --cost_bps and --fees_bps flags."
+    failure_blocks: [lift_claim_report, oos_claim_report]
+
+
+# ------------------------------------------------------------------------------
+# VERDICT CRITERIA
+# How to interpret the 60-day run results.
+# ------------------------------------------------------------------------------
+verdict:
+  pass_criteria:
+    # ALL of the following must be true to claim the hypothesis is supported:
+    - id: PASS_MEDIAN_LIFT
+      condition: "median(lift_bps, included_groups) >= 10.0"
+      note: Median (not mean) to be robust to outlier groups.
+    - id: PASS_POSITIVE_FRACTION
+      condition: "fraction(lift_bps > 0, included_groups) >= 0.60"
+      note: Majority of groups must show positive lift.
+    - id: PASS_CI_FRACTION
+      condition: "fraction(ci_low_90 > 0, included_groups) >= 0.50"
+      note: At least half of groups must have strictly positive CI lower bound.
+    - id: PASS_SIGNIFICANCE_FRACTION
+      condition: "fraction(lift_q_value <= 0.10, included_groups) >= 0.50"
+      note: At least half of included groups must pass BH-corrected significance.
+    - id: PASS_MIN_GROUPS
+      condition: "count(included_in_claim == true) >= 10"
+      note: Fewer than 10 qualifying groups means insufficient evidence.
+
+  fail_criteria:
+    # ANY of the following triggers automatic rejection:
+    - id: FAIL_LARGE_NEGATIVE
+      condition: "any(lift_bps < -5.0, included_groups)"
+      note: A large negative lift in any group is a strong counter-signal.
+    - id: FAIL_INSUFFICIENT_GROUPS
+      condition: "count(included_in_claim == true) < 10"
+    - id: FAIL_INVARIANT_VIOLATION
+      condition: "any(required_invariants.passed == false)"
+      note: Invariant failure means the measurement is invalid regardless of point estimates.
+
+  inconclusive:
+    condition: "pass_criteria NOT all met AND fail_criteria NOT triggered"
+    action: "Extend measurement window by 30 days with same protocol. Log as inconclusive_v1."
+
+
+# ------------------------------------------------------------------------------
+# ARTIFACT CONTRACT
+# What files are produced, by whom, and what gates them.
+# ------------------------------------------------------------------------------
+artifacts:
+  claim_artifacts:
+    # These are the go/no-go decision artifacts.
+    # They are BLOCKED unless evaluation_mode is True (all invariants pass).
+    - id: ARTIFACT_LIFT_CLAIM
+      path: "data/reports/ablation/{run_id}/lift_claim_report.parquet"
+      producer: eval/ablation.py
+      blocked_unless: evaluation_mode
+      schema_required:
+        - group_key
+        - condition
+        - baseline_expectancy_bps
+        - conditioned_expectancy_bps
+        - lift_bps
+        - lift_ci_low_90
+        - lift_ci_high_90
+        - lift_q_value
+        - n_baseline_events
+        - n_conditioned_events
+        - promotion_track
+        - passes_sample_constraint
+        - included_in_claim
+
+    - id: ARTIFACT_OOS_CLAIM
+      path: "data/reports/walkforward/{run_id}/oos_claim_report.json"
+      producer: eval/run_walkforward.py
+      blocked_unless: evaluation_mode
+      schema_required:
+        - run_id
+        - embargo_days
+        - evaluation_mode_result
+        - oos_sharpe_conditioned
+        - oos_sharpe_baseline
+        - sharpe_lift
+        - invariants_checked
+
+  exploratory_artifacts:
+    # These are always produced regardless of evaluation_mode.
+    # Used for diagnostics and monitoring — NOT for go/no-go decisions.
+    - id: ARTIFACT_LIFT_SUMMARY
+      path: "data/reports/ablation/{run_id}/lift_summary.csv"
+      producer: eval/ablation.py
+      always_produced: true
+    - id: ARTIFACT_ABLATION_REPORT
+      path: "data/reports/ablation/{run_id}/ablation_report.parquet"
+      producer: eval/ablation.py
+      always_produced: true

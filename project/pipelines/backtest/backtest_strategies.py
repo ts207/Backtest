@@ -232,6 +232,7 @@ def _blueprint_from_dict(raw: Dict[str, object]) -> Blueprint:
             source_path=str(lineage.get("source_path", "")),
             compiler_version=str(lineage.get("compiler_version", "")),
             generated_at_utc=str(lineage.get("generated_at_utc", "")),
+            promotion_track=str(lineage.get("promotion_track", "standard")),
         ),
     )
     bp.validate()
@@ -292,6 +293,14 @@ def _filter_blueprints(
     top_k: int,
     cli_symbols: List[str],
 ) -> List[Blueprint]:
+    # B1: Hard fail if ANY blueprint in the selection set has promotion_track=fallback_only.
+    for bp in blueprints:
+        if bp.lineage.promotion_track == "fallback_only":
+            raise ValueError(
+                f"EVALUATION GUARD [INV_NO_FALLBACK_IN_MEASUREMENT]: "
+                f"Blueprint {bp.id} has promotion_track='fallback_only'. "
+                "Fallback blueprints bypass BH-FDR and cannot appear in evaluation artifacts."
+            )
     filtered = blueprints
     if event_type != "all":
         filtered = [bp for bp in filtered if bp.event_type == event_type]

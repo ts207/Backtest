@@ -20,4 +20,4 @@ gate_v1_fallback:
   min_after_cost_expectancy_bps: 1.0
   min_sample_size: 100
   min_stability_score: 0.7
-  promotion_eligible_regardless_of_fdr: true
+  promotion_eligible_regardless_of_fdr: false
