@@ -199,7 +199,7 @@ def main() -> int:
     symbols: List[str] = [s.strip() for s in args.symbols.split(",") if s.strip()]
     timeframe: str = str(args.timeframe or "5m")
     quantiles: List[float] = _parse_quantiles(str(args.shock_quantiles))
-    min_events_cfg: int = int(args.min_events) if args.min_events_calibration is None else int(args.min_events_calibration)
+    min_events_cfg: int = 50 if args.min_events_calibration is None else int(args.min_events_calibration)
 
     cfg_profiles: Dict[str, LiquidityVacuumConfig] = {
         "strict": DEFAULT_LV_CONFIG,

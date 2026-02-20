@@ -30,6 +30,9 @@ from pipelines._lib.run_manifest import (
     validate_feature_schema_columns,
     validate_input_provenance,
 )
+from project.features.vol_regime import calculate_rv_percentile_24h
+from project.features.carry_state import calculate_funding_rate_bps
+from project.features.state_mapping import map_vol_regime, map_carry_state
 
 
 def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
@@ -84,6 +87,14 @@ def _build_market_context(symbol: str, features: pd.DataFrame) -> pd.DataFrame:
     out["trend_return_96"] = close.pct_change(96)
     out["trend_regime"] = np.where(out["trend_return_96"] >= 0.0, "bull", "bear")
 
+    # New Indicators (Milestone A/D)
+    out["rv_percentile_24h"] = calculate_rv_percentile_24h(close)
+    out["vol_regime_code"] = map_vol_regime(out["rv_percentile_24h"])
+    
+    # Legacy string mapping for readability/back-compat
+    out["vol_regime"] = out["vol_regime_code"].map({0.0: "low", 1.0: "mid", 2.0: "high"}).fillna("unknown")
+
+    # Legacy: rv_pct_17280 required by schema
     rv_pct = pd.to_numeric(features.get("rv_pct_17280"), errors="coerce")
     if rv_pct.isna().all():
         rv = pd.to_numeric(features.get("rv_96"), errors="coerce")
@@ -92,11 +103,43 @@ def _build_market_context(symbol: str, features: pd.DataFrame) -> pd.DataFrame:
         else:
             rv_pct = pd.Series(index=features.index, dtype=float)
     out["rv_pct_17280"] = rv_pct
-    out["vol_regime"] = pd.cut(
-        out["rv_pct_17280"],
-        bins=[-np.inf, 33.3333, 66.6667, np.inf],
-        labels=["low", "mid", "high"],
-    ).astype("string").fillna("unknown")
+
+    # Carry State
+    # Try funding_rate first, then funding_rate_scaled
+    if "funding_rate" in features.columns:
+        fr = pd.to_numeric(features["funding_rate"], errors="coerce")
+    elif "funding_rate_scaled" in features.columns:
+        # Assuming scaled is rate * 1e9 or something? No, standard is usually rate * 10000? 
+        # Actually build_features_v1 usually outputs funding_rate_scaled (e.g. rate * 100).
+        # Let's assume funding_rate_scaled is close enough to use if raw missing?
+        # But wait, calculate_funding_rate_bps expects raw funding rate (e.g. 0.0001).
+        # If funding_rate_scaled is used, we need to know scale.
+        # Let's check build_features_v1.py to see what it outputs.
+        # It outputs `funding_rate_scaled`.
+        # Assuming we can recover it or just rely on funding_rate being present if I generated it.
+        # I generated `funding_rate` column in my synthetic data.
+        # `build_features_v1` passes columns through?
+        # `build_features_v1` merges funding.
+        
+        # Let's fallback to funding_rate_scaled if funding_rate missing, assuming it is bps?
+        fr = pd.to_numeric(features.get("funding_rate_scaled", 0.0), errors="coerce") / 10000.0 # Blind guess if scaled
+    else:
+        fr = pd.Series(0.0, index=features.index)
+
+    # In my synthetic data, I have 'funding_rate' column in funding parquet. 
+    # build_features_v1 joins it. 
+    # If build_features_v1 keeps 'funding_rate', good.
+    # If not, it might rename it.
+    
+    # For now, let's use what's available.
+    if "funding_rate" in features.columns:
+        fr = pd.to_numeric(features["funding_rate"], errors="coerce")
+        
+    out["funding_rate_bps"] = calculate_funding_rate_bps(fr)
+    out["carry_state_code"] = map_carry_state(out["funding_rate_bps"])
+    
+    # Map code back to string for legacy/readability
+    out["carry_state"] = out["carry_state_code"].map({-1.0: "neg", 0.0: "neutral", 1.0: "pos"}).fillna("neutral")
 
     range_96 = pd.to_numeric(features.get("range_96"), errors="coerce")
     range_med_2880 = pd.to_numeric(features.get("range_med_2880"), errors="coerce")

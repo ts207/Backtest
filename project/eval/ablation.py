@@ -12,28 +12,14 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from pipelines._lib.io_utils import ensure_dir
 
 def calculate_lift(group_df: pd.DataFrame) -> pd.DataFrame:
-    # Identify unconditional baseline (condition == "all" or empty or "unconditional")
-    # Our candidate plan generator produces "conditioning": {} which results in a candidate_id without conditioning suffix?
-    # Actually, in Phase 2, we might not have explicit "condition" column parsed out yet if it's just in the candidate_id string.
-    # Let's assume we can parse it from candidate_id or it's passed through.
-    
-    # In generate_candidate_plan: plan_row_id = f"{claim_id}:{event_type}:{rule}:{horizon}:{c_key}_{c_val}:{symbol}"
-    # Phase 2 results come from executing this plan.
-    
-    # We need to parse candidate_id to extract conditioning.
-    # Format: claim:event:rule:horizon:condition:symbol
+    # Identify unconditional baseline (condition == "all")
     
     rows = []
     for _, row in group_df.iterrows():
-        cid = str(row["candidate_id"])
-        parts = cid.split(":")
-        if len(parts) >= 6:
-            condition = parts[4]
-        else:
-            condition = "unknown"
+        condition = str(row.get("condition_key", "unknown")).strip()
         
         rows.append({
-            "candidate_id": cid,
+            "candidate_id": row["candidate_id"],
             "condition": condition,
             "expectancy": row.get("expectancy", 0.0),
             "n_events": row.get("n_events", 0)
@@ -95,24 +81,29 @@ def main():
         
     full_df = pd.concat(all_results)
     
-    # Parse family keys from candidate_id (claim:event:rule:horizon:condition:symbol)
-    # Group by (event, rule, horizon, symbol) to compare conditions within that scope
+    # Group by (event_type, rule_template, horizon, symbol) to compare conditions within that scope
     
     results = []
     
-    def parse_key(cid):
-        parts = str(cid).split(":")
-        if len(parts) >= 6:
-            # claim, event, rule, horizon, condition, symbol
-            return tuple([parts[1], parts[2], parts[3], parts[5]])
-        return None
+    # Ensure columns exist
+    required_cols = ["event_type", "rule_template", "horizon", "symbol", "conditioning", "expectancy", "n_events"]
+    if not all(col in full_df.columns for col in required_cols):
+        print(f"Missing required columns in Phase 2 results. Available: {full_df.columns.tolist()}")
+        return
 
-    full_df["group_key"] = full_df["candidate_id"].apply(parse_key)
+    # Create grouping key
+    full_df["group_key"] = list(zip(full_df["event_type"], full_df["rule_template"], full_df["horizon"], full_df["symbol"]))
     
     for key, group in full_df.groupby("group_key"):
-        if key is None: continue
+        # group is a DataFrame for one (event, rule, horizon, symbol)
+        # It contains multiple conditions (all, vol_regime_high, etc)
+        print(f"DEBUG: Processing group {key}. Conditions: {group['conditioning'].unique()}")
         
-        lift_df = calculate_lift(group)
+        # Prepare for calculate_lift
+        # calculate_lift expects "candidate_id", "condition_key", "expectancy", "n_events"
+        group_renamed = group.rename(columns={"conditioning": "condition_key"})
+        
+        lift_df = calculate_lift(group_renamed)
         if not lift_df.empty:
             lift_df["event_type"] = key[0]
             lift_df["rule"] = key[1]
