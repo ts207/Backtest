@@ -50,94 +50,108 @@ def main() -> int:
 
     try:
         backlog_path = PROJECT_ROOT.parent / args.backlog
+        print(f"Checking backlog at: {backlog_path}")
         if not backlog_path.exists():
             raise FileNotFoundError(f"Backlog not found: {backlog_path}")
         
         df = pd.read_csv(backlog_path)
+        print(f"Read {len(df)} rows from backlog")
         
         # 1. Deterministic Ordering
         # priority_score (lower is higher priority), tie-break with claim_id
+        print("Sorting backlog...")
         df = df.sort_values(by=["priority_score", "claim_id"]).reset_index(drop=True)
         
         # 2. Filter for operationalizable and unverified
+        print("Filtering backlog...")
         active_claims = df[(df['operationalizable'] == 'Y') & (df['status'] != 'verified')].copy()
+        print(f"Found {len(active_claims)} active claims")
         
         candidate_templates = []
         spec_tasks = []
         
-        for _, row in active_claims.iterrows():
-            claim_id = str(row['claim_id'])
-            c_type = str(row['candidate_type']).lower() # event or feature
-            statement = str(row['statement_summary'])
-            target_pattern = str(row['next_artifact'])
-            
-            if c_type == 'event':
-                event_type = _extract_event_type(statement)
-                if not event_type:
-                    continue
+        print("Iterating over active claims...")
+        for i, row in active_claims.iterrows():
+            try:
+                claim_id = str(row['claim_id'])
+                c_type = str(row['candidate_type']).lower() # event or feature
+                statement = str(row['statement_summary'])
+                target_pattern = str(row['next_artifact'])
+                # print(f"Processing claim: {claim_id}, type: {c_type}")
                 
-                target_path = target_pattern.replace("{event_type}", event_type)
-                spec_exists = (PROJECT_ROOT.parent / target_path).exists()
-                
-                if not spec_exists:
-                    spec_tasks.append({
-                        "claim_id": claim_id,
-                        "concept_id": row['concept_id'],
-                        "object_type": "event",
-                        "target_path": target_path,
-                        "priority_score": row['priority_score'],
-                        "statement": statement,
-                        "assets_filter": row['assets']
-                    })
-                
-                # Add template regardless of spec existence (Stage 2 will filter)
-                candidate_templates.append({
-                    "template_id": f"{claim_id}@{event_type}",
-                    "source_claim_id": claim_id,
-                    "concept_id": row['concept_id'],
-                    "object_type": "event",
-                    "event_type": event_type,
-                    "target_spec_path": target_path,
-                    "rule_templates": DEFAULT_RULE_TEMPLATES,
-                    "horizons": DEFAULT_HORIZONS,
-                    "conditioning": DEFAULT_CONDITIONING,
-                    "assets_filter": row['assets'],
-                    "min_events": 50,
-                    "label_type": "returns"
-                })
-
-            elif c_type == 'feature':
-                # Features like ROLL/VPIN
-                features_list = str(row['features']).split('|')
-                for feat in features_list:
-                    target_path = target_pattern.replace("{feature_name}", feat)
+                if c_type == 'event':
+                    event_type = _extract_event_type(statement)
+                    if not event_type:
+                        continue
+                    
+                    target_path = target_pattern.replace("{event_type}", event_type)
                     spec_exists = (PROJECT_ROOT.parent / target_path).exists()
                     
                     if not spec_exists:
                         spec_tasks.append({
                             "claim_id": claim_id,
                             "concept_id": row['concept_id'],
-                            "object_type": "feature",
+                            "object_type": "event",
                             "target_path": target_path,
                             "priority_score": row['priority_score'],
                             "statement": statement,
                             "assets_filter": row['assets']
                         })
                     
+                    # Add template regardless of spec existence (Stage 2 will filter)
                     candidate_templates.append({
-                        "template_id": f"{claim_id}@{feat}",
+                        "template_id": f"{claim_id}@{event_type}",
                         "source_claim_id": claim_id,
                         "concept_id": row['concept_id'],
-                        "object_type": "feature",
-                        "feature_name": feat,
+                        "object_type": "event",
+                        "event_type": event_type,
                         "target_spec_path": target_path,
-                        "rule_templates": ["feature_conditioned_prediction"],
+                        "rule_templates": DEFAULT_RULE_TEMPLATES,
                         "horizons": DEFAULT_HORIZONS,
-                        "conditioning": {"vol_regime": ["high"]},
+                        "conditioning": DEFAULT_CONDITIONING,
                         "assets_filter": row['assets'],
                         "min_events": 50,
-                        "label_type": "RV" if "vol" in statement.lower() or "rv" in statement.lower() else "returns"
+                        "label_type": "returns"
                     })
+
+                elif c_type == 'feature':
+                    # Features like ROLL/VPIN
+                    features_val = str(row.get('features', ''))
+                    if not features_val or features_val == 'nan':
+                        continue
+                    features_list = features_val.split('|')
+                    for feat in features_list:
+                        target_path = target_pattern.replace("{feature_name}", feat)
+                        spec_exists = (PROJECT_ROOT.parent / target_path).exists()
+                        
+                        if not spec_exists:
+                            spec_tasks.append({
+                                "claim_id": claim_id,
+                                "concept_id": row['concept_id'],
+                                "object_type": "feature",
+                                "target_path": target_path,
+                                "priority_score": row['priority_score'],
+                                "statement": statement,
+                                "assets_filter": row['assets']
+                            })
+                        
+                        candidate_templates.append({
+                            "template_id": f"{claim_id}@{feat}",
+                            "source_claim_id": claim_id,
+                            "concept_id": row['concept_id'],
+                            "object_type": "feature",
+                            "feature_name": feat,
+                            "target_spec_path": target_path,
+                            "rule_templates": ["feature_conditioned_prediction"],
+                            "horizons": DEFAULT_HORIZONS,
+                            "conditioning": {"vol_regime": ["high"]},
+                            "assets_filter": row['assets'],
+                            "min_events": 50,
+                            "label_type": "RV" if "vol" in statement.lower() or "rv" in statement.lower() else "returns"
+                        })
+            except Exception as e:
+                print(f"Error processing claim {row.get('claim_id')}: {e}")
+                continue
 
         # Save Global Artifacts
         templates_df = pd.DataFrame(candidate_templates)
@@ -162,6 +176,8 @@ def main() -> int:
         return 0
 
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         finalize_manifest(manifest, "failed", error=str(exc))
         return 1
 

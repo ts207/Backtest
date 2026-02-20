@@ -84,6 +84,18 @@ EVENT_REGISTRY_SPECS: Dict[str, EventRegistrySpec] = {
         events_file="range_compression_breakout_window_events.csv",
         signal_column="range_compression_breakout_event",
     ),
+    "LIQUIDATION_CASCADE": EventRegistrySpec(
+        event_type="LIQUIDATION_CASCADE",
+        reports_dir="LIQUIDATION_CASCADE",
+        events_file="LIQUIDATION_CASCADE_events.csv",
+        signal_column="liquidation_cascade_event",
+    ),
+    "liquidity_vacuum": EventRegistrySpec(
+        event_type="liquidity_vacuum",
+        reports_dir="liquidity_vacuum",
+        events_file="liquidity_vacuum_events.csv",
+        signal_column="liquidity_vacuum_event",
+    ),
 }
 
 SIGNAL_TO_EVENT_TYPE: Dict[str, str] = {
