@@ -44,3 +44,6 @@ project/**/__pycache__/
 data/lake/cleaned/
 data/lake/features/
 data/lake/runs/
+
+.gemini/
+gha-creds-*.json
