@@ -1,0 +1,11 @@
+state_families:
+  - name: vol_regime
+    allowed_values: [low, mid, high]
+    canonical_metrics: [rv_percentile_24h]
+    thresholds: [0.33, 0.66]
+    update_cadence: 1h
+  - name: carry_state
+    allowed_values: [funding_pos, neutral, funding_neg]
+    canonical_metrics: [funding_rate_bps]
+    thresholds: [0.1, -0.1]
+    update_cadence: 8h

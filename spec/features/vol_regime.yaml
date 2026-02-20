@@ -1,0 +1,13 @@
+feature_family: vol_regime
+version: 1.0.0
+base_timeframe: 1m
+inputs:
+  - dataset: perp_ohlcv_1m
+    columns: [close]
+features:
+  - name: rv_percentile_24h
+    description: Realized volatility percentile over 24h vs lookback
+    formula: rank(std(log_ret, 60)) / lookback
+    params: {window: 60, lookback: 1440}
+provenance:
+  pit_constraint: "asof <= t0"

@@ -1,0 +1,7 @@
+state_name: vol_regime
+source_feature: rv_percentile_24h
+mapping:
+  low: [0.0, 0.33]
+  mid: [0.33, 0.66]
+  high: [0.66, 1.0]
+acceptance_test_id: VOL_REG_STABILITY_V1

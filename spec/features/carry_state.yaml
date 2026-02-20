@@ -1,0 +1,12 @@
+feature_family: carry_state
+version: 1.0.0
+base_timeframe: 1m
+inputs:
+  - dataset: perp_ohlcv_1m
+    columns: [funding_rate]
+features:
+  - name: funding_rate_bps
+    description: Last observed funding rate in basis points
+    formula: funding_rate * 10000
+provenance:
+  pit_constraint: "asof <= t0"

@@ -1,0 +1,7 @@
+state_name: carry_state
+source_feature: funding_rate_bps
+mapping:
+  funding_neg: [-inf, -0.1]
+  neutral: [-0.1, 0.1]
+  funding_pos: [0.1, inf]
+acceptance_test_id: CARRY_STABILITY_V1
