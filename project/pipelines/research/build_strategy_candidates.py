@@ -975,7 +975,7 @@ def main() -> int:
                     status_series = edge_df["status"].astype(str).str.upper()
                 else:
                     status_series = pd.Series("", index=edge_df.index, dtype=str)
-                edge_df = edge_df[status_series == "PROMOTED"].copy()
+                edge_df = edge_df[status_series.isin(["PROMOTED", "PROMOTED_RESEARCH"])].copy()
             if "gate_oos_consistency_strict" in edge_df.columns:
                 edge_df = edge_df[_as_bool_series(edge_df["gate_oos_consistency_strict"])].copy()
             if "gate_bridge_tradable" in edge_df.columns:

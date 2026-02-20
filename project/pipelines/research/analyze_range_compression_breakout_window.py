@@ -31,7 +31,7 @@ def _find_first_col(df: pd.DataFrame, prefix: str) -> str | None:
     return None
 
 
-def _load_feature_frame(run_id: str, symbol: str, timeframe: str = "15m") -> pd.DataFrame:
+def _load_feature_frame(run_id: str, symbol: str, timeframe: str = "5m") -> pd.DataFrame:
     candidates = [
         run_scoped_lake_path(DATA_ROOT, run_id, "features", "perp", symbol, timeframe, "features_v1"),
         DATA_ROOT / "lake" / "features" / "perp" / symbol / timeframe / "features_v1",

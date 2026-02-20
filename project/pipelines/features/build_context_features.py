@@ -57,7 +57,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build read-only context features")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
-    parser.add_argument("--timeframe", default="15m")
+    parser.add_argument("--timeframe", default="5m")
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
     parser.add_argument("--out_dir", default=None)
@@ -169,7 +169,7 @@ def main() -> int:
                     "provenance": {
                         "vendor": "binance",
                         "exchange": "binance",
-                        "schema_version": "cleaned_bars_15m_v1",
+                        "schema_version": "cleaned_bars_5m_v1",
                         "schema_hash": schema_hash_from_columns(bars.columns.tolist()),
                         "extraction_start": bars["timestamp"].min().isoformat(),
                         "extraction_end": bars["timestamp"].max().isoformat(),
@@ -186,7 +186,7 @@ def main() -> int:
                             "provenance": {
                                 "vendor": "binance",
                                 "exchange": "binance",
-                                "schema_version": "funding_15m_v1",
+                                "schema_version": "funding_5m_v1",
                                 "schema_hash": schema_hash_from_columns(funding_non_null.columns.tolist()),
                                 "extraction_start": funding_non_null["timestamp"].min().isoformat(),
                                 "extraction_end": funding_non_null["timestamp"].max().isoformat(),

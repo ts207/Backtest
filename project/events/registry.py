@@ -84,6 +84,48 @@ EVENT_REGISTRY_SPECS: Dict[str, EventRegistrySpec] = {
         events_file="range_compression_breakout_window_events.csv",
         signal_column="range_compression_breakout_event",
     ),
+    "funding_extreme_onset": EventRegistrySpec(
+        event_type="funding_extreme_onset",
+        reports_dir="funding_events",
+        events_file="funding_episode_events.csv", # Wait, script writes funding_episode_events.json?
+        signal_column="funding_extreme_onset_event",
+    ),
+    "funding_persistence_window": EventRegistrySpec(
+        event_type="funding_persistence_window",
+        reports_dir="funding_events",
+        events_file="funding_episode_events.csv",
+        signal_column="funding_persistence_event",
+    ),
+    "funding_normalization": EventRegistrySpec(
+        event_type="funding_normalization",
+        reports_dir="funding_events",
+        events_file="funding_episode_events.csv",
+        signal_column="funding_normalization_event",
+    ),
+    "oi_spike_positive": EventRegistrySpec(
+        event_type="oi_spike_positive",
+        reports_dir="oi_shocks",
+        events_file="oi_shock_events.csv",
+        signal_column="oi_spike_pos_event",
+    ),
+    "oi_spike_negative": EventRegistrySpec(
+        event_type="oi_spike_negative",
+        reports_dir="oi_shocks",
+        events_file="oi_shock_events.csv",
+        signal_column="oi_spike_neg_event",
+    ),
+    "oi_flush": EventRegistrySpec(
+        event_type="oi_flush",
+        reports_dir="oi_shocks",
+        events_file="oi_shock_events.csv",
+        signal_column="oi_flush_event",
+    ),
+    "LIQUIDATION_CASCADE": EventRegistrySpec(
+        event_type="LIQUIDATION_CASCADE",
+        reports_dir="liquidation_cascade",
+        events_file="liquidation_cascade_events.csv",
+        signal_column="liquidation_cascade_event",
+    ),
     "LIQUIDATION_CASCADE": EventRegistrySpec(
         event_type="LIQUIDATION_CASCADE",
         reports_dir="LIQUIDATION_CASCADE",
@@ -273,7 +315,7 @@ def merge_registry_events(
     return _normalize_registry_events_frame(merged)
 
 
-def _load_symbol_timestamps(data_root: Path, run_id: str, symbol: str, timeframe: str = "15m") -> pd.Series:
+def _load_symbol_timestamps(data_root: Path, run_id: str, symbol: str, timeframe: str = "5m") -> pd.Series:
     candidates = [
         run_scoped_lake_path(data_root, run_id, "features", "perp", symbol, timeframe, "features_v1"),
         Path(data_root) / "lake" / "features" / "perp" / symbol / timeframe / "features_v1",
@@ -297,7 +339,7 @@ def build_event_flags(
     symbols: Sequence[str],
     data_root: Path,
     run_id: str,
-    timeframe: str = "15m",
+    timeframe: str = "5m",
 ) -> pd.DataFrame:
     symbols_clean = [str(s).strip().upper() for s in symbols if str(s).strip()]
     symbols_clean = list(dict.fromkeys(symbols_clean))

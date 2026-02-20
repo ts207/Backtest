@@ -9,6 +9,11 @@ gate_v1_phase2:
   min_after_cost_expectancy_bps: 0.1
   require_sign_stability: true
   min_sample_size: 50
+  # Quality floors controlling compile eligibility
+  # strict: required for discovery-track promotion; fallback: exploratory non-discovery compile
+  quality_floor_strict: 0.66
+  quality_floor_fallback: 0.66
+  min_events_fallback: 100
 
 gate_v1_fallback:
   min_t_stat: 2.5

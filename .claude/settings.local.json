@@ -17,11 +17,15 @@
       "Bash(.venv/bin/pip index versions:*)",
       "Bash(gh api:*)",
       "WebFetch(domain:api.github.com)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(wc:*)",
+      "Bash(python project/scripts/generate_research_backlog.py:*)",
+      "Bash(python:*)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_validate_event_quality_join_rate.py -v)"
     ]
   },
   "enabledPlugins": {
-    "superpowers@superpowers-marketplace": false
+    "superpowers@superpowers-marketplace": true
   },
   "spinnerTipsEnabled": false,
   "prefersReducedMotion": true

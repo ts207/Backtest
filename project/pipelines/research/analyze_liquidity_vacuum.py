@@ -67,7 +67,7 @@ from pipelines._lib.io_utils import (
 )
 
 
-def _load_bars(run_id: str, symbol: str, timeframe: str = "15m") -> pd.DataFrame:
+def _load_bars(run_id: str, symbol: str, timeframe: str = "5m") -> pd.DataFrame:
     """Load cleaned bar data for a symbol and run.
 
     This helper looks for cleaned OHLCV bars in the per‑run lake
@@ -84,7 +84,7 @@ def _load_bars(run_id: str, symbol: str, timeframe: str = "15m") -> pd.DataFrame
     symbol : str
         Trading symbol (e.g. ``BTCUSDT``).
     timeframe : str, optional
-        Bars timeframe (e.g. ``15m``).  Defaults to ``15m``.
+        Bars timeframe (e.g. ``5m``).  Defaults to ``5m``.
 
     Returns
     -------
@@ -155,7 +155,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Phase‑1 analyzer for liquidity vacuum events")
     parser.add_argument("--run_id", required=True, help="Run identifier")
     parser.add_argument("--symbols", required=True, help="Comma‑separated list of symbols")
-    parser.add_argument("--timeframe", default="15m", help="Bars timeframe (default: 15m)")
+    parser.add_argument("--timeframe", default="5m", help="Bars timeframe (default: 5m)")
     parser.add_argument(
         "--shock_quantiles",
         default="0.95,0.97,0.98,0.99,0.995",
@@ -197,7 +197,7 @@ def main() -> int:
 
     run_id: str = args.run_id
     symbols: List[str] = [s.strip() for s in args.symbols.split(",") if s.strip()]
-    timeframe: str = str(args.timeframe or "15m")
+    timeframe: str = str(args.timeframe or "5m")
     quantiles: List[float] = _parse_quantiles(str(args.shock_quantiles))
     min_events_cfg: int = int(args.min_events) if args.min_events_calibration is None else int(args.min_events_calibration)
 
@@ -261,6 +261,43 @@ def main() -> int:
         if events.empty:
             logging.info("No liquidity vacuum events detected for %s", sym)
             continue
+        
+        # Add severity buckets based on shock_return quantiles for this symbol
+        shock_returns = events["shock_return"].dropna()
+        if not shock_returns.empty:
+            q80 = shock_returns.quantile(0.8)
+            q90 = shock_returns.quantile(0.9)
+            q95 = shock_returns.quantile(0.95)
+            
+            def _severity(ret: float) -> str:
+                if ret >= q95: return "extreme_5pct"
+                if ret >= q90: return "top_10pct"
+                if ret >= q80: return "top_20pct"
+                return "base"
+            
+            events["severity_bucket"] = events["shock_return"].map(_severity)
+        else:
+            events["severity_bucket"] = "base"
+
+        # Add Vol Regime context from features if available
+        # We look for rv_pct_17280 in features to bucket into low/mid/high
+        # This requires loading features or calculating it here. 
+        # For Phase 1, we can calculate a simple proxy or load the feature lake.
+        bars["logret"] = np.log(bars["close"] / bars["close"].shift(1))
+        bars["rv_proxy"] = bars["logret"].rolling(96).std()
+        rv_quantiles = bars["rv_proxy"].quantile([0.33, 0.66]).to_dict()
+        
+        def _vol_regime(rv: float) -> str:
+            if pd.isna(rv): return "unknown"
+            if rv <= rv_quantiles.get(0.33, 0): return "low"
+            if rv <= rv_quantiles.get(0.66, 0): return "mid"
+            return "high"
+        
+        bars["vol_regime"] = bars["rv_proxy"].map(_vol_regime)
+        
+        # Join vol_regime to events based on enter_idx
+        events["vol_regime"] = events["enter_idx"].map(lambda idx: bars.iloc[idx]["vol_regime"] if idx < len(bars) else "unknown")
+
         events["symbol"] = sym
         all_events.append(events)
         summary_rows.append(

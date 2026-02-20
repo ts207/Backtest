@@ -194,6 +194,8 @@ class LineageSpec:
     wf_status: str = "pending"
     events_count_used_for_gate: int = 0
     min_events_threshold: int = 0
+    cost_config_digest: str = ""
+    promotion_track: str = "standard"  # "standard" (discovery-backed) | "fallback_only" (exploratory)
 
     def validate(self) -> None:
         _require_non_empty(self.source_path, "lineage.source_path")
@@ -204,6 +206,9 @@ class LineageSpec:
             raise ValueError(f"lineage.wf_status must be one of {valid_wf_statuses}, got {self.wf_status!r}")
         _require_non_negative(self.events_count_used_for_gate, "lineage.events_count_used_for_gate")
         _require_non_negative(self.min_events_threshold, "lineage.min_events_threshold")
+        valid_tracks = {"standard", "fallback_only"}
+        if self.promotion_track not in valid_tracks:
+            raise ValueError(f"lineage.promotion_track must be one of {valid_tracks}, got {self.promotion_track!r}")
 
 
 @dataclass(frozen=True)

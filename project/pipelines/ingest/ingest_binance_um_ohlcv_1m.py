@@ -129,7 +129,7 @@ def _partition_complete(path: Path, expected_rows: int) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Ingest Binance USD-M OHLCV 1m from archives")
+    parser = argparse.ArgumentParser(description="Ingest Binance USD-M OHLCV 5m from archives")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--start", required=True)
@@ -167,7 +167,7 @@ def main() -> int:
         "retry_backoff_sec": args.retry_backoff_sec,
         "force": int(args.force),
     }
-    manifest = start_manifest("ingest_binance_um_ohlcv_1m", run_id, params, inputs, outputs)
+    manifest = start_manifest("ingest_binance_um_ohlcv_5m", run_id, params, inputs, outputs)
 
     stats: Dict[str, object] = {"symbols": {}}
 
@@ -192,11 +192,11 @@ def main() -> int:
                 out_dir = (
                     out_root
                     / symbol
-                    / "ohlcv_1m"
+                    / "ohlcv_5m"
                     / f"year={month_start.year}"
                     / f"month={month_start.month:02d}"
                 )
-                out_path = out_dir / f"ohlcv_{symbol}_1m_{month_start.year}-{month_start.month:02d}.parquet"
+                out_path = out_dir / f"ohlcv_{symbol}_5m_{month_start.year}-{month_start.month:02d}.parquet"
 
                 if not args.force and _partition_complete(out_path, expected_rows):
                     partitions_skipped.append(str(out_path))
@@ -207,8 +207,8 @@ def main() -> int:
                     "monthly",
                     "klines",
                     symbol,
-                    "1m",
-                    f"{symbol}-1m-{month_start.year}-{month_start.month:02d}.zip",
+                    "5m",
+                    f"{symbol}-5m-{month_start.year}-{month_start.month:02d}.zip",
                 )
                 logging.info("Downloading monthly archive %s", monthly_url)
 
@@ -237,8 +237,8 @@ def main() -> int:
                                 "daily",
                                 "klines",
                                 symbol,
-                                "1m",
-                                f"{symbol}-1m-{day.year}-{day.month:02d}-{day.day:02d}.zip",
+                                "5m",
+                                f"{symbol}-5m-{day.year}-{day.month:02d}-{day.day:02d}.zip",
                             )
                             logging.info("Downloading daily archive %s", daily_url)
                             daily_zip = Path(tmpdir) / f"ohlcv_{day:%Y%m%d}.zip"

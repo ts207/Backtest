@@ -1,90 +1,57 @@
-# Backtest
+# Backtest: Quantitative Trading Research Platform
 
-Crypto event-driven strategy discovery and backtesting system (Binance perp/spot, 15m candles).
-
-## Environment
-
+## 🛠️ Environment & Setup
 ```bash
-export BACKTEST_DATA_ROOT=/path/to/data   # Required - all artifacts live here
+export BACKTEST_DATA_ROOT=$(pwd)/data
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt
+pip install -r requirements.txt -r requirements-dev.txt
 ```
 
-## Commands
+## 🚀 Key Commands
+| Command | Description |
+|:---|:---|
+| `make run` | Ingest + Clean + Build Features |
+| `make discover-edges` | Full Discovery: Phase 1 + Phase 2 + Export |
+| `make test-fast` | Fast tests (excludes `@pytest.mark.slow`) |
+| `make check-hygiene` | Enforce repo hygiene and spec linter |
 
-```bash
-# Tests
-pytest -q                          # All tests
-pytest -q -m "not slow"            # Fast profile (CI-equivalent)
-pytest tests/test_sanity.py -v     # Single file
+## 🧠 Session Updates (Feb 19, 2026)
 
-# Pipeline (via Makefile)
-make run                           # ingest + clean + features + context
-make discover-edges                # Full discovery (phase1 + phase2 + export)
-make discover-edges-from-raw       # Discovery using existing raw data (skip ingest)
-make test                          # Full test suite
-make test-fast                     # Fast tests only
-make check-hygiene                 # Enforce repo hygiene constraints
+### 1. Atlas-Driven Discovery Loop
+Implemented a two-stage deterministic planning workflow:
+- **Global Planner**: `generate_candidate_templates.py` translates Atlas backlog into reusable templates and identifies missing specs (`spec_tasks.parquet`).
+- **Per-Run Enumerator**: `generate_candidate_plan.py` generates a budgeted, symbol-expanded `candidate_plan.jsonl` with feasibility reporting.
+- **Enforcement**: `phase2_candidate_discovery.py` now requires `--atlas_mode 1` to follow the candidate plan and records the plan hash for reproducibility.
 
-# Direct entry point
-python project/pipelines/run_all.py \
-  --run_id discovery_2020_2025 \
-  --symbols BTCUSDT,ETHUSDT \
-  --start 2020-06-01 --end 2025-07-10
-```
+### 2. Event: LIQUIDATION_CASCADE
+- **Spec**: `spec/events/LIQUIDATION_CASCADE.yaml` (Liquidation spike + OI drop).
+- **Analyzer**: `analyze_liquidation_cascade.py` implemented with severity bucketing.
+- **Registry**: Registered in `project/events/registry.py`.
 
-## Architecture
+### 3. Integrity & Reporting Invariants
+- **Cost Invariant**: `cost_config_digest` is now enforced in `Blueprint.lineage` and `compile_strategy_blueprints.py` selection logic.
+- **Phase 2 Metrics**: Refined reporting to distinguish `discoveries_statistical` from `survivors_phase2`. Fixed FDR estimation (sum of q-values).
+- **Bug Fixes**: 
+    - Fixed `ts` vs `timestamp` column mismatch in liquidation ingestor.
+    - Corrected `oi_delta_1h` window (12 bars for 1h @ 5m).
+    - Prevented double-prepending of `PROJECT_ROOT` in config resolution.
 
-```
-project/
-├── pipelines/run_all.py      # MAIN ENTRY POINT - master orchestrator (1179 lines)
-│   ├── ingest/               # Binance API → raw Parquet
-│   ├── clean/                # Normalization
-│   ├── features/             # Feature + context construction
-│   ├── research/             # Phase-1 hypothesis gen, Phase-2 conditional analysis
-│   ├── backtest/             # Strategy execution
-│   ├── eval/                 # Walkforward splits
-│   └── report/               # Promotion and reporting
-├── engine/runner.py          # Execution engine (P&L, risk, fills)
-├── strategies/               # Strategy implementations + DSL interpreter
-├── strategy_dsl/             # Blueprint schema and contract validation
-├── features/                 # Reusable feature logic
-└── configs/                  # pipeline.yaml, fees.yaml, venue configs
+### 4. Documentation
+Created a comprehensive documentation suite in `docs/`:
+- `ARCHITECTURE.md`: Pipeline orchestration and data flow.
+- `CONCEPTS.md`: PIT, Multiplicity, and Blueprints.
+- `GETTING_STARTED.md`: First run and Atlas mode guide.
+- `SPEC_FIRST.md`: How to use YAML specs as the source of truth.
 
-tests/                        # 75+ test files, 269 functions
-data/                         # Runtime artifacts (gitignored)
-docs/                         # Operational docs and runbooks
-```
+## 🏗️ Core Architecture
+- `project/pipelines/run_all.py`: Master orchestrator for 16+ stages.
+- `project/engine/`: Core execution (P&L, risk, fills).
+- `project/strategy_dsl/`: Blueprint schema and contract validation (`contract_v1.py`).
+- `spec/`: Source of Truth for concepts, features, and events.
+- `atlas/`: Global planning artifacts (`candidate_templates.parquet`).
 
-## Key Gotchas
-
-**Subprocess orchestration**: `run_all.py` spawns each pipeline stage as a subprocess, not function calls. Stages are independent scripts — fault-isolated, independently restartable.
-
-**Discovery-only by default**: These flags default to `0` — you must explicitly enable them:
-```
---run_backtest 1
---run_walkforward_eval 1
---run_make_report 1
-```
-
-**Phase-2 event chain**: `PHASE2_EVENT_CHAIN` (lines 18-28 of `run_all.py`) defines a hard-coded sequence. Phase-1 must complete before Phase-2. Output of each event type feeds the next.
-
-**Frozen canonical run**: `RUN_2022_2023` (2021-01-01 to 2022-12-31) is the canonical evaluation window for bridge policy and Codex operations (see `AGENTS.md`).
-
-**Overlay-only candidates**: Overlay strategies must NOT appear as standalone executables in backtest — delta-vs-base only.
-
-**Raw data skip**: `--skip_ingest_*` assumes data already exists in `data/lake/raw/`. Will not download if skipped.
-
-**Registry parity**: Phase-2 validates event counts against `data/events/{run_id}/events.parquet`. Mismatch is a fatal error.
-
-## Testing Patterns
-
-Tests use `conftest.py` fixture `backtest_data_root` which creates an isolated `tmp_path` and sets `BACKTEST_DATA_ROOT`. All test files follow `tests/test_*.py` naming. Import path patching (`sys.path`) is common — tests import directly from `project/`.
-
-## Data Model
-
-File-based only (no SQL). All market data and features in Parquet. Blueprints in JSONL. Stage outputs tracked in `$BACKTEST_DATA_ROOT/runs/{run_id}/{stage}.json` manifests + `.log` files.
-
-## CI
-
-GitHub Actions runs `pytest -q` + `check_repo_hygiene.sh` on every push/PR. Codex review triggered by `@codex` mention in PR comments.
+## 🛡️ Core Mandates
+1.  **Specs as Source of Truth**: All logic must be spec-bound.
+2.  **Point-in-Time (PIT) Integrity**: Strict guards against look-ahead bias.
+3.  **Cost Reproducibility**: All discoveries must be bound to a `cost_config_digest`.
+4.  **Fail-Closed Selection**: Selection must verify costs and statistical discovery.

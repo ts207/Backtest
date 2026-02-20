@@ -1,0 +1,19 @@
+event_type: LIQUIDATION_CASCADE
+description: Cascading liquidations following depth depletion and OI drop
+required_inputs:
+  - liquidation_notional
+  - oi_notional
+  - oi_delta_1h
+parameters:
+  liq_vol_th: 100000.0  # $100k minimal liquidation spike
+  oi_drop_th: -500000.0  # -$500k minimal OI drop over 1h
+severity_field: liquidation_notional
+output_schema:
+  - event_id
+  - timestamp
+  - symbol
+  - severity
+  - enter_idx
+  - duration_bars
+  - liquidation_total
+  - oi_drop_total

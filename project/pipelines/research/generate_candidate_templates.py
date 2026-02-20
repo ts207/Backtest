@@ -50,22 +50,17 @@ def main() -> int:
 
     try:
         backlog_path = PROJECT_ROOT.parent / args.backlog
-        print(f"Checking backlog at: {backlog_path}")
         if not backlog_path.exists():
             raise FileNotFoundError(f"Backlog not found: {backlog_path}")
         
         df = pd.read_csv(backlog_path)
-        print(f"Read {len(df)} rows from backlog")
         
         # 1. Deterministic Ordering
         # priority_score (lower is higher priority), tie-break with claim_id
-        print("Sorting backlog...")
         df = df.sort_values(by=["priority_score", "claim_id"]).reset_index(drop=True)
         
         # 2. Filter for operationalizable and unverified
-        print("Filtering backlog...")
         active_claims = df[(df['operationalizable'] == 'Y') & (df['status'] != 'verified')].copy()
-        print(f"Found {len(active_claims)} active claims")
         
         candidate_templates = []
         spec_tasks = []

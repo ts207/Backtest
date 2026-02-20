@@ -24,7 +24,7 @@ def _table_text(df: pd.DataFrame) -> str:
         return df.to_string(index=False)
 
 
-def _load_feature_frame(run_id: str, symbol: str, timeframe: str = "15m") -> pd.DataFrame:
+def _load_feature_frame(run_id: str, symbol: str, timeframe: str = "5m") -> pd.DataFrame:
     candidates = [
         run_scoped_lake_path(DATA_ROOT, run_id, "features", "perp", symbol, timeframe, "features_v1"),
         DATA_ROOT / "lake" / "features" / "perp" / symbol / timeframe / "features_v1",
@@ -218,7 +218,7 @@ def main() -> int:
     hazards = pd.DataFrame()
     phase = pd.DataFrame()
     sign = pd.DataFrame()
-    if not events.empty:
+    if not events.empty and not controls.empty:
         merged = events.merge(controls, on=["event_id", "symbol"], how="left", suffixes=("", "_ctrl"))
         deltas = pd.DataFrame(
             {
@@ -235,7 +235,7 @@ def main() -> int:
         hazards = pd.concat(
             [
                 _hazard(events["time_to_tail_move"], args.window_end).assign(cohort="events"),
-                _hazard(controls["time_to_tail_move"], args.window_end).assign(cohort="controls") if not controls.empty else pd.DataFrame(),
+                _hazard(controls["time_to_tail_move"], args.window_end).assign(cohort="controls"),
             ],
             ignore_index=True,
         )
@@ -259,6 +259,9 @@ def main() -> int:
             )
             .sort_values(["year", "funding_sign"])
         )
+    elif not events.empty:
+        # Fallback if only events exist
+        hazards = _hazard(events["time_to_tail_move"], args.window_end).assign(cohort="events")
 
     events_path = out_dir / "funding_extreme_reversal_window_events.csv"
     controls_path = out_dir / "funding_extreme_reversal_window_controls.csv"

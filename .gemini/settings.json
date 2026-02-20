@@ -1,0 +1,10 @@
+{
+  "hooksConfig": {
+    "disabled": [
+      "increment-iteration",
+      "reinforce-pickle-persona",
+      "pickle-rick-loop",
+      "check-limit"
+    ]
+  }
+}

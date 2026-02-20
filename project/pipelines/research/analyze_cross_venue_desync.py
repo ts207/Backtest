@@ -30,7 +30,7 @@ def _table_text(df: pd.DataFrame) -> str:
         return df.to_string(index=False)
 
 
-def _load_feature_frame(run_id: str, symbol: str, market: str, timeframe: str = "15m") -> pd.DataFrame:
+def _load_feature_frame(run_id: str, symbol: str, market: str, timeframe: str = "5m") -> pd.DataFrame:
     symbol_candidates = [symbol]
     if market == "spot":
         for suffix in ("USDT", "BUSD", "USDC", "FDUSD"):
