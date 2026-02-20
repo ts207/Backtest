@@ -195,6 +195,12 @@ def _phase2_row_to_candidate(
         "profit_density_score": profit_density_score,
         "n_events": _safe_int(row.get("sample_size", row.get("n_events", row.get("count", 0))), 0),
         "source_path": str(source_path),
+        # Phase 2 semantic columns — must propagate so compiler can use them
+        "is_discovery": _as_bool(row.get("is_discovery", False)),
+        "phase2_quality_score": _safe_float(row.get("phase2_quality_score"), _safe_float(row.get("robustness_score"), 0.0)),
+        "phase2_quality_components": str(row.get("phase2_quality_components", "{}")),
+        "compile_eligible_phase2_fallback": _as_bool(row.get("compile_eligible_phase2_fallback", False)),
+        "promotion_track": str(row.get("promotion_track", "fallback_only")),
     }
 
 
@@ -558,6 +564,12 @@ def main() -> int:
                 "profit_density_score",
                 "n_events",
                 "source_path",
+                # Phase 2 semantic columns
+                "is_discovery",
+                "phase2_quality_score",
+                "phase2_quality_components",
+                "compile_eligible_phase2_fallback",
+                "promotion_track",
             ],
         )
         if not df.empty:

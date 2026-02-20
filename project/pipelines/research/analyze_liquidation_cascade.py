@@ -127,12 +127,29 @@ def main() -> int:
             
             events = detect_cascades(feats, sym, args.liq_vol_th, args.oi_drop_th)
             if not events.empty:
-                # Add severity buckets
+                # Add severity buckets with monotonicity & tie-handling assertions
                 qs = events["severity"].quantile([0.8, 0.9, 0.95]).to_dict()
+                q80, q90, q95 = qs.get(0.8, 1e18), qs.get(0.9, 1e18), qs.get(0.95, 1e18)
+                
+                # Check metrics (cumulative)
+                c_ext = (events["severity"] >= q95).sum()
+                c_10 = (events["severity"] >= q90).sum()
+                c_20 = (events["severity"] >= q80).sum()
+                c_base = len(events)
+                
+                # Assert monotonicity
+                if not (c_ext <= c_10 <= c_20 <= c_base):
+                    raise ValueError(f"Monotonicity assertion failed for {sym}: {c_ext} <= {c_10} <= {c_20} <= {c_base}")
+                
+                # Assert fraction sanity
+                frac_90 = c_10 / c_base if c_base > 0 else 0
+                if frac_90 > 0.35:  # user says not 90%+
+                    raise ValueError(f"Fraction sanity check failed for {sym}: top_10pct fraction is {frac_90:.2f} (> 0.35 allowed due to ties)")
+                
                 def _bucket(val):
-                    if val >= qs.get(0.95, 1e18): return "extreme_5pct"
-                    if val >= qs.get(0.9, 1e18): return "top_10pct"
-                    if val >= qs.get(0.8, 1e18): return "top_20pct"
+                    if val >= q95: return "extreme_5pct"
+                    if val >= q90: return "top_10pct"
+                    if val >= q80: return "top_20pct"
                     return "base"
                 events["severity_bucket"] = events["severity"].map(_bucket)
                 all_events.append(events)

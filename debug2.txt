@@ -1,0 +1,176 @@
+﻿2026-02-19 18:32:19,659 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=01\bars_BTCUSDT_5m_2024-01.parquet
+2026-02-19 18:32:19,676 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=01\bars_BTCUSDT_5m_2024-01.parquet
+2026-02-19 18:32:19,689 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=02\bars_BTCUSDT_5m_2024-02.parquet
+2026-02-19 18:32:19,697 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=02\bars_BTCUSDT_5m_2024-02.parquet
+2026-02-19 18:32:19,706 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=03\bars_BTCUSDT_5m_2024-03.parquet
+2026-02-19 18:32:19,777 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=03\bars_BTCUSDT_5m_2024-03.parquet
+2026-02-19 18:32:19,787 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=04\bars_BTCUSDT_5m_2024-04.parquet
+2026-02-19 18:32:19,794 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=04\bars_BTCUSDT_5m_2024-04.parquet
+2026-02-19 18:32:19,803 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=05\bars_BTCUSDT_5m_2024-05.parquet
+2026-02-19 18:32:19,811 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=05\bars_BTCUSDT_5m_2024-05.parquet
+2026-02-19 18:32:19,820 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=06\bars_BTCUSDT_5m_2024-06.parquet
+2026-02-19 18:32:19,828 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=06\bars_BTCUSDT_5m_2024-06.parquet
+2026-02-19 18:32:19,838 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=07\bars_BTCUSDT_5m_2024-07.parquet
+2026-02-19 18:32:19,845 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=07\bars_BTCUSDT_5m_2024-07.parquet
+2026-02-19 18:32:19,856 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=08\bars_BTCUSDT_5m_2024-08.parquet
+2026-02-19 18:32:19,863 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=08\bars_BTCUSDT_5m_2024-08.parquet
+2026-02-19 18:32:19,874 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=09\bars_BTCUSDT_5m_2024-09.parquet
+2026-02-19 18:32:19,881 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=09\bars_BTCUSDT_5m_2024-09.parquet
+2026-02-19 18:32:19,892 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=10\bars_BTCUSDT_5m_2024-10.parquet
+2026-02-19 18:32:19,899 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=10\bars_BTCUSDT_5m_2024-10.parquet
+2026-02-19 18:32:19,908 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=11\bars_BTCUSDT_5m_2024-11.parquet
+2026-02-19 18:32:19,916 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=11\bars_BTCUSDT_5m_2024-11.parquet
+2026-02-19 18:32:19,926 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=12\bars_BTCUSDT_5m_2024-12.parquet
+2026-02-19 18:32:19,933 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2024\month=12\bars_BTCUSDT_5m_2024-12.parquet
+2026-02-19 18:32:19,943 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=01\bars_BTCUSDT_5m_2025-01.parquet
+2026-02-19 18:32:19,951 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=01\bars_BTCUSDT_5m_2025-01.parquet
+2026-02-19 18:32:19,961 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=02\bars_BTCUSDT_5m_2025-02.parquet
+2026-02-19 18:32:19,969 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=02\bars_BTCUSDT_5m_2025-02.parquet
+2026-02-19 18:32:19,978 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=03\bars_BTCUSDT_5m_2025-03.parquet
+2026-02-19 18:32:19,985 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=03\bars_BTCUSDT_5m_2025-03.parquet
+2026-02-19 18:32:19,995 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=04\bars_BTCUSDT_5m_2025-04.parquet
+2026-02-19 18:32:20,003 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=04\bars_BTCUSDT_5m_2025-04.parquet
+2026-02-19 18:32:20,012 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=05\bars_BTCUSDT_5m_2025-05.parquet
+2026-02-19 18:32:20,020 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=05\bars_BTCUSDT_5m_2025-05.parquet
+2026-02-19 18:32:20,029 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=06\bars_BTCUSDT_5m_2025-06.parquet
+2026-02-19 18:32:20,036 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=06\bars_BTCUSDT_5m_2025-06.parquet
+2026-02-19 18:32:20,046 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=07\bars_BTCUSDT_5m_2025-07.parquet
+2026-02-19 18:32:20,054 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=07\bars_BTCUSDT_5m_2025-07.parquet
+2026-02-19 18:32:20,064 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=08\bars_BTCUSDT_5m_2025-08.parquet
+2026-02-19 18:32:20,072 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=08\bars_BTCUSDT_5m_2025-08.parquet
+2026-02-19 18:32:20,082 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=09\bars_BTCUSDT_5m_2025-09.parquet
+2026-02-19 18:32:20,089 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=09\bars_BTCUSDT_5m_2025-09.parquet
+2026-02-19 18:32:20,099 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=10\bars_BTCUSDT_5m_2025-10.parquet
+2026-02-19 18:32:20,107 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=10\bars_BTCUSDT_5m_2025-10.parquet
+2026-02-19 18:32:20,117 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=11\bars_BTCUSDT_5m_2025-11.parquet
+2026-02-19 18:32:20,124 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=11\bars_BTCUSDT_5m_2025-11.parquet
+2026-02-19 18:32:20,134 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=12\bars_BTCUSDT_5m_2025-12.parquet
+2026-02-19 18:32:20,142 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2025\month=12\bars_BTCUSDT_5m_2025-12.parquet
+2026-02-19 18:32:20,151 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2026\month=01\bars_BTCUSDT_5m_2026-01.parquet
+2026-02-19 18:32:20,159 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2026\month=01\bars_BTCUSDT_5m_2026-01.parquet
+2026-02-19 18:32:20,169 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\BTCUSDT\bars_5m\year=2026\month=02\bars_BTCUSDT_5m_2026-02.parquet
+2026-02-19 18:32:20,177 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\BTCUSDT\bars_5m\year=2026\month=02\bars_BTCUSDT_5m_2026-02.parquet
+2026-02-19 18:32:20,267 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=01\bars_ETHUSDT_5m_2024-01.parquet
+2026-02-19 18:32:20,277 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=01\bars_ETHUSDT_5m_2024-01.parquet
+2026-02-19 18:32:20,288 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=02\bars_ETHUSDT_5m_2024-02.parquet
+2026-02-19 18:32:20,295 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=02\bars_ETHUSDT_5m_2024-02.parquet
+2026-02-19 18:32:20,305 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=03\bars_ETHUSDT_5m_2024-03.parquet
+2026-02-19 18:32:20,312 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=03\bars_ETHUSDT_5m_2024-03.parquet
+2026-02-19 18:32:20,322 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=04\bars_ETHUSDT_5m_2024-04.parquet
+2026-02-19 18:32:20,329 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=04\bars_ETHUSDT_5m_2024-04.parquet
+2026-02-19 18:32:20,339 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=05\bars_ETHUSDT_5m_2024-05.parquet
+2026-02-19 18:32:20,347 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=05\bars_ETHUSDT_5m_2024-05.parquet
+2026-02-19 18:32:20,358 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=06\bars_ETHUSDT_5m_2024-06.parquet
+2026-02-19 18:32:20,365 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=06\bars_ETHUSDT_5m_2024-06.parquet
+2026-02-19 18:32:20,375 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=07\bars_ETHUSDT_5m_2024-07.parquet
+2026-02-19 18:32:20,382 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=07\bars_ETHUSDT_5m_2024-07.parquet
+2026-02-19 18:32:20,393 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=08\bars_ETHUSDT_5m_2024-08.parquet
+2026-02-19 18:32:20,400 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=08\bars_ETHUSDT_5m_2024-08.parquet
+2026-02-19 18:32:20,410 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=09\bars_ETHUSDT_5m_2024-09.parquet
+2026-02-19 18:32:20,417 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=09\bars_ETHUSDT_5m_2024-09.parquet
+2026-02-19 18:32:20,427 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=10\bars_ETHUSDT_5m_2024-10.parquet
+2026-02-19 18:32:20,434 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=10\bars_ETHUSDT_5m_2024-10.parquet
+2026-02-19 18:32:20,444 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=11\bars_ETHUSDT_5m_2024-11.parquet
+2026-02-19 18:32:20,451 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=11\bars_ETHUSDT_5m_2024-11.parquet
+2026-02-19 18:32:20,462 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=12\bars_ETHUSDT_5m_2024-12.parquet
+2026-02-19 18:32:20,469 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2024\month=12\bars_ETHUSDT_5m_2024-12.parquet
+2026-02-19 18:32:20,478 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=01\bars_ETHUSDT_5m_2025-01.parquet
+2026-02-19 18:32:20,485 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=01\bars_ETHUSDT_5m_2025-01.parquet
+2026-02-19 18:32:20,494 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=02\bars_ETHUSDT_5m_2025-02.parquet
+2026-02-19 18:32:20,501 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=02\bars_ETHUSDT_5m_2025-02.parquet
+2026-02-19 18:32:20,511 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=03\bars_ETHUSDT_5m_2025-03.parquet
+2026-02-19 18:32:20,518 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=03\bars_ETHUSDT_5m_2025-03.parquet
+2026-02-19 18:32:20,527 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=04\bars_ETHUSDT_5m_2025-04.parquet
+2026-02-19 18:32:20,535 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=04\bars_ETHUSDT_5m_2025-04.parquet
+2026-02-19 18:32:20,545 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=05\bars_ETHUSDT_5m_2025-05.parquet
+2026-02-19 18:32:20,552 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=05\bars_ETHUSDT_5m_2025-05.parquet
+2026-02-19 18:32:20,562 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=06\bars_ETHUSDT_5m_2025-06.parquet
+2026-02-19 18:32:20,569 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=06\bars_ETHUSDT_5m_2025-06.parquet
+2026-02-19 18:32:20,579 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=07\bars_ETHUSDT_5m_2025-07.parquet
+2026-02-19 18:32:20,587 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=07\bars_ETHUSDT_5m_2025-07.parquet
+2026-02-19 18:32:20,596 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=08\bars_ETHUSDT_5m_2025-08.parquet
+2026-02-19 18:32:20,604 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=08\bars_ETHUSDT_5m_2025-08.parquet
+2026-02-19 18:32:20,613 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=09\bars_ETHUSDT_5m_2025-09.parquet
+2026-02-19 18:32:20,620 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=09\bars_ETHUSDT_5m_2025-09.parquet
+2026-02-19 18:32:20,630 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=10\bars_ETHUSDT_5m_2025-10.parquet
+2026-02-19 18:32:20,637 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=10\bars_ETHUSDT_5m_2025-10.parquet
+2026-02-19 18:32:20,646 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=11\bars_ETHUSDT_5m_2025-11.parquet
+2026-02-19 18:32:20,654 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=11\bars_ETHUSDT_5m_2025-11.parquet
+2026-02-19 18:32:20,663 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=12\bars_ETHUSDT_5m_2025-12.parquet
+2026-02-19 18:32:20,670 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2025\month=12\bars_ETHUSDT_5m_2025-12.parquet
+2026-02-19 18:32:20,680 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2026\month=01\bars_ETHUSDT_5m_2026-01.parquet
+2026-02-19 18:32:20,688 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2026\month=01\bars_ETHUSDT_5m_2026-01.parquet
+2026-02-19 18:32:20,699 INFO Writing cleaned data to out_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\runs\atlas_loop_debug\cleaned\perp\ETHUSDT\bars_5m\year=2026\month=02\bars_ETHUSDT_5m_2026-02.parquet
+2026-02-19 18:32:20,705 INFO Writing cleaned data to compat_path: C:\Users\tstuv\Documents\back\Backtest\data\lake\cleaned\perp\ETHUSDT\bars_5m\year=2026\month=02\bars_ETHUSDT_5m_2026-02.parquet
+python : C:\Users\tstuv\Documents\back\Backtest\project\pipelines\features\build_market_context.py:84: FutureWarning: The default fill_method='pad' 
+in Series.pct_change is deprecated and will be removed in a future version. Either fill in any non-leading NA values prior to calling pct_change or 
+specify 'fill_method=None' to not fill NA values.
+At line:1 char:1
++ python project/pipelines/run_all.py --run_id atlas_loop_debug --symbo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\tstuv\...fill NA values.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  out["trend_return_96"] = close.pct_change(96)
+C:\Users\tstuv\Documents\back\Backtest\project\pipelines\features\build_market_context.py:84: FutureWarning: The default fill_method='pad' in 
+Series.pct_change is deprecated and will be removed in a future version. Either fill in any non-leading NA values prior to calling pct_change or 
+specify 'fill_method=None' to not fill NA values.
+  out["trend_return_96"] = close.pct_change(96)
+CANDIDATE_PLAN_HASH=sha256:bba2132ace2ee844ea39f0d2c94e82ff6257fb52492a062cd850d985aff5de20
+C:\Users\tstuv\Documents\back\Backtest\project\events\registry.py:302: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA 
+entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old 
+behavior, exclude the relevant entries before the concat operation.
+  merged = pd.concat([existing_kept, incoming_replacement], ignore_index=True)
+2026-02-19 18:32:41,493 INFO Phase 2 complete: 27 tested, 0 discoveries_statistical, 0 survivors_phase2 \u2192 
+C:\Users\tstuv\Documents\back\Backtest\data\reports\phase2\atlas_loop_debug\LIQUIDATION_CASCADE\phase2_report.json
+{"funnel_out_path": "C:\\Users\\tstuv\\Documents\\back\\Backtest\\data\\reports\\atlas_loop_debug\\funnel_summary.json", "out_path": "C:\\Users\\tstuv\\Documents\\back\\Backtest\\data\\reports\\phase2\\atlas_loop_debug\\discovery_quality_summary.json", "run_id": "atlas_loop_debug"}
+Stage failed: compile_strategy_blueprints
+Stage log: C:\Users\tstuv\Documents\back\Backtest\data\runs\atlas_loop_debug\compile_strategy_blueprints.log
+Stage manifest: C:\Users\tstuv\Documents\back\Backtest\data\runs\atlas_loop_debug\compile_strategy_blueprints.json
+Planned stages: 15
+[1/15] Starting stage: build_cleaned_5m
+[1/15] Finished stage: build_cleaned_5m (1.6s)
+[2/15] Starting stage: build_features_v1
+[2/15] Finished stage: build_features_v1 (3.2s)
+[3/15] Starting stage: build_universe_snapshots
+[3/15] Finished stage: build_universe_snapshots (1.1s)
+[4/15] Starting stage: build_context_features
+[4/15] Finished stage: build_context_features (3.7s)
+[5/15] Starting stage: build_market_context
+[5/15] Finished stage: build_market_context (1.2s)
+[6/15] Starting stage: generate_candidate_templates
+[6/15] Finished stage: generate_candidate_templates (0.5s)
+[7/15] Starting stage: generate_candidate_plan
+[7/15] Finished stage: generate_candidate_plan (0.5s)
+[8/15] Starting stage: analyze_liquidation_cascade
+[8/15] Finished stage: analyze_liquidation_cascade (3.1s)
+[9/15] Starting stage: build_event_registry
+[9/15] Finished stage: build_event_registry (5.6s)
+[10/15] Starting stage: phase2_conditional_hypotheses
+[10/15] Finished stage: phase2_conditional_hypotheses (1.8s)
+[11/15] Starting stage: bridge_evaluate_phase2
+[11/15] Finished stage: bridge_evaluate_phase2 (0.4s)
+[12/15] Starting stage: summarize_discovery_quality
+[12/15] Finished stage: summarize_discovery_quality (0.4s)
+[13/15] Starting stage: evaluate_naive_entry
+[13/15] Finished stage: evaluate_naive_entry (0.5s)
+[14/15] Starting stage: export_edge_candidates
+[14/15] Finished stage: export_edge_candidates (0.5s)
+[15/15] Starting stage: compile_strategy_blueprints
+[15/15] Finished stage: compile_strategy_blueprints (0.5s)
+Slow-stage summary before failure:
+  - build_event_registry: 5.6s
+  - build_context_features: 3.7s
+  - build_features_v1: 3.2s
+  - analyze_liquidation_cascade: 3.1s
+  - phase2_conditional_hypotheses: 1.8s
+  - build_cleaned_5m: 1.6s
+  - build_market_context: 1.2s
+  - build_universe_snapshots: 1.1s
+  - evaluate_naive_entry: 0.5s
+  - generate_candidate_templates: 0.5s
+  - generate_candidate_plan: 0.5s
+  - compile_strategy_blueprints: 0.5s
+  - export_edge_candidates: 0.5s
+  - bridge_evaluate_phase2: 0.4s
+  - summarize_discovery_quality: 0.4s

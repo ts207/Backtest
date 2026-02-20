@@ -214,6 +214,83 @@ def calculate_expectancy(
     return mean_ret, p_value, float(n), bool(stability_pass)
 
 
+# Naming convention for analysis-only (non-runtime) bucket prefixes.
+_BUCKET_PREFIXES = ("severity_bucket_", "quantile_",)
+
+# Rule template names must never appear as condition strings.
+_RULE_TEMPLATE_NAMES = ("mean_reversion", "continuation", "carry", "breakout")
+
+
+def _condition_for_cond_name(
+    cond_name: str,
+    *,
+    run_symbols=None,
+    strict: bool = True,
+) -> str:
+    """Map a conditioning bucket name to an executable DSL condition string.
+
+    Modes
+    -----
+    strict=True (research default):
+        Unknown names that are not known analysis buckets → return '__BLOCKED__'.
+        Callers should mark the candidate compile_eligible=False.
+    strict=False (permissive / debug):
+        Unknown names fall back to 'all' silently.
+
+    This function MUST NEVER return an 'all__<name>' prefixed string — that
+    format silently drops runtime enforcement even for mapped conditions.
+    """
+    from strategy_dsl.contract_v1 import is_executable_condition
+
+    name = str(cond_name or "").strip()
+    if not name or name == "all":
+        return "all"
+
+    # Severity / quantile buckets are research-only labels — never runtime
+    if any(name.startswith(pfx) for pfx in _BUCKET_PREFIXES):
+        return "all"
+
+    if is_executable_condition(name, run_symbols=run_symbols):
+        return name
+
+    # Unknown name
+    if strict:
+        return "__BLOCKED__"
+    return "all"
+
+
+def _condition_routing(
+    cond_name: str,
+    *,
+    run_symbols=None,
+    strict: bool = True,
+):
+    """Return (condition_str, condition_source) tuple.
+
+    condition_source values:
+        'runtime'              — maps to a real ConditionNodeSpec
+        'bucket_non_runtime'   — research-only bucket (severity_bucket_*, etc.)
+        'blocked'              — strict mode rejected unknown name
+        'permissive_fallback'  — permissive mode fell back to 'all'
+        'unconditional'        — was 'all' or empty to begin with
+    """
+    from strategy_dsl.contract_v1 import is_executable_condition
+
+    name = str(cond_name or "").strip()
+    if not name or name == "all":
+        return "all", "unconditional"
+
+    if any(name.startswith(pfx) for pfx in _BUCKET_PREFIXES):
+        return "all", "bucket_non_runtime"
+
+    if is_executable_condition(name, run_symbols=run_symbols):
+        return name, "runtime"
+
+    if strict:
+        return "__BLOCKED__", "blocked"
+    return "all", "permissive_fallback"
+
+
 def _resolve_phase2_costs(
     args: argparse.Namespace,
     project_root: Path,
@@ -286,6 +363,8 @@ def main():
 
     max_q = gates.get("max_q_value", 0.05)
     min_after_cost = gates.get("min_after_cost_expectancy_bps", 0.1) / 10000.0  # bps → decimal
+    quality_floor_fallback = float(gates.get("quality_floor_fallback", 0.66))
+    min_events_fallback = int(gates.get("min_events_fallback", 100))
 
     # 2. Minimal Template Set & Horizons
     fam_config = families_spec.get("families", {}).get(args.event_type, {})
@@ -331,6 +410,12 @@ def main():
             for line in raw_bytes.decode("utf-8").splitlines():
                 if line.strip():
                     plan_rows.append(json.loads(line))
+            
+            # Assert plan rows uniqueness
+            plan_ids = [r.get("plan_row_id") for r in plan_rows if r.get("plan_row_id")]
+            if len(plan_ids) != len(set(plan_ids)):
+                log.error("Phase 2 aborted: Duplicate plan_row_ids detected in input candidate plan.")
+                sys.exit(1)
         else:
             log.warning("Candidate plan file not found: %s", path)
 
@@ -392,6 +477,16 @@ def main():
             if not stability_pass: fail_reasons.append("STABILITY_GATE")
             gate_phase2_final = econ_pass_conservative and stability_pass
 
+            # Compute condition routing before building result
+            _cond_str, _cond_source = _condition_routing(cond_label)
+            _compile_eligible = _cond_source != "blocked"
+            if not _compile_eligible:
+                fail_reasons.append("NON_EXECUTABLE_CONDITION")
+
+            _p2_quality_score = (float(econ_pass) + float(econ_pass_conservative) + float(stability_pass)) / 3.0
+            _p2_quality_components = json.dumps({"econ": int(econ_pass), "econ_cons": int(econ_pass_conservative), "stability": int(stability_pass)}, sort_keys=True)
+            _compile_eligible_fallback = _p2_quality_score >= quality_floor_fallback and int(n_joined) >= min_events_fallback
+            _promotion_track = "standard" if gate_phase2_final else "fallback_only"
             results.append({
                 "candidate_id": f"{event_type}_{rule}_{horizon}_{symbol}_{cond_label}",
                 "family_id": f"{event_type}_{rule}_{horizon}_{cond_label}",
@@ -413,9 +508,18 @@ def main():
                 "gate_economic_conservative": econ_pass_conservative,
                 "gate_stability": stability_pass,
                 "gate_phase2_final": gate_phase2_final,
-                "robustness_score": 1.0 if gate_phase2_final else 0.5,
+                "robustness_score": _p2_quality_score,
+                # Explicit semantic columns — do not conflate these
+                "is_discovery": False,  # Populated after BH-FDR pass
+                "phase2_quality_score": _p2_quality_score,
+                "phase2_quality_components": _p2_quality_components,
+                "compile_eligible_phase2_fallback": _compile_eligible_fallback,
+                "promotion_track": _promotion_track,
                 "fail_reasons": ",".join(fail_reasons),
-                "condition": cond_label if cond_label == "all" else f"all__{cond_label}",
+                "condition": _cond_str,
+                "condition_raw": cond_label,   # pre-routing label for Atlas feedback
+                "condition_source": _cond_source,
+                "compile_eligible": _compile_eligible,
                 "action": "enter_long_market" if _TEMPLATE_DIRECTION.get(rule, 1) > 0 else "enter_short_market",
                 "cost_config_digest": cost_coordinate["config_digest"],
                 "cost_bps_resolved": cost_coordinate["cost_bps"],
@@ -469,6 +573,16 @@ def main():
                         # Composite Phase 2 gate (economic + stability).
                         g_phase2_final = ec_pass_conservative and stab
 
+                        # Condition routing
+                        _cond_str, _cond_source = _condition_routing(cond_name)
+                        _compile_eligible = _cond_source != "blocked"
+                        if not _compile_eligible:
+                            f_reasons.append("NON_EXECUTABLE_CONDITION")
+
+                        _p2_qs = (float(ec_pass) + float(ec_pass_conservative) + float(stab)) / 3.0
+                        _p2_qc = json.dumps({"econ": int(ec_pass), "econ_cons": int(ec_pass_conservative), "stability": int(stab)}, sort_keys=True)
+                        _fb_eligible = _p2_qs >= quality_floor_fallback and int(n) >= min_events_fallback
+                        _p_track = "standard" if g_phase2_final else "fallback_only"
                         results.append({
                             "candidate_id": f"{args.event_type}_{rule}_{horizon}_{symbol}_{cond_name}",
                             "family_id": f"{args.event_type}_{rule}_{horizon}_{cond_name}",
@@ -483,16 +597,25 @@ def main():
                             "stressed_after_cost_expectancy_per_trade": aft_cost_conservative,
                             "cost_ratio": cost / eff if eff != 0 else 1.0,
                             "p_value": pv,
-                            "sample_size": len(sym_all_events), # Note: this is symbol-level size, not bucket-level
+                            "sample_size": len(sym_all_events),
                             "n_events": int(n),
                             "sign": 1 if eff > 0 else -1,
                             "gate_economic": ec_pass,
                             "gate_economic_conservative": ec_pass_conservative,
                             "gate_stability": stab,
                             "gate_phase2_final": g_phase2_final,
-                            "robustness_score": 1.0 if g_phase2_final else 0.5,
+                            "robustness_score": _p2_qs,
+                            # Explicit semantic columns
+                            "is_discovery": False,  # Populated after BH-FDR pass
+                            "phase2_quality_score": _p2_qs,
+                            "phase2_quality_components": _p2_qc,
+                            "compile_eligible_phase2_fallback": _fb_eligible,
+                            "promotion_track": _p_track,
                             "fail_reasons": ",".join(f_reasons),
-                            "condition": cond_name if cond_name == "all" else f"all__{cond_name}",
+                            "condition": _cond_str,
+                            "condition_raw": cond_name,   # pre-routing label for Atlas feedback
+                            "condition_source": _cond_source,
+                            "compile_eligible": _compile_eligible,
                             "action": "enter_long_market" if _TEMPLATE_DIRECTION.get(rule, 1) > 0 else "enter_short_market",
                             "cost_config_digest": cost_coordinate["config_digest"],
                             "cost_bps_resolved": cost_coordinate["cost_bps"],
@@ -546,11 +669,23 @@ def main():
 
     fdr_df = pd.concat(fdr_results, ignore_index=True)
 
+    # After BH-FDR: write the definitive is_discovery (overrides the row-level False placeholder).
+    # Then refresh promotion_track and compile_eligible_phase2_fallback from it.
+    fdr_df["is_discovery"] = fdr_df["q_value"] <= max_q
+
     # Invariant: Phase 2 Final Pass REQUIRES discovery (multiplicity pass)
     fdr_df["gate_phase2_final"] = fdr_df["gate_phase2_final"] & fdr_df["is_discovery"]
-    
-    # Update robustness score based on final gate: 1.0 if everything passed, 0.5 otherwise.
-    fdr_df["robustness_score"] = np.where(fdr_df["gate_phase2_final"], 1.0, 0.5)
+
+    # Refresh promotion_track: standard only if gate_phase2_final, else fallback_only
+    fdr_df["promotion_track"] = np.where(fdr_df["gate_phase2_final"], "standard", "fallback_only")
+
+    # Refresh compile_eligible_phase2_fallback using the now-definitive quality score
+    if "phase2_quality_score" not in fdr_df.columns:
+        fdr_df["phase2_quality_score"] = fdr_df["robustness_score"]
+    fdr_df["compile_eligible_phase2_fallback"] = (
+        (fdr_df["phase2_quality_score"] >= quality_floor_fallback)
+        & (fdr_df["n_events"] >= min_events_fallback)
+    )
 
     # 5. Emit Artifacts
     ensure_dir(reports_root)
@@ -574,6 +709,9 @@ def main():
 
     report = {
         "spec_hashes": spec_hashes,
+        "inputs": {
+            "candidate_plan_hash": candidate_plan_hash
+        },
         "family_definition": "Option A (event_type, rule_template, horizon)",
         "cost_coordinate": cost_coordinate,
         "thresholds": {
@@ -587,6 +725,9 @@ def main():
             "stability_pass": int(fdr_df["gate_stability"].sum()),
             "sum_p_values_discoveries": float(fdr_df[fdr_df["is_discovery"]]["p_value"].sum()) if fdr_df["is_discovery"].any() else 0.0,
             "expected_false_discoveries_fdr": float(fdr_df[fdr_df["is_discovery"]]["q_value"].sum()) if fdr_df["is_discovery"].any() else 0.0,
+            "fallback_eligible_compile": int(fdr_df["compile_eligible_phase2_fallback"].sum()) if "compile_eligible_phase2_fallback" in fdr_df.columns else 0,
+            "quality_floor_fallback": quality_floor_fallback,
+            "min_events_fallback": min_events_fallback,
         },
     }
 

@@ -233,7 +233,22 @@ def _data_hash(symbols: List[str]) -> str:
 def _write_run_manifest(run_id: str, payload: dict) -> None:
     out_dir = DATA_ROOT / "runs" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "run_manifest.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path = out_dir / "run_manifest.json"
+    
+    if manifest_path.exists():
+        try:
+            existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for k, v in existing.items():
+                if k not in payload or payload[k] is None:
+                    payload[k] = v
+                elif isinstance(v, dict) and isinstance(payload[k], dict):
+                    merged = dict(v)
+                    merged.update(payload[k])
+                    payload[k] = merged
+        except Exception:
+            pass
+
+    manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _claim_map_hash(project_root: Path) -> str:
@@ -1134,18 +1149,30 @@ def main() -> int:
         if bool(int(getattr(args, _attr, 0))):
             non_production_overrides.append(f"{_stage_name}:{_cli_flag}=1")
     def _has_hypothesis_entries(run_id: str, event_type: str) -> bool:
+        # Check Atlas candidate plan first
+        plan_path = DATA_ROOT / "reports" / "hypothesis_generator" / run_id / "candidate_plan.jsonl"
+        if plan_path.exists():
+            try:
+                for line in plan_path.read_text(encoding="utf-8").splitlines():
+                    if not line.strip(): continue
+                    row = json.loads(line)
+                    if row.get("event_type") == event_type:
+                        return True
+            except Exception:
+                pass
+        
+        # Check classic Phase 1 queue
         queue_path = DATA_ROOT / "reports" / "hypothesis_generator" / run_id / "phase1_hypothesis_queue.jsonl"
-        if not queue_path.exists():
-            return False
-        try:
-            for line in queue_path.read_text(encoding="utf-8").splitlines():
-                if not line.strip(): continue
-                row = json.loads(line)
-                targets = row.get("target_phase2_event_types", [])
-                if isinstance(targets, list) and event_type in targets:
-                    return True
-        except Exception:
-            pass
+        if queue_path.exists():
+            try:
+                for line in queue_path.read_text(encoding="utf-8").splitlines():
+                    if not line.strip(): continue
+                    row = json.loads(line)
+                    targets = row.get("target_phase2_event_types", [])
+                    if isinstance(targets, list) and event_type in targets:
+                        return True
+            except Exception:
+                pass
         return False
 
     for idx, (stage, script, base_args) in enumerate(stages, start=1):
