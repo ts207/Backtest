@@ -433,7 +433,7 @@ def _strategy_returns(
     )
     total_bars = int(len(ret))
     diagnostics = {
-        \"dsl\": dsl_diagnostics,
+        "dsl": dsl_diagnostics,
         "total_bars": total_bars,
         "nan_return_bars": int(nan_ret_mask.sum()),
         "forced_flat_bars": forced_flat_bars,

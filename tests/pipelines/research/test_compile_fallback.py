@@ -1,6 +1,6 @@
 import pytest
 import pandas as pd
-from project.pipelines.research.compile_strategy_blueprints import _passes_fallback_gate, _choose_event_rows
+from pipelines.research.compile_strategy_blueprints import _passes_fallback_gate, _choose_event_rows
 
 def test_passes_fallback_gate():
     gates = {
@@ -29,12 +29,12 @@ def test_choose_event_rows_fallback():
         "stressed_after_cost_expectancy_per_trade": 0.0001, # Added this
         "n_events": 150,
         "rejected": False, # NOT a discovery
-        "robustness_score": 0.8,
-        "expectancy_per_trade": 0.0003,
-        "cost_ratio": 0.1
-    }])
-    
-    # In discovery mode, should return nothing
+                    "robustness_score": 0.8,
+                    "expectancy_per_trade": 0.0003,
+                    "cost_ratio": 0.1,
+                    "gate_bridge_tradable": True
+                }])
+            # In discovery mode, should return nothing
     selected, diag, _ = _choose_event_rows(
         "run_test", "event_test", [], phase2_df, 1, True, True, 50, mode="discovery"
     )

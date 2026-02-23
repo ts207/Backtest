@@ -151,8 +151,7 @@ def main() -> int:
         
         with (out_dir / "candidate_plan.jsonl").open("w") as f:
             for row in plan_rows:
-                f.write(json.dumps(row) + "
-")
+                f.write(json.dumps(row) + "\n")
 
         finalize_manifest(manifest, "success", stats={
             "claims_processed": len(active_claims),

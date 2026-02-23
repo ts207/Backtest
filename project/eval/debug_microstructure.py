@@ -4,12 +4,11 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(PROJECT_ROOT / "project"))
-DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT / "data"))
 
-from project.features.microstructure import calculate_roll_spread, calculate_vpin
+from features.microstructure import calculate_roll_spread, calculate_vpin
 from pipelines._lib.io_utils import list_parquet_files, read_parquet
 
 def debug():

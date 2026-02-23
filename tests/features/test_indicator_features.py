@@ -1,8 +1,8 @@
 import pandas as pd
 import numpy as np
 import pytest
-from project.features.vol_regime import calculate_rv_percentile_24h
-from project.features.carry_state import calculate_funding_rate_bps
+from features.vol_regime import calculate_rv_percentile_24h
+from features.carry_state import calculate_funding_rate_bps
 
 def test_vol_regime_feature():
     # Synthetic data

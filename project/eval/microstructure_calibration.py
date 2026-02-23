@@ -6,12 +6,11 @@ import yaml
 from pathlib import Path
 from typing import Dict, Any
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(PROJECT_ROOT / "project"))
-DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT / "data"))
 
-from project.features.microstructure import (
+from features.microstructure import (
     calculate_roll_spread,
     calculate_amihud_illiquidity,
     calculate_vpin
@@ -19,7 +18,7 @@ from project.features.microstructure import (
 from pipelines._lib.io_utils import list_parquet_files, read_parquet
 
 def load_concept_spec(concept_id: str) -> Dict[str, Any]:
-    spec_path = PROJECT_ROOT / "spec" / "concepts" / f"{concept_id}.yaml"
+    spec_path = PROJECT_ROOT.parent / "spec" / "concepts" / f"{concept_id}.yaml"
     if not spec_path.exists():
         raise FileNotFoundError(f"Spec not found: {spec_path}")
     with open(spec_path, "r") as f:

@@ -1,7 +1,7 @@
 {
   "version": "feature_schema_v1",
   "datasets": {
-    "features_v1_15m_v1": {
+    "features_v1_5m_v1": {
       "required_columns": [
         "timestamp",
         "open",

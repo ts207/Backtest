@@ -30,9 +30,9 @@ from pipelines._lib.run_manifest import (
     validate_feature_schema_columns,
     validate_input_provenance,
 )
-from project.features.vol_regime import calculate_rv_percentile_24h
-from project.features.carry_state import calculate_funding_rate_bps
-from project.features.state_mapping import map_vol_regime, map_carry_state
+from features.vol_regime import calculate_rv_percentile_24h
+from features.carry_state import calculate_funding_rate_bps
+from features.state_mapping import map_vol_regime, map_carry_state
 
 
 def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:

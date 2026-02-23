@@ -63,7 +63,7 @@ def _iter_days(start: datetime, end: datetime) -> List[datetime]:
 def _expected_bars(start: datetime, end_exclusive: datetime) -> int:
     if end_exclusive <= start:
         return 0
-    return int((end_exclusive - start).total_seconds() // (15 * 60))
+    return int((end_exclusive - start).total_seconds() // (5 * 60))
 
 
 def _read_ohlcv_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame:

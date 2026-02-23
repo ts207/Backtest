@@ -79,7 +79,7 @@ def _align_funding(bars: pd.DataFrame, funding: pd.DataFrame) -> Tuple[pd.DataFr
     )
     if "funding_rate_scaled" in merged.columns:
         interval_hours = 8
-        bars_per_event = int((interval_hours * 60) / 1)
+        bars_per_event = int((interval_hours * 60) / 5)
         merged["funding_rate_event_scaled"] = merged["funding_rate_scaled"]
         merged["funding_rate_scaled"] = merged["funding_rate_scaled"] / bars_per_event
     

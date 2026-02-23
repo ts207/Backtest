@@ -720,7 +720,6 @@ def _choose_event_rows(
     rejected_quality_floor_count = 0
     
     promoted = [row for row in eligible_rows if str(row.get("status", "")).upper() == "PROMOTED"]
-    print(f"DEBUG: promoted={len(promoted)}")
     if promoted:
         promoted_sorted = sorted(promoted, key=_rank_key)
         promoted_quality = [row for row in promoted_sorted if _passes_quality_floor(row, strict_cost_fields=strict_cost_fields, min_events=min_events, min_robustness=min_robustness, require_positive_expectancy=require_positive_expectancy, expected_cost_digest=expected_cost_digest)]
@@ -750,45 +749,45 @@ def _choose_event_rows(
             )
             return selected, diagnostics, pd.DataFrame(selection_data)
             
-        if not allow_fallback_blueprints:
+    if not allow_fallback_blueprints:
+        diagnostics.update(
+            {
+                "selected_count": 0,
+                "rejected_quality_floor_count": int(rejected_quality_floor_count),
+                "reason": "rejected_all_promoted_quality_floor",
+                "used_fallback": False,
+            }
+        )
+        return [], diagnostics, pd.DataFrame(selection_data)
+
+    # Updated non_promoted_rows logic to use eligible_rows
+    non_promoted_rows = [row for row in eligible_rows if str(row.get("status", "")).upper() != "PROMOTED"]
+    if non_promoted_rows:
+        non_promoted_sorted = sorted(non_promoted_rows, key=_rank_key)
+        non_promoted_quality = [row for row in non_promoted_sorted if _passes_quality_floor(row, strict_cost_fields=strict_cost_fields, min_events=min_events, min_robustness=min_robustness, require_positive_expectancy=False, expected_cost_digest=expected_cost_digest)]
+        rejected_quality_floor_count += max(0, len(non_promoted_sorted) - len(non_promoted_quality))
+        
+        for c in non_promoted_sorted:
+            if c not in non_promoted_quality:
+                 _add_selection_record(c, "quality_floor_fail_fallback_non_promoted", False, 0)
+
+        if non_promoted_quality:
+            selected = non_promoted_quality[:max_per_event]
+            for i, c in enumerate(selected):
+                _add_selection_record(c, "fallback_non_promoted_quality", True, i+1)
+            
+            for i, c in enumerate(non_promoted_quality[max_per_event:]):
+                _add_selection_record(c, "excluded_by_cap", False, max_per_event+i+1)
+
             diagnostics.update(
                 {
-                    "selected_count": 0,
+                    "selected_count": int(len(selected)),
                     "rejected_quality_floor_count": int(rejected_quality_floor_count),
-                    "reason": "rejected_all_promoted_quality_floor",
-                    "used_fallback": False,
+                    "reason": "fallback_non_promoted_quality",
+                    "used_fallback": True,
                 }
             )
-            return [], diagnostics, pd.DataFrame(selection_data)
-
-        # Updated non_promoted_rows logic to use eligible_rows
-        non_promoted_rows = [row for row in eligible_rows if str(row.get("status", "")).upper() != "PROMOTED"]
-        if non_promoted_rows:
-            non_promoted_sorted = sorted(non_promoted_rows, key=_rank_key)
-            non_promoted_quality = [row for row in non_promoted_sorted if _passes_quality_floor(row, strict_cost_fields=strict_cost_fields, min_events=min_events, min_robustness=min_robustness, require_positive_expectancy=False, expected_cost_digest=expected_cost_digest)]
-            rejected_quality_floor_count += max(0, len(non_promoted_sorted) - len(non_promoted_quality))
-            
-            for c in non_promoted_sorted:
-                if c not in non_promoted_quality:
-                     _add_selection_record(c, "quality_floor_fail_fallback_non_promoted", False, 0)
-
-            if non_promoted_quality:
-                selected = non_promoted_quality[:max_per_event]
-                for i, c in enumerate(selected):
-                    _add_selection_record(c, "fallback_non_promoted_quality", True, i+1)
-                
-                for i, c in enumerate(non_promoted_quality[max_per_event:]):
-                    _add_selection_record(c, "excluded_by_cap", False, max_per_event+i+1)
-
-                diagnostics.update(
-                    {
-                        "selected_count": int(len(selected)),
-                        "rejected_quality_floor_count": int(rejected_quality_floor_count),
-                        "reason": "fallback_non_promoted_quality",
-                        "used_fallback": True,
-                    }
-                )
-                return selected, diagnostics, pd.DataFrame(selection_data)
+            return selected, diagnostics, pd.DataFrame(selection_data)
 
         diagnostics.update(
             {
@@ -864,7 +863,19 @@ def _choose_event_rows(
         eligible_parsed_rows = []
         for row in parsed_rows:
             is_eligible = True
-            if not allow_naive_entry_fail and naive_validation is not None:
+            
+            # Mode-based filtering for Phase 2 fallback
+            is_disc = _as_bool(row.get("rejected", False)) or _as_bool(row.get("is_discovery", False))
+            is_fall = _passes_fallback_gate(row, gates)
+            
+            if mode == "discovery" and not is_disc:
+                is_eligible = False
+            elif mode == "fallback" and not is_fall:
+                is_eligible = False
+            elif mode == "both" and not (is_disc or is_fall):
+                is_eligible = False
+
+            if is_eligible and not allow_naive_entry_fail and naive_validation is not None:
                 cid = str(row.get("candidate_id", "")).strip()
                 if not naive_validation.get((event_type, cid), False):
                     is_eligible = False

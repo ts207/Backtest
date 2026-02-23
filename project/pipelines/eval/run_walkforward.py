@@ -1015,11 +1015,10 @@ def main() -> int:
             "config_passthrough_count": int(len(args.config)),
             "allow_unexpected_strategy_files": bool(int(args.allow_unexpected_strategy_files)),
         }
-            summary = {
-                "run_id": args.run_id,
-                "cost_config_digest": str(params.get("execution_cost_config_digest", "")),
-                "splits": [w.to_dict() for w in windows],
-        
+        summary = {
+            "run_id": args.run_id,
+            "cost_config_digest": str(params.get("execution_cost_config_digest", "")),
+            "splits": [w.to_dict() for w in windows],
             "per_split_metrics": per_split_metrics,
             "per_strategy_split_metrics": per_strategy_split_metrics,
             "per_strategy_regime_metrics": per_strategy_regime_metrics,

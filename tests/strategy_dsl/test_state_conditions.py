@@ -1,4 +1,4 @@
-from project.strategy_dsl.contract_v1 import normalize_entry_condition
+from strategy_dsl.contract_v1 import normalize_entry_condition
 
 def test_normalize_carry_condition():
     cond, nodes, _ = normalize_entry_condition("carry_pos", event_type="test", candidate_id="1")

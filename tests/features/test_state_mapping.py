@@ -1,6 +1,6 @@
 import pandas as pd
 import pytest
-from project.features.state_mapping import map_vol_regime, map_carry_state
+from features.state_mapping import map_vol_regime, map_carry_state
 
 def test_map_vol_regime():
     rv = pd.Series([0.1, 0.5, 0.9])

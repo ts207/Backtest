@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from project.pipelines.ingest.ingest_binance_um_liquidation_snapshot import (
+from pipelines.ingest.ingest_binance_um_liquidation_snapshot import (
     CM_SYMBOL_MAP,
     _KNOWN_CM_CONTRACTS,
     _assert_cm_mapping_complete,
