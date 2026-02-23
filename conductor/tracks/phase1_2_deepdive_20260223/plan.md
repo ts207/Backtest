@@ -6,11 +6,11 @@
 - [x] Task: Implement fixes for identified data layer risks (e.g., funding scaling, bar alignment). [checkpoint: 6c3fc2f]
 - [x] Task: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md)
 
-## Phase 2: Logic and Discovery Refinement
+## Phase 2: Logic and Discovery Refinement [checkpoint: b3f4986]
 - [x] Task: Audit `project/events/` and `project/pipelines/research/` for logic consistency. [checkpoint: 7d0df91]
 - [x] Task: TDD - Create regression tests for event detection and statistical validation (BH-FDR). [checkpoint: 7d0df91]
 - [x] Task: Implement logic refinements for Phase 1 event triggers and Phase 2 discovery gates. [checkpoint: 7d0df91]
-- [ ] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
 
 ## Phase 3: Final Validation and Certification
 - [ ] Task: Run full discovery pipeline on a 7-day slice (certification run).
