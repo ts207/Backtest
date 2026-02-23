@@ -1,6 +1,6 @@
- BACKTEST PROJECT: QUANTITATIVE SYSTEMS AUDIT REPORT
+# BACKTEST PROJECT: QUANTITATIVE SYSTEMS AUDIT REPORT
 
-  Project: Backtest — Quantitative Trading Research Platform
+Project: Backtest — Quantitative Trading Research Platform
   Audit Scope: Statistical validity · Execution realism · Data integrity · Production readiness for 60-day "+10 bps lift
    from state-conditioned entries" validation run
   Auditor: Staff-level embedded systems auditor
@@ -262,9 +262,10 @@
       └── wf_status: pending | pass | trimmed_*
 
   Feature allowlist (DSL safety — contract_v1.py:79–162):
-  - Allowed prefixes: vol_, range_, ret_, rvol_, atr_, basis_, spread_, quote_vol_, volume_, oi_, liq_, fp_, mc_,
+
+- Allowed prefixes: vol_, range_, ret_, rvol_, atr_, basis_, spread_, quote_vol_, volume_, oi_, liq_, fp_, mc_,
   session_, regime_, bb_, z_, event_, flag_, symbol_
-  - Hard-blocked patterns: fwd_, forward_, future_, label_, target_, _y_, outcome_, return_after_costs, mfe, mae
+- Hard-blocked patterns: fwd_, forward_, future_, label_, target_, *y*, outcome_, return_after_costs, mfe, mae
 
   ---
   SECTION 2 — DATA INTEGRITY AUDIT
@@ -275,17 +276,20 @@
 
   All ingest scripts perform smart epoch unit detection (ms vs s) before conversion:
 
-  # ingest_binance_um_liquidation_snapshot.py:188-190
+# ingest_binance_um_liquidation_snapshot.py:188-190
+
   ts_numeric = pd.to_numeric(raw[ts_col], errors="coerce")
   ts_unit = "ms" if ts_numeric.dropna().abs().median() >= 1_000_000_000_000 else "s"
   ts_series = pd.to_datetime(ts_numeric, unit=ts_unit, utc=True, errors="coerce")
 
-  # ingest_binance_um_funding.py:97-102 — explicit unit inference
+# ingest_binance_um_funding.py:97-102 — explicit unit inference
+
   def _infer_epoch_unit(ts_series):
       med = int(vals.median())
       return "s" if med < 1_000_000_000_000 else "ms"
 
-  # pipelines/_lib/validation.py:32-40 — hard enforcement
+# pipelines/_lib/validation.py:32-40 — hard enforcement
+
   def ensure_utc_timestamp(series, name):
       if not isinstance(series.dtype, pd.DatetimeTZDtype):
           raise ValueError(f"{name} must be timezone-aware UTC")
@@ -298,17 +302,21 @@
 
   Every merge_asof in the codebase uses direction="backward" — the only safe direction for PIT integrity:
 
-  # build_features_v1.py:118-123 — OI merge
+# build_features_v1.py:118-123 — OI merge
+
   out = pd.merge_asof(out.sort_values("timestamp"), oi_series.sort_values("timestamp"),
       on="timestamp", direction="backward")
 
-  # build_features_v1.py:154-159 — Liquidation merge
+# build_features_v1.py:154-159 — Liquidation merge
+
   out = pd.merge_asof(..., direction="backward")
 
-  # build_features_v1.py:208-213 — Spot basis merge
+# build_features_v1.py:208-213 — Spot basis merge
+
   out = pd.merge_asof(..., direction="backward", tolerance=pd.Timedelta("5min"))
 
-  # build_cleaned_5m.py:73-79 — Funding rate merge
+# build_cleaned_5m.py:73-79 — Funding rate merge
+
   merged = pd.merge_asof(..., direction="backward")
 
   2.3 Feature Engineering Lookahead
@@ -317,31 +325,36 @@
 
   All rolling windows enforce min_periods = window, preventing any computation before sufficient history exists:
 
-  # build_features_v1.py:382-388
+# build_features_v1.py:382-388
+
   features["rv_96"] = features["logret_1"].rolling(window=96, min_periods=96).std()
-  features["rv_pct_17280"] = _rolling_percentile(features["rv_96"], window=17280)
+  features["rv_pct_17280"] =_rolling_percentile(features["rv_96"], window=17280)
   features["high_96"] = features["high"].rolling(window=96, min_periods=96).max()
   features["range_med_2880"] = features["range_96"].rolling(window=2880, min_periods=2880).median()
 
-  # liquidity_vacuum.py:127-128
+# liquidity_vacuum.py:127-128
+
   out["vol_med"] = volume.rolling(cfg.volume_window, min_periods=cfg.volume_window).median()
 
   2.4 OI Delta Window Verification
 
   Status: PASS ✅ (Bug confirmed fixed)
 
-  # build_features_v1.py:165
+# build_features_v1.py:165
+
   out["oi_delta_1h"] = out["oi_notional"].diff(12)  # 5m bars: 60/5 = 12 ✓
 
   2.5 Timestamp Column Name Normalization
 
   Status: PASS ✅
 
-  # build_features_v1.py:81-85 — handles both ts and timestamp
+# build_features_v1.py:81-85 — handles both ts and timestamp
+
   ts_col = "timestamp" if "timestamp" in frame.columns else ("ts" if "ts" in frame.columns else None)
   frame = frame.rename(columns={ts_col: "timestamp"})
 
-  # ingest_binance_um_liquidation_snapshot.py:178-186 — multi-candidate detection
+# ingest_binance_um_liquidation_snapshot.py:178-186 — multi-candidate detection
+
   for candidate in ("time", "timestamp", "create_time", "createtime", "ts"):
       if candidate in raw.columns:
           ts_col = candidate; break
@@ -350,7 +363,8 @@
 
   Status: PASS ✅
 
-  # ingest_binance_um_ohlcv_5m.py:268-271
+# ingest_binance_um_ohlcv_5m.py:268-271
+
   if data["timestamp"].duplicated().any():
       raise ValueError(f"Duplicate timestamps in {symbol} {month_start:%Y-%m}")
   if not data["timestamp"].is_monotonic_increasing:
@@ -360,7 +374,8 @@
 
   Status: ⚠️ PARTIAL RISK
 
-  # ingest_binance_um_liquidation_snapshot.py:32-41
+# ingest_binance_um_liquidation_snapshot.py:32-41
+
   CM_SYMBOL_MAP = {
       "BTC": "BTCUSD_PERP",
       "BTCUSDT": "BTCUSD_PERP",
@@ -376,7 +391,8 @@
 
   Status: PASS ✅
 
-  # build_cleaned_5m.py:81-84
+# build_cleaned_5m.py:81-84
+
   interval_hours = 8
   bars_per_event = int((interval_hours * 60) / 5)  # = 96 at 5m resolution
   merged["funding_rate_scaled"] = merged["funding_rate_scaled"] / bars_per_event
@@ -426,13 +442,15 @@
 
   P-value generation: analyze_conditional_expectancy.py:65-123
 
-  # T-statistic
+# T-statistic
+
   t_stat = float(mean_val / (std_val / np.sqrt(n)))   # Standard one-sample t
 
-  # P-value via Normal approximation
+# P-value via Normal approximation
+
   def _two_sided_p_from_t(t_stat):
       z = abs(float(t_stat))
-      return float(2.0 * (1.0 - _normal_cdf(z)))      # Two-sided
+      return float(2.0 * (1.0 -_normal_cdf(z)))      # Two-sided
 
   Known limitation: Normal CDF approximation underestimates tail probability at small n (< 50). At n = 30, t = 2.0,
   exact t-CDF p = 0.057 vs Normal p = 0.046 — a 19% underestimate that inflates discovery counts.
@@ -441,22 +459,26 @@
 
   Location: phase2_candidate_discovery.py:542,638,765
 
-  # Atlas mode (line 542)
-  "family_id": f"{event_type}_{rule}_{horizon}_{cond_label}"
+# Atlas mode (line 542)
 
-  # Default mode (line 638)
-  "family_id": f"{args.event_type}_{rule}_{horizon}_{cond_name}"
+  "family_id": f"{event_type}*{rule}*{horizon}_{cond_label}"
 
-  # Report description (line 765)
+# Default mode (line 638)
+
+  "family_id": f"{args.event_type}*{rule}*{horizon}_{cond_name}"
+
+# Report description (line 765)
+
   "family_definition": "Option A (event_type, rule_template, horizon)"
 
   Family unit: (event_type, rule_template, horizon, condition_label)
 
   Critical gap: Symbol is NOT stratified. BTCUSDT, ETHUSDT, SOLUSDT all share the same family for a given (event, rule,
   horizon, condition). This means:
-  - A strong BTC signal boosts the family's BH power, promoting weak ETH candidates and vice versa
-  - Per-symbol FDR is uncontrolled
-  - The correction is asymmetric: large-family events (many symbols) are easier to discover than single-symbol events
+
+- A strong BTC signal boosts the family's BH power, promoting weak ETH candidates and vice versa
+- Per-symbol FDR is uncontrolled
+- The correction is asymmetric: large-family events (many symbols) are easier to discover than single-symbol events
 
   3.3 FDR Threshold and Application
 
@@ -474,7 +496,8 @@
       family_df["is_discovery"] = family_df["q_value"] <= max_q
       fdr_results.append(family_df)
 
-  # Fail-closed invariant (line 784-798)
+# Fail-closed invariant (line 784-798)
+
   if not (summary["survivors_phase2"] <= summary["discoveries_statistical"]):
       raise ValueError("Invariant violation: survivors_phase2 exceeds discoveries_statistical")
 
@@ -582,9 +605,10 @@
 
   Embargo gap: With embargo_days=0, the last bar of the training window is immediately adjacent to the first bar of the
   validation window. For event-driven crypto strategies, this leaves:
-  - Autocorrelation from persistent regime states bleeding across the boundary
-  - Funding rate episodes that span the boundary artificially boosting validation Sharpe
-  - A minimum of 5 bars (25 minutes at 5m) embargo is the practical floor; 1 day (288 bars) is recommended for daily
+
+- Autocorrelation from persistent regime states bleeding across the boundary
+- Funding rate episodes that span the boundary artificially boosting validation Sharpe
+- A minimum of 5 bars (25 minutes at 5m) embargo is the practical floor; 1 day (288 bars) is recommended for daily
   funding cycles
 
   No time-series block bootstrap: Statistical significance of OOS Sharpe is not computed. There is no CI on the lift
@@ -610,12 +634,14 @@
 
   Location: engine/runner.py:302-335
 
-  # Execution lag (default: 1 bar)
+# Execution lag (default: 1 bar)
+
   execution_lag = int(params.get("execution_lag_bars", 1))
   if execution_lag > 0:
       positions = positions.shift(execution_lag).fillna(0).astype(int)
 
-  # Fill price
+# Fill price
+
   close = bars_indexed["close"].astype(float)
   ret = compute_returns(close)   # pct_change() — returns from T-1 close to T close
 
@@ -625,10 +651,11 @@
   (precisely when these strategies fire).
 
   What is missing:
-  - No bid/ask simulation — fills at mid (close) rather than at ask for buys, bid for sells
-  - No partial fill model — assumes full execution at bar close
-  - No VWAP or TWAP within bar
-  - 1s ToB data is ingested and stored in lake/raw/tob/ but is never consumed by the execution engine
+
+- No bid/ask simulation — fills at mid (close) rather than at ask for buys, bid for sells
+- No partial fill model — assumes full execution at bar close
+- No VWAP or TWAP within bar
+- 1s ToB data is ingested and stored in lake/raw/tob/ but is never consumed by the execution engine
 
   4.2 P&L Decomposition
 
@@ -637,17 +664,18 @@
   aligned_pos  = pos.reindex(ret.index).fillna(0.0)
   prior_pos    = aligned_pos.shift(1).fillna(0.0)         # Position from T-1
 
-  gross_pnl    = prior_pos * ret                           # Timing: correct ✅
+  gross_pnl    = prior_pos *ret                           # Timing: correct ✅
   trading_cost = (aligned_pos - prior_pos).abs()           # Turnover
                * (cost_bps_aligned / 10000.0)
-  funding_pnl  = -prior_pos * funding_rate_aligned         # Carry attribution ✅
+  funding_pnl  = -prior_pos *funding_rate_aligned         # Carry attribution ✅
   borrow_cost  = prior_pos.clip(upper=0.0).abs()           # Short borrow
                * borrow_rate_aligned
   pnl          = gross_pnl - trading_cost + funding_pnl - borrow_cost
 
   Sign convention verification (funding):
-  - Long (pos=+1), rate=+0.01%: funding_pnl = -1 × 0.0001 = -0.0001 → longs pay ✅
-  - Short (pos=-1), rate=+0.01%: funding_pnl = -(-1) × 0.0001 = +0.0001 → shorts receive ✅
+
+- Long (pos=+1), rate=+0.01%: funding_pnl = -1 × 0.0001 = -0.0001 → longs pay ✅
+- Short (pos=-1), rate=+0.01%: funding_pnl = -(-1) × 0.0001 = +0.0001 → shorts receive ✅
 
   Funding accrual issue: funding_rate_scaled is merged onto all bars (including flat bars). The formula funding_pnl =
   -prior_pos × rate naturally produces zero when prior_pos = 0, so flat-position bars correctly contribute zero funding
@@ -657,12 +685,14 @@
 
   Location: engine/execution_model.py:9-55, configs/fees.yaml, pipelines/_lib/execution_costs.py:41-77
 
-  # configs/fees.yaml
+# configs/fees.yaml
+
   fee_bps_per_side: 4
   slippage_bps_per_fill: 2
   risk_per_trade_pct: 0.5
 
-  # execution_model.py — dynamic model
+# execution_model.py — dynamic model
+
   base_fee_bps      = config.get("base_fee_bps", 0.0)
   base_slippage_bps = config.get("base_slippage_bps", 0.0)
   spread_weight     = config.get("spread_weight", 0.0)      # 0 unless configured
@@ -670,17 +700,19 @@
   liquidity_weight  = config.get("liquidity_weight", 0.0)   # 0 unless configured
   impact_weight     = config.get("impact_weight", 0.0)      # 0 unless configured
 
-  dynamic = (spread_weight * spread_bps
-           + volatility_weight * vol_bps
-           + liquidity_weight * (liq_scale * 10.0)
-           + impact_weight * (impact * 10.0))
+  dynamic = (spread_weight *spread_bps
+           + volatility_weight* vol_bps
+           + liquidity_weight *(liq_scale* 10.0)
+           + impact_weight *(impact* 10.0))
 
   cost_bps = (base_fee_bps + base_slippage_bps + dynamic).clip(0.0, cap_bps)
 
-  # runner.py:376-379 — default split when no explicit execution_cfg
+# runner.py:376-379 — default split when no explicit execution_cfg
+
   execution_cfg["base_fee_bps"]      = float(cost_bps) / 2.0   # 3 bps
   execution_cfg["base_slippage_bps"] = float(cost_bps) / 2.0   # 3 bps
-  # Total: 6 bps round-trip (4 fee + 2 slippage per side = 12 bps, but cost_bps=6?)
+
+# Total: 6 bps round-trip (4 fee + 2 slippage per side = 12 bps, but cost_bps=6?)
 
   Calibration note: The fees.yaml specifies 4 bps fee + 2 bps slippage = 6 bps per side. The cost_bps in pipeline args
   refers to total round-trip cost. The split 50/50 in runner.py correctly allocates 3 bps fee + 3 bps slippage per side
@@ -702,7 +734,7 @@
       "cost_bps": float(cost),
       "execution_model": execution_model,
   }
-  digest = _sha256_text(json.dumps(payload, sort_keys=True, default=str))
+  digest =_sha256_text(json.dumps(payload, sort_keys=True, default=str))
 
   Enforcement: compile_strategy_blueprints.py:299-302
 
@@ -729,7 +761,8 @@
 
   4.6 Missing Data Handling in Engine
 
-  # pnl.py:61-72 — NaN returns zero out all components
+# pnl.py:61-72 — NaN returns zero out all components
+
   nan_ret = ret.isna()
   if nan_ret.any():
       gross_pnl[nan_ret] = 0.0
@@ -737,7 +770,8 @@
       funding_pnl[nan_ret] = 0.0
       borrow_cost[nan_ret] = 0.0
 
-  # runner.py:358-367 — missing funding defaults to 0
+# runner.py:358-367 — missing funding defaults to 0
+
   funding_series = pd.to_numeric(
       features_indexed.get("funding_rate_scaled",
       pd.Series(0.0, index=ret.index)).reindex(ret.index),
@@ -749,7 +783,7 @@
   ---
   SECTION 5 — COMPLETE FINDINGS TABLE
 
-  #: F-1
+  #: F-1 ✅ RESOLVED (B1, Feb 23 2026)
   Issue: Fallback promotion bypasses BH-FDR entirely
   Severity: 🔴 CRITICAL
   Evidence — File:Lines: spec/gates.yaml:22 (promotion_eligible_regardless_of_fdr: true);
@@ -768,7 +802,7 @@
   Impact on 60-day Run: ~30 false "lift discoveries" expected across 100 groups × 6 conditions; the "+10 bps" target may
 
     be met by noise
-  Recommended Fix: Add per-group BH correction: apply _bh_adjust(p_values_per_group) before reporting lift_bps; filter
+  Recommended Fix: Add per-group BH correction: apply *bh_adjust(p_values_per_group) before reporting lift_bps; filter
   on
     lift_q_value ≤ 0.10
   Effort: 1 day
@@ -776,15 +810,15 @@
   #: F-3
   Issue: BH family pools symbols — per-symbol FDR uncontrolled
   Severity: 🟡 HIGH
-  Evidence — File:Lines: phase2_candidate_discovery.py:542 (family_id = f"{event_type}_{rule}_{horizon}_{cond_label}"),
+  Evidence — File:Lines: phase2_candidate_discovery.py:542 (family_id = f"{event_type}*{rule}*{horizon}*{cond_label}"),
     phase2_candidate_discovery.py:638
   Impact on 60-day Run: Cross-symbol power leakage; ETH/SOL events inflate BTC discovery rate and vice versa; per-symbol
 
     edge claims are unsupported
-  Recommended Fix: Prepend symbol to family_id: f"{symbol}_{event_type}_{rule}_{horizon}_{cond_label}"
+  Recommended Fix: Prepend symbol to family_id: f"{symbol}*{event_type}*{rule}*{horizon}*{cond_label}"
   Effort: 2 hours
   ────────────────────────────────────────
-  #: F-4
+  #: F-4 ✅ RESOLVED (B2, Feb 23 2026)
   Issue: Walk-forward embargo = 0 by default
   Severity: 🟡 HIGH
   Evidence — File:Lines: eval/run_walkforward.py (--embargo_days default 0); eval/splits.py
@@ -797,7 +831,7 @@
   #: F-5
   Issue: Normal CDF approximation inflates discoveries at small n
   Severity: 🟡 MEDIUM
-  Evidence — File:Lines: analyze_conditional_expectancy.py:114-123 (_normal_cdf comment: "Normal approximation keeps
+  Evidence — File:Lines: analyze_conditional_expectancy.py:114-123 (*normal_cdf comment: "Normal approximation keeps
   this
     dependency-free")
   Impact on 60-day Run: At n=30, t=2.0: Normal p=0.046 vs exact t p=0.057 — 19% underestimate inflates is_discovery
@@ -818,14 +852,14 @@
   #: F-7
   Issue: 1s ToB data ingested but never consumed in execution
   Severity: 🟡 MEDIUM
-  Evidence — File:Lines: engine/runner.py:246-268 (features joined, no ToB); clean/build_tob_*.py (tob built but unused)
+  Evidence — File:Lines: engine/runner.py:246-268 (features joined, no ToB); clean/build_tob**.py (tob built but unused)
   Impact on 60-day Run: Bid/ask spread defaults to 0 in cost model; real spread during liquidation events is 2-10×
   normal
   Recommended Fix: Wire spread_bps from ToB parquet into runner.py frame_for_cost; set spread_weight > 0 in
   execution_cfg
   Effort: 2 days
   ────────────────────────────────────────
-  #: F-8
+  #: F-8 ✅ RESOLVED (PR-5, Feb 23 2026)
   Issue: Liquidation CM↔UM symbol map — silent zero-event failure
   Severity: 🟡 MEDIUM
   Evidence — File:Lines: ingest_binance_um_liquidation_snapshot.py:32-41 (CM_SYMBOL_MAP); no post-ingest validation
@@ -925,8 +959,8 @@
   Evidence: phase2_candidate_discovery.py:784-798
   ────────────────────────────────────────
   Control: Fallback track FDR control
-  Status: ❌ FAIL
-  Evidence: gates.yaml:22 bypass
+  Status: ✅ PASS (resolved B1, Feb 23 2026)
+  Evidence: gates.yaml:22 bypass → fixed; fallback blueprints banned from OOS artifacts
   ────────────────────────────────────────
   Control: Symbol stratification in families
   Status: ❌ FAIL
@@ -937,8 +971,8 @@
   Evidence: eval/ablation.py:30-43 — no BH on lift
   ────────────────────────────────────────
   Control: Walk-forward embargo ≥ 1 day
-  Status: ❌ FAIL
-  Evidence: Default = 0
+  Status: ✅ PASS (resolved B2, Feb 23 2026)
+  Evidence: Default changed 0 → 1 day in run_walkforward.py
   ────────────────────────────────────────
   Control: Lift hypothesis pre-registered
   Status: ❌ FAIL
@@ -963,7 +997,7 @@
   ├───────────────────────────────────┼─────────┼───────────────────────────────────────────────────┤
   │ OI delta window correct (12 bars) │ ✅ PASS │ build_features_v1.py:165                          │
   ├───────────────────────────────────┼─────────┼───────────────────────────────────────────────────┤
-  │ Liquidation symbol map validation │ ❌ FAIL │ No assertion after mapping                        │
+  │ Liquidation symbol map validation │ ✅ PASS │ Resolved PR-5 Feb 23 2026; 31 unit tests added    │
   └───────────────────────────────────┴─────────┴───────────────────────────────────────────────────┘
 
   6.4 Execution Realism
@@ -1015,93 +1049,107 @@
 
   These 5 PRs are required for the run results to be statistically defensible.
 
-  PR-1: Fix fallback FDR bypass (F-1)
-  - File: spec/gates.yaml:22
-  - Change: promotion_eligible_regardless_of_fdr: true → false
-  - OR: Add filter in backtest_strategies.py to exclude lineage.promotion_track = "fallback_only" from OOS measurement
-  - Acceptance: Zero fallback-track blueprints in lift measurement; run manifest shows fallback_eligible_compile = 0 in
+  PR-1: Fix fallback FDR bypass (F-1) ✅ DONE Feb 23 2026
+
+- File: spec/gates.yaml:22
+- Change: promotion_eligible_regardless_of_fdr: true → false
+- OR: Add filter in backtest_strategies.py to exclude lineage.promotion_track = "fallback_only" from OOS measurement
+- Acceptance: Zero fallback-track blueprints in lift measurement; run manifest shows fallback_eligible_compile = 0 in
   phase2 report
-  - Effort: 0.5 day
+- Effort: 0.5 day
 
   PR-2: Add BH correction to ablation lift (F-2)
-  - File: eval/ablation.py:14-55
-  - Change: Within each (event, rule, horizon, symbol) group, compute t-statistic for (conditioned - baseline) and apply
+
+- File: eval/ablation.py:14-55
+- Change: Within each (event, rule, horizon, symbol) group, compute t-statistic for (conditioned - baseline) and apply
    _bh_adjust across conditions before reporting
-  - Acceptance: lift_q_value column in lift_summary.csv; only conditions with q ≤ 0.10 flagged as lift discoveries
-  - Effort: 1 day
+- Acceptance: lift_q_value column in lift_summary.csv; only conditions with q ≤ 0.10 flagged as lift discoveries
+- Effort: 1 day
 
   PR-3: Stratify BH family by symbol (F-3)
-  - File: phase2_candidate_discovery.py:542 and :638
-  - Change: family_id = f"{symbol}_{event_type}_{rule}_{horizon}_{cond_label}"
-  - Acceptance: Phase 2 report shows total_tested increased ~3×; discoveries_statistical per symbol reported separately
-  - Effort: 2 hours + re-run phase2 test suite
 
-  PR-4: Set embargo_days=1 default (F-4)
-  - File: eval/run_walkforward.py (argparse default)
-  - Change: default=0 → default=1 for --embargo_days
-  - Acceptance: Walk-forward report shows non-adjacent train/val windows; gap = 288 bars (1 day at 5m)
-  - Effort: 30 minutes
+- File: phase2_candidate_discovery.py:542 and :638
+- Change: family_id = f"{symbol}*{event_type}*{rule}*{horizon}*{cond_label}"
+- Acceptance: Phase 2 report shows total_tested increased ~3×; discoveries_statistical per symbol reported separately
+- Effort: 2 hours + re-run phase2 test suite
 
-  PR-5: Liquidation symbol map validation (F-8)
-  - File: ingest_binance_um_liquidation_snapshot.py (post-mapping block)
-  - Change: Add assert set(mapped_symbols) == set(requested_symbols) and assert len(events_per_symbol) > 0 with hard
+  PR-4: Set embargo_days=1 default (F-4) ✅ DONE Feb 23 2026
+
+- File: eval/run_walkforward.py (argparse default)
+- Change: default=0 → default=1 for --embargo_days
+- Acceptance: Walk-forward report shows non-adjacent train/val windows; gap = 288 bars (1 day at 5m)
+- Effort: 30 minutes
+
+  PR-5: Liquidation symbol map validation (F-8) ✅ DONE Feb 23 2026
+
+- File: ingest_binance_um_liquidation_snapshot.py (post-mapping block)
+- Change: Add assert set(mapped_symbols) == set(requested_symbols) and assert len(events_per_symbol) > 0 with hard
   failure
-  - Acceptance: Unit test covering a missing symbol triggers ValueError; certification run passes
-  - Effort: 2 hours
+- Acceptance: Unit test covering a missing symbol triggers ValueError; certification run passes — 31 tests added
+- Effort: 2 hours
 
   ---
   7.2 Phase 2–6 Weeks — REQUIRED for valid 60-day run interpretation
 
   PR-6: Pre-register lift hypothesis (F-11)
-  - Create: spec/hypotheses/lift_state_conditioned_v1.yaml
-  - Content: null_lift_bps, alternative_lift_bps (10), alpha (0.05), test_statistic (BH-corrected group lift),
+
+- Create: spec/hypotheses/lift_state_conditioned_v1.yaml
+- Content: null_lift_bps, alternative_lift_bps (10), alpha (0.05), test_statistic (BH-corrected group lift),
   min_n_events_per_condition (200), registered_date
-  - Acceptance: File committed and hash in run_manifest before run starts
+- Acceptance: File committed and hash in run_manifest before run starts
 
   PR-7: Add bootstrap CI to ablation (F-13)
-  - File: eval/ablation.py
-  - Change: 1000-resample block bootstrap (block = event sequence) for lift_bps; output lift_ci_low_90, lift_ci_high_90
-  - Acceptance: CI reported alongside point estimate; power analysis showing 60-day sample has ≥80% power to detect 10
+
+- File: eval/ablation.py
+- Change: 1000-resample block bootstrap (block = event sequence) for lift_bps; output lift_ci_low_90, lift_ci_high_90
+- Acceptance: CI reported alongside point estimate; power analysis showing 60-day sample has ≥80% power to detect 10
   bps lift
 
   PR-8: Add slippage sensitivity sweep (F-14)
-  - Create: project/scripts/run_cost_sensitivity.py
-  - Change: Re-run discovery at 1×, 1.5×, 2× cost_bps; compare discoveries_statistical and lift_bps across scenarios
-  - Acceptance: Lift ≥ 5 bps at 1.5× cost; ≥ 0 bps at 2× cost
+
+- Create: project/scripts/run_cost_sensitivity.py
+- Change: Re-run discovery at 1×, 1.5×, 2× cost_bps; compare discoveries_statistical and lift_bps across scenarios
+- Acceptance: Lift ≥ 5 bps at 1.5× cost; ≥ 0 bps at 2× cost
 
   PR-9: Wire spread from ToB into cost model (F-7)
-  - File: engine/runner.py:380-392
-  - Change: Load spread_bps from ToB parquet (via merge_asof backward) and pass to estimate_transaction_cost_bps; set
+
+- File: engine/runner.py:380-392
+- Change: Load spread_bps from ToB parquet (via merge_asof backward) and pass to estimate_transaction_cost_bps; set
   spread_weight = 0.5 in execution_cfg
-  - Acceptance: effective_avg_cost_bps in backtest results increases ~1-3 bps; cost model no longer reports zero spread
+- Acceptance: effective_avg_cost_bps in backtest results increases ~1-3 bps; cost model no longer reports zero spread
 
   PR-10: Exact t-CDF for p-values (F-5)
-  - File: analyze_conditional_expectancy.py:114-123
-  - Change: Implement exact t-distribution CDF using math.lgamma (no scipy), use when n < 200
-  - Acceptance: Unit test: _two_sided_p_from_t(t=2.0, n=30) ≈ 0.057 ± 0.001
+
+- File: analyze_conditional_expectancy.py:114-123
+- Change: Implement exact t-distribution CDF using math.lgamma (no scipy), use when n < 200
+- Acceptance: Unit test: _two_sided_p_from_t(t=2.0, n=30) ≈ 0.057 ± 0.001
 
   ---
   7.3 Phase 6–12 Weeks — Production hardening post-lift validation
 
   PR-11: Move to next-bar open fills (F-6)
-  - File: engine/runner.py:332-335, engine/pnl.py
-  - Change: Use open_price.shift(-1) as fill price; document expected P&L delta vs close-price baseline
-  - Acceptance: Slippage study comparing close vs open fill on signal bars over 60-day window
+
+- File: engine/runner.py:332-335, engine/pnl.py
+- Change: Use open_price.shift(-1) as fill price; document expected P&L delta vs close-price baseline
+- Acceptance: Slippage study comparing close vs open fill on signal bars over 60-day window
 
   PR-12: Monitoring dashboard
-  - Create: project/monitoring/daily_monitor.py
-  - Metrics: Daily realized PnL, rolling 20-day Sharpe per strategy, drawdown from peak, funding carry attribution,
+
+- Create: project/monitoring/daily_monitor.py
+- Metrics: Daily realized PnL, rolling 20-day Sharpe per strategy, drawdown from peak, funding carry attribution,
   trigger count per event type
-  - Alerts: Email/webhook if drawdown > 3% in 5 days, or daily Sharpe < -1.0
+- Alerts: Email/webhook if drawdown > 3% in 5 days, or daily Sharpe < -1.0
 
   PR-13: Experiment tracking integration
-  - Integrate: MLflow or Weights & Biases
-  - Log per run: all metrics from phase2 report, lift_summary.csv, walk-forward Sharpe, cost_config_digest
-  - Acceptance: UI shows lift by condition across all historical runs
+
+- Integrate: MLflow or Weights & Biases
+- Log per run: all metrics from phase2 report, lift_summary.csv, walk-forward Sharpe, cost_config_digest
+- Acceptance: UI shows lift by condition across all historical runs
 
   PR-14: Extend certification to 30 days
-  - File: data/runs/certification_batch/ — re-run with --start=2023-12-01 --end=2024-01-07
-  - Acceptance: gate_bridge_has_trades_validation passes for ≥10 events per active event type
+
+- File: data/runs/certification_batch/ — re-run with --start=2023-12-01 --end=2024-01-07
+- Acceptance: gate_bridge_has_trades_validation passes for ≥10 events per active event type
 
   ---
   7.4 Pass/Fail Acceptance Metrics for 60-Day Run
@@ -1148,10 +1196,10 @@
   The following could not be verified from the codebase alone. Explicit confirmation is required before the 60-day run
   starts.
 
-  1. Bar timeframe in execution: runner.py dedup labels say "15m" (f"features:{symbol}:15m"), but the pipeline builds
+  1. ✅ RESOLVED (A1, Feb 23 2026) Bar timeframe in execution: runner.py dedup labels say "15m" (f"features:{symbol}:15m"), but the pipeline builds
   "5m" cleaned bars. If backtest_strategies.py loads 15m OHLCV while discovery uses 5m events, there is a 3-bar
-  resolution mismatch at every event timestamp. Confirm: does backtest_strategies.py pass --timeframe=5m or
-  --timeframe=15m to runner.py?
+  resolution mismatch at every event timestamp. → Fixed:_DEFAULT_TIMEFRAME = "5m" in runner.py; --timeframe="5m"
+  threaded through backtest_strategies.py, run_walkforward.py, and run_all.py (--backtest_timeframe).
   2. Conditioning density in 60-day run: The audit assumes ≤6 conditioning states per template. Confirm
   MAX_CONDITIONING_VARIANTS in generate_hypothesis_queue.py:24 is enforced and matches the multiplicity budget above.
   3. Fallback blueprint fraction in existing runs: Check data/reports/phase2/ablation/ or any existing blueprints.jsonl

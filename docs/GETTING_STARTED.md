@@ -10,13 +10,15 @@ This guide will walk you through setting up the Backtest platform and running yo
 
 ## ⚙️ Installation
 
-1.  **Clone the repository**:
+1. **Clone the repository**:
+
     ```bash
     git clone <repository-url>
     cd Backtest
     ```
 
-2.  **Create a virtual environment**:
+2. **Create a virtual environment**:
+
     ```bash
     python -m venv .venv
     # Windows:
@@ -25,14 +27,16 @@ This guide will walk you through setting up the Backtest platform and running yo
     source .venv/bin/activate
     ```
 
-3.  **Install dependencies**:
+3. **Install dependencies**:
+
     ```bash
     pip install -r requirements.txt
     pip install -r requirements-dev.txt
     ```
 
-4.  **Set Environment Variables**:
+4. **Set Environment Variables**:
     The platform needs to know where to store data. By default, it uses a `data/` folder in the root.
+
     ```bash
     # Windows (PowerShell):
     $env:BACKTEST_DATA_ROOT = "$(pwd)\data"
@@ -45,7 +49,9 @@ This guide will walk you through setting up the Backtest platform and running yo
 The platform uses a master orchestrator `project/pipelines/run_all.py` to manage complex research stages.
 
 ### 1. Ingest and Clean Data
+
 Run the initial stage to fetch data for BTC and ETH:
+
 ```bash
 python project/pipelines/run_all.py 
     --run_id my_first_run 
@@ -55,7 +61,9 @@ python project/pipelines/run_all.py
 ```
 
 ### 2. Run Full Discovery
+
 To detect "Liquidity Vacuum" events and validate them statistically:
+
 ```bash
 python project/pipelines/run_all.py 
     --run_id discovery_run 
@@ -70,7 +78,9 @@ python project/pipelines/run_all.py
 ```
 
 ### 3. Run Atlas-Driven Discovery (Automated)
+
 Instead of specifying event types manually, let the Knowledge Atlas drive the queue:
+
 ```bash
 python project/pipelines/run_all.py \
     --run_id atlas_run \
@@ -83,7 +93,9 @@ python project/pipelines/run_all.py \
 ```
 
 ### 4. Check the Results
+
 After the run finishes, check the following locations:
+
 - **Run Logs**: `data/runs/discovery_run/`
 - **Global Templates**: `atlas/template_index.md`
 - **Per-Run Plan**: `data/reports/hypothesis_generator/discovery_run/candidate_plan.jsonl`
@@ -93,10 +105,13 @@ After the run finishes, check the following locations:
 ## ✅ Running Tests
 
 Ensure everything is working correctly by running the fast test suite:
+
 ```bash
 make test-fast
 ```
+
 or directly with pytest:
+
 ```bash
 pytest -m "not slow"
 ```
