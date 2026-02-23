@@ -30,6 +30,21 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 LOGGER = logging.getLogger(__name__)
 
+# Bars-per-year lookup for Sharpe annualization.  Add entries as new timeframes land.
+BARS_PER_YEAR: Dict[str, int] = {
+    "1m":  525_600,   # 365 * 24 * 60
+    "5m":  105_120,   # 365 * 24 * 12
+    "15m":  35_040,   # 365 * 24 * 4
+    "1h":    8_760,   # 365 * 24
+    "4h":    2_190,   # 365 * 6
+    "1d":      365,
+}
+
+# Default execution timeframe — matches the research pipeline's feature lake layout.
+# Changing this requires the feature builder and cleaned bar builder to produce data
+# at the matching granularity before any backtest run.
+_DEFAULT_TIMEFRAME = "5m"
+
 
 @dataclass
 class StrategyResult:
@@ -204,14 +219,15 @@ def _load_symbol_data(
     start_ts: pd.Timestamp | None = None,
     end_ts: pd.Timestamp | None = None,
     event_flags: pd.DataFrame | None = None,
+    timeframe: str = _DEFAULT_TIMEFRAME,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     feature_candidates = [
-        run_scoped_lake_path(data_root, run_id, "features", "perp", symbol, "15m", "features_v1"),
-        data_root / "lake" / "features" / "perp" / symbol / "15m" / "features_v1",
+        run_scoped_lake_path(data_root, run_id, "features", "perp", symbol, timeframe, "features_v1"),
+        data_root / "lake" / "features" / "perp" / symbol / timeframe / "features_v1",
     ]
     bars_candidates = [
-        run_scoped_lake_path(data_root, run_id, "cleaned", "perp", symbol, "bars_15m"),
-        data_root / "lake" / "cleaned" / "perp" / symbol / "bars_15m",
+        run_scoped_lake_path(data_root, run_id, "cleaned", "perp", symbol, f"bars_{timeframe}"),
+        data_root / "lake" / "cleaned" / "perp" / symbol / f"bars_{timeframe}",
     ]
     features_dir = choose_partition_dir(feature_candidates)
     bars_dir = choose_partition_dir(bars_candidates)
@@ -220,15 +236,19 @@ def _load_symbol_data(
     features = read_parquet(feature_files)
     bars = read_parquet(bars_files)
     if features.empty or bars.empty:
-        raise ValueError(f"Missing data for {symbol}")
+        raise ValueError(
+            f"Missing data for {symbol} (timeframe={timeframe}). "
+            f"Expected features at {feature_candidates[0]} and bars at {bars_candidates[0]}. "
+            "Verify the feature builder ran with the matching timeframe."
+        )
 
     features["timestamp"] = pd.to_datetime(features["timestamp"], utc=True)
     bars["timestamp"] = pd.to_datetime(bars["timestamp"], utc=True)
     ensure_utc_timestamp(features["timestamp"], "timestamp")
     ensure_utc_timestamp(bars["timestamp"], "timestamp")
 
-    features, _ = _dedupe_timestamp_rows(features, label=f"features:{symbol}:15m")
-    bars, _ = _dedupe_timestamp_rows(bars, label=f"bars:{symbol}:15m")
+    features, _ = _dedupe_timestamp_rows(features, label=f"features:{symbol}:{timeframe}")
+    bars, _ = _dedupe_timestamp_rows(bars, label=f"bars:{symbol}:{timeframe}")
     if start_ts is not None:
         features = features[features["timestamp"] >= start_ts].copy()
         bars = bars[bars["timestamp"] >= start_ts].copy()
@@ -238,7 +258,7 @@ def _load_symbol_data(
     if features.empty or bars.empty:
         raise ValueError(f"No data in selected window for {symbol}")
 
-    context = _load_context_data(data_root, symbol, run_id=run_id, timeframe="15m")
+    context = _load_context_data(data_root, symbol, run_id=run_id, timeframe=timeframe)
     if start_ts is not None:
         context = context[context["timestamp"] >= start_ts].copy()
     if end_ts is not None:
@@ -698,6 +718,7 @@ def run_engine(
     params_by_strategy: Optional[Dict[str, Dict[str, object]]] = None,
     start_ts: pd.Timestamp | None = None,
     end_ts: pd.Timestamp | None = None,
+    timeframe: str = _DEFAULT_TIMEFRAME,
 ) -> Dict[str, object]:
     engine_dir = data_root / "runs" / run_id / "engine"
     ensure_dir(engine_dir)
@@ -736,6 +757,7 @@ def run_engine(
                 start_ts=start_ts,
                 end_ts=end_ts,
                 event_flags=event_flags,
+                timeframe=timeframe,
             )
             eligibility_mask = _symbol_eligibility_mask(bars["timestamp"], symbol, universe_snapshots)
             result = _strategy_returns(
@@ -876,11 +898,3 @@ def run_engine(
         "diagnostics": metrics.get("diagnostics", {}),
     }
 
-
-    # --- EXECUTION COST WIRING PATCH ---
-    fee_bps = params.get("fee_bps_per_side")
-    slip_bps = params.get("slippage_bps_per_fill")
-    if fee_bps is not None or slip_bps is not None:
-        execution_cfg["base_fee_bps"] = fee_bps if fee_bps is not None else cost_bps / 2
-        execution_cfg["base_slippage_bps"] = slip_bps if slip_bps is not None else cost_bps / 2
-    # --- END PATCH ---

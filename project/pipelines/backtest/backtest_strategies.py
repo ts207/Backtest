@@ -23,7 +23,7 @@ from pipelines._lib.execution_costs import resolve_execution_costs
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.validation import strategy_family_allowed_keys, validate_strategy_family_params
 from engine.pnl import compute_pnl
-from engine.runner import run_engine
+from engine.runner import BARS_PER_YEAR, run_engine
 from strategies.overlay_registry import apply_overlay
 from strategy_dsl.schema import (
     Blueprint,
@@ -293,14 +293,18 @@ def _filter_blueprints(
     top_k: int,
     cli_symbols: List[str],
 ) -> List[Blueprint]:
-    # B1: Hard fail if ANY blueprint in the selection set has promotion_track=fallback_only.
-    for bp in blueprints:
-        if bp.lineage.promotion_track == "fallback_only":
-            raise ValueError(
-                f"EVALUATION GUARD [INV_NO_FALLBACK_IN_MEASUREMENT]: "
-                f"Blueprint {bp.id} has promotion_track='fallback_only'. "
-                "Fallback blueprints bypass BH-FDR and cannot appear in evaluation artifacts."
-            )
+    # B1: Hard fail if ANY input blueprint has promotion_track != 'standard'.
+    # Checked before filtering so nothing slips through on event_type/top_k path.
+    fallback_inputs = [bp for bp in blueprints if bp.lineage.promotion_track != "standard"]
+    if fallback_inputs:
+        bad_ids = ", ".join(bp.id for bp in fallback_inputs[:5])
+        extra = f" (+{len(fallback_inputs) - 5} more)" if len(fallback_inputs) > 5 else ""
+        raise ValueError(
+            f"EVALUATION GUARD [INV_NO_FALLBACK_IN_MEASUREMENT]: "
+            f"{len(fallback_inputs)} blueprint(s) have promotion_track != 'standard': {bad_ids}{extra}. "
+            "Fallback-only blueprints bypass BH-FDR and cannot be used in evaluation. "
+            "Remediation: set spec/gates.yaml gate_v1_fallback.promotion_eligible_regardless_of_fdr: false."
+        )
     filtered = blueprints
     if event_type != "all":
         filtered = [bp for bp in filtered if bp.event_type == event_type]
@@ -718,6 +722,7 @@ def main() -> int:
     parser.add_argument("--blueprints_top_k", type=int, default=10)
     parser.add_argument("--blueprints_filter_event_type", default="all")
     parser.add_argument("--overlays", default="")
+    parser.add_argument("--timeframe", default="5m", help="Bar timeframe for data loading (e.g. '5m', '15m')")
     parser.add_argument("--force", type=int, default=0)
     parser.add_argument("--clean_engine_artifacts", type=int, default=1)
     parser.add_argument("--config", action="append", default=[])
@@ -802,6 +807,18 @@ def main() -> int:
             )
             if not selected_blueprints:
                 raise ValueError("No blueprints selected after applying filters/top-k and symbol intersection.")
+            # B1: Hard fail on fallback blueprints — they bypass BH-FDR and are banned from
+            # evaluation artifacts. [INV_NO_FALLBACK_IN_MEASUREMENT]
+            fallback_bps = [bp for bp in selected_blueprints if bp.lineage.promotion_track != "standard"]
+            if fallback_bps:
+                bad_ids = ", ".join(bp.id for bp in fallback_bps)
+                raise ValueError(
+                    f"EVALUATION GUARD [INV_NO_FALLBACK_IN_MEASUREMENT]: "
+                    f"{len(fallback_bps)} blueprint(s) have promotion_track != 'standard': {bad_ids}. "
+                    "Fallback-only blueprints bypass BH-FDR and cannot be used in evaluation. "
+                    "Remediation: set spec/gates.yaml gate_v1_fallback.promotion_eligible_regardless_of_fdr: false "
+                    "and re-run discovery to produce standard-track survivors only."
+                )
             for bp in selected_blueprints:
                 strategy_id = f"dsl_interpreter_v1__{_sanitize_id(bp.id)}"
                 strategies.append(strategy_id)
@@ -870,6 +887,7 @@ def main() -> int:
             params_by_strategy=strategy_params_by_name,
             start_ts=start_ts,
             end_ts=end_ts,
+            timeframe=args.timeframe,
         )
 
         for strategy_name in strategies:
@@ -932,7 +950,10 @@ def main() -> int:
             equity_series = INITIAL_EQUITY * (1.0 + cumulative_return)
             ending_equity = float(equity_series.iloc[-1])
             max_drawdown = _compute_drawdown(equity_series)
-            sharpe_annualized = _annualized_sharpe(portfolio["portfolio_pnl"])
+            sharpe_annualized = _annualized_sharpe(
+                portfolio["portfolio_pnl"],
+                periods_per_year=BARS_PER_YEAR.get(args.timeframe, BARS_PER_YEAR_5M),
+            )
         metrics_payload = {
             "total_trades": total_trades,
             "win_rate": win_rate,
@@ -1040,15 +1061,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
-    # --- COST DECOMPOSITION PATCH ---
-    if "dynamic_cost_bps" in frame.columns:
-        total_cost = (frame["turnover"] * frame["dynamic_cost_bps"] / 10000.0).sum()
-        dynamic_extra = max(0.0, total_cost - (fees + slippage + impact))
-        cost_decomposition["dynamic_slippage"] = dynamic_extra
-        cost_decomposition["net_alpha"] = gross - total_cost + funding - borrow
-    # --- END PATCH ---
 
 
 def _write_trigger_coverage(run_dir: Path, results: list, enabled: int = 1):

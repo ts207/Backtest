@@ -101,6 +101,50 @@ def _to_cm_contract(symbol: str) -> str:
     return s
 
 
+# All recognized CM perpetual contract names — used for pre-ingest mapping validation.
+_KNOWN_CM_CONTRACTS: frozenset = frozenset(CM_SYMBOL_MAP.values())
+
+
+def _assert_cm_mapping_complete(symbols: List[str]) -> None:
+    """Raise ValueError if any symbol has no recognized CM perpetual contract mapping.
+
+    Called before network I/O so an unmapped symbol (e.g. 'SOL') causes a clear,
+    immediate failure rather than a silent 0-row result.
+    """
+    unmapped = [s for s in symbols if _to_cm_contract(s) not in _KNOWN_CM_CONTRACTS]
+    if not unmapped:
+        return
+    details = ", ".join(f"{s!r} -> {_to_cm_contract(s)!r}" for s in unmapped)
+    raise ValueError(
+        f"Symbol mapping validation failed [F-8]: {len(unmapped)} symbol(s) have no "
+        f"recognized CM perpetual contract mapping: {details}. "
+        "Add entries to CM_SYMBOL_MAP or restrict --symbols to supported CM contracts "
+        f"(currently: {sorted(_KNOWN_CM_CONTRACTS)})."
+    )
+
+
+def _assert_events_per_symbol(events_per_symbol: Dict[str, int]) -> None:
+    """Raise ValueError if any symbol contributed 0 liquidation events after ingestion.
+
+    Catches symbols that mapped correctly but returned no archive data (e.g. a CM
+    contract with no liquidation coverage for the requested date range).
+    """
+    if not events_per_symbol:
+        raise ValueError(
+            "Per-symbol event validation failed [F-8]: events_per_symbol is empty — "
+            "no symbols were processed."
+        )
+    empty = [s for s, n in events_per_symbol.items() if n == 0]
+    if not empty:
+        return
+    raise ValueError(
+        f"Per-symbol event validation failed [F-8]: {len(empty)} symbol(s) returned "
+        f"0 liquidation events after ingestion: {', '.join(empty)}. "
+        "Check CM archive availability and date range, or verify the symbol is a "
+        "supported CM perpetual (BTCUSD_PERP, ETHUSD_PERP)."
+    )
+
+
 def _to_float(value: object) -> float | None:
     if value is None:
         return None
@@ -491,6 +535,9 @@ def main() -> int:
     stats: Dict[str, object] = {"provider": "binance_data_vision_cm", "symbols": {}}
 
     try:
+        # F-8: Fail fast before any network I/O if any symbol has no CM contract mapping.
+        _assert_cm_mapping_complete(symbols)
+
         session = requests.Session()
         total_rows = 0
         total_written_parts = 0
@@ -593,6 +640,10 @@ def main() -> int:
 
             total_rows += int(len(data))
             total_written_parts += int(written_parts)
+
+        # F-8: Post-loop — every symbol must have contributed at least one event.
+        events_per_symbol = {s: int(stats["symbols"][s]["rows"]) for s in symbols}
+        _assert_events_per_symbol(events_per_symbol)
 
         if int(args.fail_if_no_data) and total_rows == 0 and total_written_parts == 0:
             raise RuntimeError(

@@ -128,15 +128,22 @@ def _expected_blueprint_strategy_ids(
     cli_symbols: List[str],
 ) -> List[str]:
     raw_rows = _load_blueprints_raw(blueprints_path)
-    # B1: Hard fail if ANY blueprint being processed has promotion_track=fallback_only.
-    for row in raw_rows:
-        lineage = row.get("lineage", {})
-        if isinstance(lineage, dict) and str(lineage.get("promotion_track", "standard")) == "fallback_only":
-            raise ValueError(
-                f"EVALUATION GUARD [INV_NO_FALLBACK_IN_MEASUREMENT]: "
-                f"Blueprint {row.get('id')} has promotion_track='fallback_only'. "
-                "Fallback blueprints bypass BH-FDR and cannot appear in evaluation artifacts."
-            )
+    # B1: Hard fail if ANY blueprint has promotion_track != 'standard'.
+    # Fallback blueprints bypass BH-FDR and are banned from evaluation. [INV_NO_FALLBACK_IN_MEASUREMENT]
+    fallback_rows = [
+        row for row in raw_rows
+        if str((row.get("lineage") or {}).get("promotion_track", "standard")) != "standard"
+    ]
+    if fallback_rows:
+        bad_ids = ", ".join(str(row.get("id", "<unknown>")) for row in fallback_rows[:5])
+        extra = f" (+{len(fallback_rows) - 5} more)" if len(fallback_rows) > 5 else ""
+        raise ValueError(
+            f"EVALUATION GUARD [INV_NO_FALLBACK_IN_MEASUREMENT]: "
+            f"{len(fallback_rows)} blueprint(s) have promotion_track != 'standard': {bad_ids}{extra}. "
+            "Fallback-only blueprints bypass BH-FDR and cannot appear in evaluation artifacts. "
+            "Remediation: set spec/gates.yaml gate_v1_fallback.promotion_eligible_regardless_of_fdr: false "
+            "and re-run discovery to produce standard-track survivors only."
+        )
     cli_set = {str(symbol).strip().upper() for symbol in cli_symbols if str(symbol).strip()}
     out: List[str] = []
     seen = set()
@@ -676,6 +683,7 @@ def _build_backtest_cmd(
     blueprints_filter_event_type: str,
     clean_engine_artifacts: int,
     config_paths: List[str],
+    timeframe: str = "5m",
 ) -> List[str]:
     cmd = [
         sys.executable,
@@ -692,6 +700,8 @@ def _build_backtest_cmd(
         str(int(force)),
         "--clean_engine_artifacts",
         str(int(clean_engine_artifacts)),
+        "--timeframe",
+        str(timeframe),
     ]
     if fees_bps is not None:
         cmd.extend(["--fees_bps", str(float(fees_bps))])
@@ -725,7 +735,7 @@ def main() -> int:
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
-    parser.add_argument("--embargo_days", type=int, default=0)
+    parser.add_argument("--embargo_days", type=int, default=1)  # B2: default 1, never 0
     parser.add_argument("--allow_zero_trigger_coverage", type=int, default=0)
     parser.add_argument("--train_frac", type=float, default=0.6)
     parser.add_argument("--validation_frac", type=float, default=0.2)
@@ -735,6 +745,7 @@ def main() -> int:
     parser.add_argument("--cost_bps", type=float, default=None)
     parser.add_argument("--strategies", default=None)
     parser.add_argument("--overlays", default="")
+    parser.add_argument("--timeframe", default="5m", help="Bar timeframe for data loading (e.g. '5m', '15m')")
     parser.add_argument("--blueprints_path", default=None)
     parser.add_argument("--blueprints_top_k", type=int, default=10)
     parser.add_argument("--blueprints_filter_event_type", default="all")
@@ -760,6 +771,17 @@ def main() -> int:
         return 1
     if not (0.0 < float(args.drawdown_tail_q) < 1.0):
         print("run_walkforward: --drawdown_tail_q must be within (0,1).", file=sys.stderr)
+        return 1
+    # B2: Hard fail if embargo is zero — autocorrelation from persistent regime states bleeds
+    # across train/validation boundaries, inflating OOS Sharpe. [INV_EMBARGO_NONZERO]
+    if int(args.embargo_days) < 1:
+        print(
+            f"EVALUATION GUARD [INV_EMBARGO_NONZERO]: --embargo_days={args.embargo_days} is below "
+            "the required minimum of 1. Autocorrelation from persistent regime states bleeds across "
+            "train/validation boundaries when embargo=0, inflating OOS Sharpe. "
+            "Remediation: use --embargo_days 1 or higher.",
+            file=sys.stderr,
+        )
         return 1
 
     out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "eval" / args.run_id
@@ -843,6 +865,7 @@ def main() -> int:
                 blueprints_filter_event_type=str(args.blueprints_filter_event_type),
                 clean_engine_artifacts=int(args.clean_engine_artifacts),
                 config_paths=[str(path) for path in args.config],
+                timeframe=str(args.timeframe),
             )
             rc = _run_split_backtest(cmd)
             if rc != 0:

@@ -348,12 +348,13 @@ def main() -> int:
     parser.add_argument("--oi_drop_th", type=float, default=-500000.0)
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--run_backtest", type=int, default=0)
+    parser.add_argument("--backtest_timeframe", default="5m", help="Bar timeframe for backtest/walkforward data loading (e.g. '5m', '15m')")
     parser.add_argument("--clean_engine_artifacts", type=int, default=1)
     parser.add_argument("--run_blueprint_promotion", type=int, default=1)
     parser.add_argument("--promotion_allow_fallback_evidence", type=int, default=0)
     parser.add_argument("--run_walkforward_eval", type=int, default=0)
     parser.add_argument("--walkforward_allow_unexpected_strategy_files", type=int, default=0)
-    parser.add_argument("--walkforward_embargo_days", type=int, default=0)
+    parser.add_argument("--walkforward_embargo_days", type=int, default=1)  # B2: default 1, never 0
     parser.add_argument("--walkforward_train_frac", type=float, default=0.6)
     parser.add_argument("--walkforward_validation_frac", type=float, default=0.2)
     parser.add_argument("--walkforward_regime_max_share", type=float, default=0.80)
@@ -1086,6 +1087,7 @@ def main() -> int:
                 base_args.extend(["--blueprints_path", str(effective_blueprints_path)])
                 base_args.extend(["--blueprints_top_k", str(int(args.blueprints_top_k))])
                 base_args.extend(["--blueprints_filter_event_type", str(args.blueprints_filter_event_type)])
+            base_args.extend(["--timeframe", str(args.backtest_timeframe)])
         if stage_name.startswith("phase2_conditional_hypotheses") or stage_name == "compile_strategy_blueprints":
             if args.fees_bps is not None:
                 base_args.extend(["--fees_bps", str(args.fees_bps)])
@@ -1108,6 +1110,7 @@ def main() -> int:
                 base_args.extend(["--blueprints_path", str(effective_blueprints_path)])
                 base_args.extend(["--blueprints_top_k", str(int(args.blueprints_top_k))])
                 base_args.extend(["--blueprints_filter_event_type", str(args.blueprints_filter_event_type)])
+            base_args.extend(["--timeframe", str(args.backtest_timeframe)])
 
     stage_timings: List[Tuple[str, float]] = []
     feature_schema_version, feature_schema_hash = _feature_schema_metadata()
@@ -1224,11 +1227,29 @@ def main() -> int:
             run_manifest["checklist_decision"] = checklist_decision
             if checklist_decision == "KEEP_RESEARCH" and execution_requested:
                 if bool(int(args.auto_continue_on_keep_research)):
-                    # B1: Hard fail if auto_continue would inject fallback override.
+                    # B1: Hard fail — auto_continue would inject --allow_fallback_blueprints=1
+                    # into compile_strategy_blueprints, producing fallback-track blueprints that
+                    # bypass BH-FDR. Write manifest before exiting. [INV_NO_FALLBACK_IN_MEASUREMENT]
+                    run_manifest["finished_at"] = _utc_now_iso()
+                    run_manifest["ended_at"] = run_manifest["finished_at"]
+                    run_manifest["status"] = "failed"
+                    run_manifest["failed_stage"] = "checklist_gate"
+                    run_manifest["evaluation_guard_violation"] = (
+                        "auto_continue_on_keep_research blocked: would inject "
+                        "--allow_fallback_blueprints=1, producing fallback blueprints that "
+                        "bypass BH-FDR [INV_NO_FALLBACK_IN_MEASUREMENT]"
+                    )
+                    run_manifest["stage_timings_sec"] = {
+                        name: round(duration, 3) for name, duration in stage_timings
+                    }
+                    _write_run_manifest(run_id, run_manifest)
                     print(
                         "EVALUATION GUARD [INV_NO_FALLBACK_IN_MEASUREMENT]: "
-                        "--auto_continue_on_keep_research is blocked from injecting --allow_fallback_blueprints. "
-                        "Fallback blueprints are strictly forbidden in this environment.",
+                        "--auto_continue_on_keep_research is disabled. It would inject "
+                        "--allow_fallback_blueprints=1 which produces fallback blueprints "
+                        "that bypass BH-FDR and cannot appear in evaluation artifacts. "
+                        "Remediation: ensure discovery produces standard-track survivors, "
+                        "or do not request execution stages when checklist=KEEP_RESEARCH.",
                         file=sys.stderr,
                     )
                     return 1
@@ -1266,7 +1287,7 @@ def main() -> int:
                     print(
                         "Checklist gate blocked execution because decision=KEEP_RESEARCH. "
                         f"First blocked stage: {first_blocked}. "
-                        "Re-run with --auto_continue_on_keep_research 1 only for non-production diagnostics.",
+                        "Remediation: address checklist findings before requesting execution stages.",
                         file=sys.stderr,
                     )
                     return 1

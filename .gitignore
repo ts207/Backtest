@@ -16,10 +16,9 @@ __pycache__/
 .DS_Store
 .worktrees/
 
-# Windows ADS sidecars from copied files
+# Windows ADS sidecars from copied files (ASCII colon and unicode lookalike U+F03A)
 *:Zone.Identifier
-*#Uf03aZone.Identifier
-*#Uf03aZone.Identifier:Zone.Identifier
+*Zone.Identifier
 
 # Generated runtime artifacts
 data/*
