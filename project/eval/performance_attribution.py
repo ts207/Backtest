@@ -1,11 +1,5 @@
 import pandas as pd
 import numpy as np
-try:
-    import empyrical_reloaded as em
-    HAS_EMPYRICAL = True
-except ImportError:
-    HAS_EMPYRICAL = False
-
 def calculate_regime_metrics(df: pd.DataFrame, regime_col: str = "vol_regime", pnl_col: str = "pnl") -> pd.DataFrame:
     """
     Calculate performance metrics grouped by market regime.
@@ -34,11 +28,18 @@ def calculate_regime_metrics(df: pd.DataFrame, regime_col: str = "vol_regime", p
         std_pnl = pnl.std()
         sharpe = (mean_pnl / std_pnl) if std_pnl > 0 and not np.isnan(std_pnl) else 0.0
         
+        # Calculate Max Drawdown
+        cum_pnl = pnl.cumsum()
+        running_max = cum_pnl.cummax()
+        drawdown = running_max - cum_pnl
+        max_drawdown = drawdown.max()
+        
         return pd.Series({
             "total_pnl": total_pnl,
             "mean_pnl": mean_pnl,
             "std_pnl": std_pnl,
             "sharpe_ratio": sharpe,
+            "max_drawdown": max_drawdown,
             "count": count
         })
         

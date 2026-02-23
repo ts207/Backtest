@@ -16,7 +16,8 @@ def generate_attribution_report(metrics_df: pd.DataFrame, output_path: str) -> N
         raise ValueError("Cannot generate report from empty DataFrame")
         
     # We expect at least net_pnl_bps or sharpe_ratio to be present
-    if not any(col in metrics_df.columns for col in ["net_pnl_bps", "sharpe_ratio", "total_pnl"]):
+    required_metrics = ["net_pnl_bps", "sharpe_ratio", "total_pnl"]
+    if not any(col in metrics_df.columns for col in required_metrics):
         raise ValueError("DataFrame missing key performance metrics")
         
     output_file = Path(output_path)

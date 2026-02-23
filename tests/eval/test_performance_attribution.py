@@ -40,6 +40,17 @@ class TestPerformanceAttribution:
         assert "sharpe_ratio" in metrics.columns
         assert metrics.loc["high", "sharpe_ratio"] > 0
 
+    def test_calculate_regime_metrics_drawdown(self):
+        """Test that max_drawdown is calculated correctly."""
+        # Cum PNL: [1, 3, 2, 5, 4] -> Peak: [1, 3, 3, 5, 5] -> DD: [0, 0, 1, 0, 1]
+        df = pd.DataFrame({
+            "vol_regime": ["high"] * 5,
+            "pnl": [1.0, 2.0, -1.0, 3.0, -1.0]
+        })
+        metrics = calculate_regime_metrics(df)
+        assert "max_drawdown" in metrics.columns
+        assert metrics.loc["high", "max_drawdown"] == 1.0
+
     def test_missing_columns(self):
         """Should raise ValueError if pnl or regime column missing."""
         df = pd.DataFrame({"pnl": [0.01]})
