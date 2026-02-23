@@ -795,7 +795,7 @@ Project: Backtest — Quantitative Trading Research Platform
     filtering blueprints.jsonl on lineage.promotion_track
   Effort: 0.5 day
   ────────────────────────────────────────
-  #: F-2
+  #: F-2 ✅ RESOLVED
   Issue: Ablation lift has no multiplicity adjustment
   Severity: 🔴 HIGH
   Evidence — File:Lines: eval/ablation.py:30-43 (raw delta); ablation.py:57-124 (no correction in loop)
