@@ -9,7 +9,7 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md)
 
 ## Phase 2: Attribution-Aware Scoring
-- [ ] Task: TDD - Create tests for attribution-aware ranking logic
+- [~] Task: TDD - Create tests for attribution-aware ranking logic
 - [ ] Task: Implement logic to load regime attribution metrics in Atlas generator
 - [ ] Task: Implement `regime_attribution_score` calculation in ranking loop
 - [ ] Task: Update Atlas reporting to include attribution-aware metrics

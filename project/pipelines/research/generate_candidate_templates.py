@@ -43,6 +43,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Knowledge Atlas: Global Candidate Template Generator")
     parser.add_argument("--backlog", default="research_backlog.csv")
     parser.add_argument("--atlas_dir", default="atlas")
+    parser.add_argument("--attribution_report", default=None, help="Path to regime performance attribution report (Parquet)")
     args = parser.parse_args()
 
     atlas_dir = PROJECT_ROOT.parent / args.atlas_dir
@@ -58,9 +59,29 @@ def main() -> int:
         
         df = pd.read_csv(backlog_path)
         
-        # 1. Deterministic Ordering
+        # 1. Load Performance Attribution (if provided)
+        attribution_map = {}
+        if args.attribution_report:
+            attr_path = Path(args.attribution_report)
+            if attr_path.exists():
+                attr_df = pd.read_parquet(attr_path)
+                # Map concept_id -> score (e.g. sharpe_ratio)
+                if "concept_id" in attr_df.columns and "sharpe_ratio" in attr_df.columns:
+                    # If multiple rows per concept (different regimes), take the mean or max
+                    attribution_map = attr_df.groupby("concept_id")["sharpe_ratio"].mean().to_dict()
+        
+        def _get_attribution_bonus(row):
+            concept_id = str(row.get("concept_id"))
+            return attribution_map.get(concept_id, 0.0)
+
+        df["regime_attribution_score"] = df.apply(_get_attribution_bonus, axis=1)
+        # Higher attribution bonus reduces priority_score (making it higher priority)
+        # We clip bonus to avoid negative priority_scores
+        df["adjusted_priority_score"] = (df["priority_score"] - df["regime_attribution_score"]).clip(lower=0.0)
+
+        # 2. Deterministic Ordering
         # priority_score (lower is higher priority), tie-break with claim_id
-        df = df.sort_values(by=["priority_score", "claim_id"]).reset_index(drop=True)
+        df = df.sort_values(by=["adjusted_priority_score", "claim_id"]).reset_index(drop=True)
         
         # 2. Filter for operationalizable and unverified
         active_claims = df[(df['operationalizable'] == 'Y') & (df['status'] != 'verified')].copy()
@@ -109,7 +130,8 @@ def main() -> int:
                         "conditioning": DEFAULT_CONDITIONING,
                         "assets_filter": row['assets'],
                         "min_events": 50,
-                        "label_type": "returns"
+                        "label_type": "returns",
+                        "regime_attribution_score": row['regime_attribution_score']
                     })
 
                 elif c_type == 'feature':
@@ -145,7 +167,8 @@ def main() -> int:
                             "conditioning": {"vol_regime": ["high"]},
                             "assets_filter": row['assets'],
                             "min_events": 50,
-                            "label_type": "RV" if "vol" in statement.lower() or "rv" in statement.lower() else "returns"
+                            "label_type": "RV" if "vol" in statement.lower() or "rv" in statement.lower() else "returns",
+                            "regime_attribution_score": row['regime_attribution_score']
                         })
             except Exception as e:
                 print(f"Error processing claim {row.get('claim_id')}: {e}")
@@ -163,7 +186,7 @@ def main() -> int:
             f.write("# Knowledge Atlas: Candidate Templates\n\n")
             f.write(f"Generated from `{args.backlog}`\n\n")
             if not templates_df.empty:
-                f.write(templates_df[["template_id", "object_type", "event_type", "assets_filter"]].to_markdown(index=False))
+                f.write(templates_df[["template_id", "object_type", "event_type", "regime_attribution_score", "assets_filter"]].to_markdown(index=False))
             else:
                 f.write("No active templates found.\n")
 
