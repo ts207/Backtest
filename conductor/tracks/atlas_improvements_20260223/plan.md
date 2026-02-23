@@ -15,9 +15,9 @@
 - [x] Task: Update Atlas reporting to include attribution-aware metrics
 - [x] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
 
-## Phase 3: Verification & Lineage
-- [ ] Task: TDD - Create tests for automated claim verification against Registry
-- [ ] Task: Update `verify_atlas_claims.py` to cross-reference with `Event Registry` flags
-- [ ] Task: Implement lineage metadata injection (concept IDs, versioning) in all Atlas outputs
-- [ ] Task: End-to-end pipeline validation with new Atlas logic enabled
-- [ ] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
+## Phase 3: Verification & Lineage [checkpoint: a636fa4]
+- [x] Task: TDD - Create tests for automated claim verification against Registry
+- [x] Task: Update `verify_atlas_claims.py` to cross-reference with `Event Registry` flags
+- [x] Task: Implement lineage metadata injection (concept IDs, versioning) in all Atlas outputs
+- [x] Task: End-to-end pipeline validation with new Atlas logic enabled
+- [x] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
