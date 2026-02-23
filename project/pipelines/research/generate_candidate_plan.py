@@ -195,12 +195,25 @@ def main() -> int:
                         
                         # Add buckets
                         for c_key, c_vals in cond_config.items():
-                            if c_key == "vol_regime" and not _check_market_context_exists(symbol, args.run_id):
+                            # Feasibility checks for state variables
+                            market_context_required = ["vol_regime", "funding_bps", "regime_vol_liquidity"]
+                            if c_key in market_context_required and not _check_market_context_exists(symbol, args.run_id):
                                 feasibility_report.append({
                                     "template_id": template_id,
                                     "symbol": symbol,
                                     "status": "blocked_missing_dataset",
-                                    "reason": f"market_context missing for vol_regime on {symbol}"
+                                    "reason": f"market_context missing for {c_key} on {symbol}"
+                                })
+                                continue
+                            
+                            # VPIN check (assuming it's in features or market context)
+                            # For now, let's group it with market context or add a specific check
+                            if c_key == "vpin" and not _check_market_context_exists(symbol, args.run_id):
+                                feasibility_report.append({
+                                    "template_id": template_id,
+                                    "symbol": symbol,
+                                    "status": "blocked_missing_dataset",
+                                    "reason": f"market_context (or features) missing for vpin on {symbol}"
                                 })
                                 continue
                                 

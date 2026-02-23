@@ -19,11 +19,14 @@ from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 
 # Default configuration for expansion
 DEFAULT_HORIZONS = ["5m", "15m", "60m"]
-DEFAULT_RULE_TEMPLATES = ["mean_reversion", "continuation"]
+DEFAULT_RULE_TEMPLATES = ["mean_reversion", "continuation", "trend_continuation", "liquidity_reversion_v2"]
 DEFAULT_CONDITIONING = {
     "vol_regime": ["high", "low"],
     "carry_state": ["pos", "neg", "neutral"],
-    "severity_bucket": ["top_10pct", "extreme_5pct"]
+    "severity_bucket": ["top_10pct", "extreme_5pct"],
+    "funding_bps": ["extreme_pos", "extreme_neg"],
+    "vpin": ["high_toxic"],
+    "regime_vol_liquidity": ["high_vol_low_liq", "low_vol_high_liq"]
 }
 
 def _extract_event_type(statement: str) -> Optional[str]:
