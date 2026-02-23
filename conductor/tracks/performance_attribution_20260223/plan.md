@@ -1,10 +1,10 @@
 # Implementation Plan: Performance Attribution and Economic Evaluation
 
 ## Phase 1: Foundation & Data Preparation
-- [ ] Task: Implement PIT Joiner for Attribution
-    - [ ] Write failing tests for joining candidates with regime features
-    - [ ] Implement `project/eval/attribution_joiner.py` to join candidates with PIT features
-    - [ ] Verify tests pass and coverage >80%
+- [x] Task: Implement PIT Joiner for Attribution (4404aff)
+    - [x] Write failing tests for joining candidates with regime features
+    - [x] Implement `project/eval/attribution_joiner.py` to join candidates with PIT features
+    - [x] Verify tests pass and coverage >80%
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Foundation & Data Preparation' (Protocol in workflow.md)
 
 ## Phase 2: Performance Attribution Logic
