@@ -21,3 +21,8 @@ def test_event_specs_exist():
     assert (root / "oi_spike_positive.yaml").exists()
     assert (root / "oi_spike_negative.yaml").exists()
     assert (root / "oi_flush.yaml").exists()
+
+    # Remaining
+    assert (root / "directional_exhaustion_after_forced_flow.yaml").exists()
+    assert (root / "cross_venue_desync.yaml").exists()
+    assert (root / "LIQUIDATION_CASCADE.yaml").exists()
