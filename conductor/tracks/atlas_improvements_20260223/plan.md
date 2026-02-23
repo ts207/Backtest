@@ -8,12 +8,12 @@
 - [x] Task: Update `generate_candidate_plan.py` to support `funding_bps`, `vpin`, and composite regimes
 - [x] Task: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md)
 
-## Phase 2: Attribution-Aware Scoring
-- [~] Task: TDD - Create tests for attribution-aware ranking logic
-- [ ] Task: Implement logic to load regime attribution metrics in Atlas generator
-- [ ] Task: Implement `regime_attribution_score` calculation in ranking loop
-- [ ] Task: Update Atlas reporting to include attribution-aware metrics
-- [ ] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
+## Phase 2: Attribution-Aware Scoring [checkpoint: a636fa4]
+- [x] Task: TDD - Create tests for attribution-aware ranking logic
+- [x] Task: Implement logic to load regime attribution metrics in Atlas generator
+- [x] Task: Implement `regime_attribution_score` calculation in ranking loop
+- [x] Task: Update Atlas reporting to include attribution-aware metrics
+- [x] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
 
 ## Phase 3: Verification & Lineage
 - [ ] Task: TDD - Create tests for automated claim verification against Registry
