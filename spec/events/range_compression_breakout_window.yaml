@@ -1,0 +1,4 @@
+event_type: "range_compression_breakout_window"
+reports_dir: "range_compression_breakout_window"
+events_file: "range_compression_breakout_window_events.csv"
+signal_column: "range_compression_breakout_event"
