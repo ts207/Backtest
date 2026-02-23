@@ -135,12 +135,29 @@ def _lookup_event_quality(run_id: str, scope: str) -> Tuple[Optional[float], flo
     return rate, 1.0, rate >= 1.0
 
 
+def _lookup_registry_presence(run_id: str, scope: str) -> Tuple[Optional[float], float, bool]:
+    """T_EVENT_REGISTRY_PRESENCE — checks if event_type exists in events.parquet."""
+    path = DATA_ROOT / "events" / run_id / "events.parquet"
+    if not path.exists():
+        return None, 1.0, False
+    try:
+        df = pd.read_parquet(path)
+        if df.empty:
+            return 0.0, 1.0, False
+        # Scope is the event_type we're looking for
+        exists = scope in df["event_type"].unique()
+        return 1.0 if exists else 0.0, 1.0, exists
+    except Exception:
+        return None, 1.0, False
+
+
 # Test ID → lookup function
 _LOOKUP_MAP = {
     "T_MICROSTRUCTURE_ACCEPTANCE": _lookup_microstructure,
     "T_MULTIPLICITY_FDR": _lookup_multiplicity_fdr,
     "T_CONDITIONAL_EXPECTANCY": _lookup_conditional_expectancy,
     "T_EVENT_QUALITY_E1": _lookup_event_quality,
+    "T_EVENT_REGISTRY_PRESENCE": _lookup_registry_presence,
 }
 
 _DEFAULT_LOOKUP = lambda run_id, scope: (None, 0.5, False)

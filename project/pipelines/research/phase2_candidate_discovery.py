@@ -358,6 +358,9 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     log = logging.getLogger(__name__)
 
+    # Use standard manifest helpers
+    manifest = start_manifest("phase2_conditional_hypotheses", args.run_id, vars(args), [], [])
+
     # 1. Lock in Invariants (Spec-Binding)
     spec_hashes = get_spec_hashes(PROJECT_ROOT)
     gates = _load_gates_spec().get("gate_v1_phase2", {})
@@ -804,6 +807,16 @@ def main():
 
     with open(reports_root / "phase2_report.json", "w") as f:
         json.dump(report, f, indent=2)
+
+    finalize_manifest(
+        manifest,
+        "success",
+        stats={
+            "total_tested": int(len(fdr_df)),
+            "discoveries_statistical": int(fdr_df["is_discovery"].sum()),
+            "survivors_phase2": int(fdr_df["gate_phase2_final"].sum()),
+        },
+    )
 
     log.info(
         "Phase 2 complete: %d tested, %d discoveries_statistical, %d survivors_phase2 → %s",

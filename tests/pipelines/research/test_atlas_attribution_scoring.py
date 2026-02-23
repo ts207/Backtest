@@ -1,5 +1,7 @@
 import os
+import sys
 from pathlib import Path
+from unittest.mock import patch
 import pandas as pd
 import pytest
 from pipelines.research.generate_candidate_templates import main as templates_main
@@ -55,9 +57,6 @@ def test_attribution_scoring_priority_adjustment(mock_backlog, mock_attribution_
     
     # Run without attribution first to see default order (alphabetical claim_id if scores equal)
     # Both have priority_score 10.
-    
-    import sys
-    from unittest.mock import patch
     
     test_args = [
         "generate_candidate_templates.py",
