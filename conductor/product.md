@@ -23,5 +23,5 @@ The platform provides full support for the following critical phases:
 1. **Ingestion & Cleaning**: Normalizing raw exchange data into high-quality, research-ready "Point-in-Time" (PIT) datasets.
 2. **Hypothesis & Events**: Detecting market events (e.g., liquidity vacuums, vol shocks) and generating directional hypotheses.
 3. **Statistical Validation**: Applying Multiplicity Control (BH-FDR) to filter out lucky discoveries and ensure statistical significance.
-4. **Economic Evaluation**: Simulating execution costs, slippage, and market impact to assess the real-world viability of strategies.
+4. **Economic Evaluation (Bridge)**: Simulating execution costs, slippage, and market impact to assess the real-world viability of strategies. Now includes robust performance attribution to market regimes.
 5. **Walkforward Backtesting**: Evaluating strategy robustness across non-overlapping time splits and market regimes.
