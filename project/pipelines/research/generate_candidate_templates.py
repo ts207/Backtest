@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import pandas as pd
+import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
@@ -28,6 +29,29 @@ DEFAULT_CONDITIONING = {
     "vpin": ["high_toxic"],
     "regime_vol_liquidity": ["high_vol_low_liq", "low_vol_high_liq"]
 }
+
+def _load_taxonomy() -> Dict[str, Any]:
+    """Load event taxonomy from spec."""
+    path = PROJECT_ROOT.parent / "spec" / "multiplicity" / "taxonomy.yaml"
+    if not path.exists():
+        return {}
+    with open(path, "r") as f:
+        return yaml.safe_load(f)
+
+def _get_templates_for_event(event_type: str, taxonomy: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Determine rule templates for a given event type based on taxonomy."""
+    if taxonomy is None:
+        taxonomy = _load_taxonomy()
+    
+    event_type_norm = str(event_type).strip().lower()
+    families = taxonomy.get("families", {})
+    
+    for family_id, family_cfg in families.items():
+        events = [str(e).strip().lower() for e in family_cfg.get("events", [])]
+        if event_type_norm in events:
+            return family_cfg.get("templates", DEFAULT_RULE_TEMPLATES)
+            
+    return DEFAULT_RULE_TEMPLATES
 
 def _extract_event_type(statement: str) -> Optional[str]:
     """Heuristically extract event type from statement."""
@@ -58,6 +82,7 @@ def main() -> int:
             raise FileNotFoundError(f"Backlog not found: {backlog_path}")
         
         df = pd.read_csv(backlog_path)
+        taxonomy = _load_taxonomy()
         
         # 1. Load Performance Attribution (if provided)
         attribution_map = {}
@@ -125,7 +150,7 @@ def main() -> int:
                         "object_type": "event",
                         "event_type": event_type,
                         "target_spec_path": target_path,
-                        "rule_templates": DEFAULT_RULE_TEMPLATES,
+                        "rule_templates": _get_templates_for_event(event_type, taxonomy),
                         "horizons": DEFAULT_HORIZONS,
                         "conditioning": DEFAULT_CONDITIONING,
                         "assets_filter": row['assets'],
