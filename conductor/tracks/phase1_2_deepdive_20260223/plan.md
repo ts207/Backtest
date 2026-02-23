@@ -12,8 +12,8 @@
 - [x] Task: Implement logic refinements for Phase 1 event triggers and Phase 2 discovery gates. [checkpoint: 7d0df91]
 - [x] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
 
-## Phase 3: Final Validation and Certification
+## Phase 3: Final Validation and Certification [checkpoint: 5fdf0cc]
 - [x] Task: Run full discovery pipeline on a 7-day slice (certification run). [checkpoint: 6b165a7]
 - [x] Task: Verify artifact schemas and provenance against `project/schemas/`. [checkpoint: 6b165a7]
 - [x] Task: Fix any remaining inconsistencies found during the certification run. [checkpoint: 6b165a7]
-- [ ] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
