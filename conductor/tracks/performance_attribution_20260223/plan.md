@@ -22,8 +22,8 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 3: Economic Evaluation (Bridge)' (Protocol in workflow.md)
 
 ## Phase 4: Reporting & Integration
-- [ ] Task: Generate Attribution Reports
-    - [ ] Write failing tests for Parquet report generation
-    - [ ] Implement report export in `project/pipelines/report/performance_attribution_report.py`
-    - [ ] Verify tests pass and coverage >80%
+- [x] Task: Generate Attribution Reports (58d271c)
+    - [x] Write failing tests for Parquet report generation
+    - [x] Implement report export in `project/pipelines/report/performance_attribution_report.py`
+    - [x] Verify tests pass and coverage >80%
 - [ ] Task: Conductor - User Manual Verification 'Phase 4: Reporting & Integration' (Protocol in workflow.md)
