@@ -8,6 +8,7 @@
 - **Data Engineering**: Pandas, NumPy, PyArrow (Parquet storage)
 - **Architecture**: Subprocess-driven orchestration, **Spec-First** design.
 - **Testing**: Pytest with isolated data roots and automated spec validation.
+- **Management**: **Conductor** spec-driven development framework.
 
 ### Core Architecture
 - `project/pipelines/run_all.py`: Master orchestrator for 13+ pipeline stages.
@@ -15,6 +16,7 @@
 - `project/strategies/`: Strategy implementations and DSL interpreter.
 - `spec/`: **Source of Truth** for concepts (`spec/concepts/`), features (`spec/features/`), events (`spec/events/`), and tests (`spec/tests/`).
 - `data/`: Local artifact root (Gitignored). Defined by `BACKTEST_DATA_ROOT`.
+- `conductor/`: Project management, tracks, and workflow definitions.
 
 ---
 
@@ -24,7 +26,7 @@
 2.  **Slice 2: PIT Features & Labels**: Feature construction with strict "Point-in-Time" guards.
 3.  **Slice 3: Event Registry**: Detection of liquidity stress, vol shocks, and funding extremes.
 4.  **Slice 4: Validation (Phase 2)**: Candidate generation with BH-FDR multiplicity control.
-5.  **Slice 5: Bridge**: Executed-like simulation (bid/ask fills, latency, slippage).
+5.  **Slice 5: Bridge**: Executed-like simulation (bid/ask fills, latency, slippage) and **Performance Attribution**.
 6.  **Slice 6: Strategy & Walkforward**: Robustness testing and parameter sweeps.
 7.  **Slice 7: Portfolio**: Cluster-based allocation and portfolio execution simulation.
 
@@ -51,18 +53,6 @@ Before entering Phase 2, every event type (e.g., `liquidity_vacuum`) must pass t
     - **Multiplicity**: FDR discovery at `q <= 0.05`.
 - **Required Outputs**: `candidates_raw.parquet`, `pvals.parquet`, `fdr.parquet`, `report.json`.
 
-### 4. Atlas Verification Loop
-- **Claim Mapping**: Atlas claims are linked to executable Test IDs via `claim_test_map.csv`.
-- **Verification Log**: Every run must append to `claim_verification_log.parquet` to update claim status (`supported_in_env` vs `unsupported_in_env`).
-
-### 5. Golden Baseline
-The "Certification Batch" (Run ID: `certification_batch`, Jan 1-7 2024, BTC/ETH/SOL) serves as the regression baseline.
-- **Golden Artifacts**: Stored in `golden/` directory.
-    - `e1_report.json`: Gate E-1 results.
-    - `phase2_fdr.parquet`: Phase 2 multiplicity results.
-    - `claim_verification_log.parquet`: Atlas claim verification.
-- **Contract Tests**: `tests/test_audit_compliance.py` verifies current run outputs against this baseline.
-
 ---
 
 ## Current Operational State
@@ -72,11 +62,19 @@ The system is fully calibrated for **BTCUSDT**, **ETHUSDT**, and **SOLUSDT** (Fe
 - **Amihud Ratio**: Updated threshold > 0.5 (reflecting liquidity provision regimes).
 - **VPIN**: Tests for correlation magnitude (abs > 0.1) rather than direction.
 
+### Performance Attribution & Economic Evaluation
+The platform now supports robust attribution of candidate performance to market regimes.
+- **PIT Joiner**: Exact timestamp/symbol matching for candidates and features.
+- **Regime Metrics**: Aggregated P&L, Sharpe Ratio, and **Max Drawdown** per volatility/liquidity regime.
+- **Cost Model**: Binance-specific fee and slippage modeling integrated into the Bridge phase.
+
 ### Infrastructure Implemented
+- `project/eval/attribution_joiner.py`: Joins Phase 2 candidates with PIT features.
+- `project/eval/performance_attribution.py`: Calculates regime-specific performance metrics.
+- `project/eval/cost_model.py`: Applies fee and slippage models to gross P&L.
+- `project/pipelines/report/performance_attribution_report.py`: Exports attribution results to Parquet.
 - `spec_qa_linter.py`: Enforces spec integrity.
 - `validate_event_quality.py`: Implements Gate E-1.
-- `phase2_candidate_discovery.py`: Implements spec-bound candidate discovery with BH-FDR.
-- `verify_atlas_claims.py`: Automates Knowledge Atlas claim verification.
 
 ---
 
@@ -96,3 +94,5 @@ pip install -r requirements.txt -r requirements-dev.txt
 | `make discover-edges` | Full discovery: Phase 1 + Phase 2 + Export |
 | `make check-hygiene` | Enforce repo hygiene and spec linter |
 | `make test-fast` | Fast tests (excludes `@pytest.mark.slow`) |
+| `/conductor:setup` | Re-initialize or check project management state |
+| `/conductor:implement` | Select and implement a pending track |
