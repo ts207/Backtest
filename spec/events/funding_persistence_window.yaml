@@ -1,0 +1,4 @@
+event_type: "funding_persistence_window"
+reports_dir: "funding_events"
+events_file: "funding_episode_events.csv"
+signal_column: "funding_persistence_event"

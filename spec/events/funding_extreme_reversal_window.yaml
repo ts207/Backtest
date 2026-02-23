@@ -1,0 +1,4 @@
+event_type: "funding_extreme_reversal_window"
+reports_dir: "funding_extreme_reversal_window"
+events_file: "funding_extreme_reversal_window_events.csv"
+signal_column: "funding_extreme_event"

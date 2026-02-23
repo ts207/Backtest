@@ -12,3 +12,12 @@ def test_event_specs_exist():
     assert (root / "liquidity_refill_lag_window.yaml").exists()
     assert (root / "liquidity_absence_window.yaml").exists()
     assert (root / "liquidity_vacuum.yaml").exists()
+
+    # Funding & OI
+    assert (root / "funding_extreme_reversal_window.yaml").exists()
+    assert (root / "funding_extreme_onset.yaml").exists()
+    assert (root / "funding_persistence_window.yaml").exists()
+    assert (root / "funding_normalization.yaml").exists()
+    assert (root / "oi_spike_positive.yaml").exists()
+    assert (root / "oi_spike_negative.yaml").exists()
+    assert (root / "oi_flush.yaml").exists()
