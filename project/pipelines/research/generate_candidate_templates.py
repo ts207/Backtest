@@ -15,20 +15,29 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 
+def _load_global_defaults() -> Dict[str, Any]:
+    """Load global defaults from spec."""
+    path = PROJECT_ROOT.parent / "spec" / "global_defaults.yaml"
+    if not path.exists():
+        return {}
+    with open(path, "r") as f:
+        return yaml.safe_load(f).get("defaults", {})
+
+GLOBAL_DEFAULTS = _load_global_defaults()
+
 # Default configuration for expansion
-DEFAULT_HORIZONS = ["5m", "15m", "60m"]
-DEFAULT_RULE_TEMPLATES = ["mean_reversion", "continuation", "trend_continuation", "liquidity_reversion_v2"]
-DEFAULT_CONDITIONING = {
+DEFAULT_HORIZONS = GLOBAL_DEFAULTS.get("horizons", ["5m", "15m", "60m"])
+DEFAULT_RULE_TEMPLATES = GLOBAL_DEFAULTS.get("rule_templates", ["mean_reversion", "continuation", "trend_continuation", "liquidity_reversion_v2"])
+DEFAULT_CONDITIONING = GLOBAL_DEFAULTS.get("conditioning", {
     "vol_regime": ["high", "low"],
     "carry_state": ["pos", "neg", "neutral"],
     "severity_bucket": ["top_10pct", "extreme_5pct"],
     "funding_bps": ["extreme_pos", "extreme_neg"],
     "vpin": ["high_toxic"],
     "regime_vol_liquidity": ["high_vol_low_liq", "low_vol_high_liq"]
-}
+})
 
 def _load_taxonomy() -> Dict[str, Any]:
     """Load event taxonomy from spec."""

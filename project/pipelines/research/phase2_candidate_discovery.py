@@ -80,6 +80,15 @@ def _load_family_spec() -> Dict[str, Any]:
         return yaml.safe_load(f)
 
 
+def _load_global_defaults() -> Dict[str, Any]:
+    """Load global defaults from spec."""
+    path = PROJECT_ROOT.parent / "spec" / "global_defaults.yaml"
+    if not path.exists():
+        return {}
+    with open(path, "r") as f:
+        return yaml.safe_load(f).get("defaults", {})
+
+
 def _load_features(run_id: str, symbol: str) -> pd.DataFrame:
     """Load PIT features table from lake."""
     candidates = [
@@ -376,9 +385,10 @@ def main():
     min_events_fallback = int(gates.get("min_events_fallback", 100))
 
     # 2. Minimal Template Set & Horizons
+    global_defaults = _load_global_defaults()
     fam_config = families_spec.get("families", {}).get(args.event_type, {})
-    templates = fam_config.get("templates", ["mean_reversion", "continuation", "carry"])
-    horizons = fam_config.get("horizons", ["5m", "15m", "60m"])
+    templates = fam_config.get("templates", global_defaults.get("rule_templates", ["mean_reversion", "continuation", "carry"]))
+    horizons = fam_config.get("horizons", global_defaults.get("horizons", ["5m", "15m", "60m"]))
     max_cands = fam_config.get("max_candidates_per_run", 1000)
 
     symbols = [s.strip() for s in args.symbols.split(",")]
@@ -591,7 +601,7 @@ def main():
     else:
         # Default fallback discovery (original loop)
         # Pre-define allowed conditioning columns to avoid explosion
-        CONDITIONING_COLS = ["severity_bucket", "vol_regime"]
+        CONDITIONING_COLS = global_defaults.get("conditioning_cols", ["severity_bucket", "vol_regime"])
 
         for symbol in symbols:
             sym_all_events = events_df[events_df["symbol"] == symbol] if "symbol" in events_df.columns else events_df

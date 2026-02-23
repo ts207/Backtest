@@ -1,0 +1,12 @@
+# spec/global_defaults.yaml
+defaults:
+  horizons: ["5m", "15m", "60m"]
+  rule_templates: ["mean_reversion", "continuation", "trend_continuation", "liquidity_reversion_v2"]
+  conditioning:
+    vol_regime: ["high", "low"]
+    carry_state: ["pos", "neg", "neutral"]
+    severity_bucket: ["top_10pct", "extreme_5pct"]
+    funding_bps: ["extreme_pos", "extreme_neg"]
+    vpin: ["high_toxic"]
+    regime_vol_liquidity: ["high_vol_low_liq", "low_vol_high_liq"]
+  conditioning_cols: ["severity_bucket", "vol_regime"]
