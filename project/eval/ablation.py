@@ -10,38 +10,40 @@ DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.io_utils import ensure_dir
+from eval.multiplicity import benjamini_hochberg
 
 def calculate_lift(group_df: pd.DataFrame) -> pd.DataFrame:
-    # Identify unconditional baseline (condition == "all")
-    
+    """Compute per-condition lift vs baseline ('all') with BH multiplicity correction.
+
+    Requires columns: candidate_id, condition_key, expectancy, n_events.
+    Optional column: p_value (used for BH; defaults to 1.0 if absent).
+    Returns DataFrame with lift_q_value and is_lift_discovery added (F-2 fix).
+    """
     rows = []
     for _, row in group_df.iterrows():
         condition = str(row.get("condition_key", "unknown")).strip()
-        
         rows.append({
             "candidate_id": row["candidate_id"],
             "condition": condition,
             "expectancy": row.get("expectancy", 0.0),
-            "n_events": row.get("n_events", 0)
+            "n_events": row.get("n_events", 0),
+            "p_value": float(row.get("p_value", 1.0)),
         })
-        
+
     df = pd.DataFrame(rows)
-    
-    # Baseline: condition == "all"
+
     baseline = df[df["condition"] == "all"]
     if baseline.empty:
         return pd.DataFrame()
-    
+
     base_exp = baseline["expectancy"].mean()
-    
+
     out_rows = []
     for _, row in df.iterrows():
         if row["condition"] == "all":
             continue
-            
-        lift = (row["expectancy"] - base_exp)
+        lift = row["expectancy"] - base_exp
         lift_pct = (lift / abs(base_exp)) if base_exp != 0 else 0.0
-        
         out_rows.append({
             "candidate_id": row["candidate_id"],
             "condition": row["condition"],
@@ -49,10 +51,22 @@ def calculate_lift(group_df: pd.DataFrame) -> pd.DataFrame:
             "conditioned_expectancy": row["expectancy"],
             "lift_bps": lift * 10000.0,
             "lift_pct": lift_pct,
-            "n_events": row["n_events"]
+            "n_events": row["n_events"],
+            "p_value": row["p_value"],
         })
-        
-    return pd.DataFrame(out_rows)
+
+    if not out_rows:
+        return pd.DataFrame()
+
+    result = pd.DataFrame(out_rows)
+
+    # BH multiplicity correction across all conditions in this group (F-2 fix).
+    _BH_ALPHA = 0.10
+    _, q_values = benjamini_hochberg(result["p_value"].tolist(), alpha=_BH_ALPHA)
+    result["lift_q_value"] = q_values
+    result["is_lift_discovery"] = result["lift_q_value"] <= _BH_ALPHA
+
+    return result.drop(columns=["p_value"])
 
 def main():
     parser = argparse.ArgumentParser()
