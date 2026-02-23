@@ -1,12 +1,12 @@
 # Implementation Plan: Atlas Improvements
 
-## Phase 1: Template & State Expansion
+## Phase 1: Template & State Expansion [checkpoint: f2b5f8f]
 - [x] Task: TDD - Create tests for new Atlas template generation
 - [x] Task: Implement `trend_continuation` archetype in `generate_candidate_templates.py`
 - [x] Task: Implement `liquidity_reversion_v2` archetype in `generate_candidate_templates.py`
 - [x] Task: TDD - Create tests for advanced state conditioning in candidate plans
 - [x] Task: Update `generate_candidate_plan.py` to support `funding_bps`, `vpin`, and composite regimes
-- [ ] Task: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md)
 
 ## Phase 2: Attribution-Aware Scoring
 - [ ] Task: TDD - Create tests for attribution-aware ranking logic
