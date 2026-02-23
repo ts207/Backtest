@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
 
 import pandas as pd
+import yaml
 
 from pipelines._lib.io_utils import (
     choose_partition_dir,
@@ -29,104 +30,28 @@ class EventRegistrySpec:
     signal_column: str
 
 
-EVENT_REGISTRY_SPECS: Dict[str, EventRegistrySpec] = {
-    "vol_shock_relaxation": EventRegistrySpec(
-        event_type="vol_shock_relaxation",
-        reports_dir="vol_shock_relaxation",
-        events_file="vol_shock_relaxation_events.csv",
-        signal_column="vol_shock_relaxation_event",
-    ),
-    "liquidity_refill_lag_window": EventRegistrySpec(
-        event_type="liquidity_refill_lag_window",
-        reports_dir="liquidity_refill_lag_window",
-        events_file="liquidity_refill_lag_window_events.csv",
-        signal_column="liquidity_refill_lag_event",
-    ),
-    "liquidity_absence_window": EventRegistrySpec(
-        event_type="liquidity_absence_window",
-        reports_dir="liquidity_absence_window",
-        events_file="liquidity_absence_window_events.csv",
-        signal_column="liquidity_absence_event",
-    ),
-    "vol_aftershock_window": EventRegistrySpec(
-        event_type="vol_aftershock_window",
-        reports_dir="vol_aftershock_window",
-        events_file="vol_aftershock_window_events.csv",
-        signal_column="vol_aftershock_event",
-    ),
-    "directional_exhaustion_after_forced_flow": EventRegistrySpec(
-        event_type="directional_exhaustion_after_forced_flow",
-        reports_dir="directional_exhaustion_after_forced_flow",
-        events_file="directional_exhaustion_after_forced_flow_events.csv",
-        signal_column="forced_flow_exhaustion_event",
-    ),
-    "cross_venue_desync": EventRegistrySpec(
-        event_type="cross_venue_desync",
-        reports_dir="cross_venue_desync",
-        events_file="cross_venue_desync_events.csv",
-        signal_column="cross_venue_desync_event",
-    ),
-    "liquidity_vacuum": EventRegistrySpec(
-        event_type="liquidity_vacuum",
-        reports_dir="liquidity_vacuum",
-        events_file="liquidity_vacuum_events.csv",
-        signal_column="liquidity_vacuum_event",
-    ),
-    "funding_extreme_reversal_window": EventRegistrySpec(
-        event_type="funding_extreme_reversal_window",
-        reports_dir="funding_extreme_reversal_window",
-        events_file="funding_extreme_reversal_window_events.csv",
-        signal_column="funding_extreme_event",
-    ),
-    "range_compression_breakout_window": EventRegistrySpec(
-        event_type="range_compression_breakout_window",
-        reports_dir="range_compression_breakout_window",
-        events_file="range_compression_breakout_window_events.csv",
-        signal_column="range_compression_breakout_event",
-    ),
-    "funding_extreme_onset": EventRegistrySpec(
-        event_type="funding_extreme_onset",
-        reports_dir="funding_events",
-        events_file="funding_episode_events.csv",
-        signal_column="funding_extreme_onset_event",
-    ),
-    "funding_persistence_window": EventRegistrySpec(
-        event_type="funding_persistence_window",
-        reports_dir="funding_events",
-        events_file="funding_episode_events.csv",
-        signal_column="funding_persistence_event",
-    ),
-    "funding_normalization": EventRegistrySpec(
-        event_type="funding_normalization",
-        reports_dir="funding_events",
-        events_file="funding_episode_events.csv",
-        signal_column="funding_normalization_event",
-    ),
-    "oi_spike_positive": EventRegistrySpec(
-        event_type="oi_spike_positive",
-        reports_dir="oi_shocks",
-        events_file="oi_shock_events.csv",
-        signal_column="oi_spike_pos_event",
-    ),
-    "oi_spike_negative": EventRegistrySpec(
-        event_type="oi_spike_negative",
-        reports_dir="oi_shocks",
-        events_file="oi_shock_events.csv",
-        signal_column="oi_spike_neg_event",
-    ),
-    "oi_flush": EventRegistrySpec(
-        event_type="oi_flush",
-        reports_dir="oi_shocks",
-        events_file="oi_shock_events.csv",
-        signal_column="oi_flush_event",
-    ),
-    "LIQUIDATION_CASCADE": EventRegistrySpec(
-        event_type="LIQUIDATION_CASCADE",
-        reports_dir="liquidation_cascade",
-        events_file="liquidation_cascade_events.csv",
-        signal_column="liquidation_cascade_event",
-    ),
-}
+def _load_event_specs() -> Dict[str, EventRegistrySpec]:
+    spec_dir = PROJECT_ROOT.parent / "spec" / "events"
+    if not spec_dir.exists():
+        return {}
+
+    specs = {}
+    for yaml_file in sorted(spec_dir.glob("*.yaml")):
+        with open(yaml_file, "r") as f:
+            data = yaml.safe_load(f)
+            if not data:
+                continue
+            spec = EventRegistrySpec(
+                event_type=data["event_type"],
+                reports_dir=data["reports_dir"],
+                events_file=data["events_file"],
+                signal_column=data["signal_column"],
+            )
+            specs[spec.event_type] = spec
+    return specs
+
+
+EVENT_REGISTRY_SPECS: Dict[str, EventRegistrySpec] = _load_event_specs()
 
 SIGNAL_TO_EVENT_TYPE: Dict[str, str] = {
     spec.signal_column: event_type for event_type, spec in EVENT_REGISTRY_SPECS.items()
