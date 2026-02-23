@@ -21,3 +21,6 @@
 - [x] Task: Implement lineage metadata injection (concept IDs, versioning) in all Atlas outputs
 - [x] Task: End-to-end pipeline validation with new Atlas logic enabled
 - [x] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions 1de63c9
