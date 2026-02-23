@@ -1,0 +1,48 @@
+families:
+  liquidity_dislocation:
+    description: "Temporary liquidity imbalance causing price overshoot and repair."
+    expected_behavior: "mean_reversion"
+    templates: ["mean_reversion", "liquidity_reversion_v2"]
+    events:
+      - "liquidity_vacuum"
+      - "liquidity_refill_lag_window"
+      - "liquidity_absence_window"
+
+  volatility_transition:
+    description: "Variance regime change resulting in a repricing phase."
+    expected_behavior: "continuation"
+    templates: ["continuation", "trend_continuation"]
+    events:
+      - "vol_shock_relaxation"
+      - "vol_aftershock_window"
+      - "range_compression_breakout_window"
+
+  positioning_extremes:
+    description: "Crowded trades leading to forced liquidation paths."
+    expected_behavior: "reversal_or_squeeze"
+    templates: ["mean_reversion", "continuation", "trend_continuation"]
+    events:
+      - "funding_extreme_reversal_window"
+      - "funding_extreme_onset"
+      - "funding_persistence_window"
+      - "funding_normalization"
+      - "oi_spike_positive"
+      - "oi_spike_negative"
+      - "oi_flush"
+      - "LIQUIDATION_CASCADE"
+
+  exhaustion_reversion:
+    description: "Energy depletion leading to reversal."
+    expected_behavior: "mean_reversion"
+    templates: ["mean_reversion"]
+    events:
+      - "directional_exhaustion_after_forced_flow"
+
+  cross_signal:
+    description: "Multi-variable coincidences indicating structural desync."
+    expected_behavior: "variable"
+    templates: ["mean_reversion", "continuation"]
+    events:
+      - "cross_venue_desync"
+
+default_feature_templates: ["feature_conditioned_prediction"]
