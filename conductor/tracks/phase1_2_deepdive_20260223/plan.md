@@ -7,9 +7,9 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md)
 
 ## Phase 2: Logic and Discovery Refinement
-- [ ] Task: Audit `project/events/` and `project/pipelines/research/` for logic consistency.
-- [ ] Task: TDD - Create regression tests for event detection and statistical validation (BH-FDR).
-- [ ] Task: Implement logic refinements for Phase 1 event triggers and Phase 2 discovery gates.
+- [x] Task: Audit `project/events/` and `project/pipelines/research/` for logic consistency. [checkpoint: b8da19b]
+- [x] Task: TDD - Create regression tests for event detection and statistical validation (BH-FDR). [checkpoint: b8da19b]
+- [x] Task: Implement logic refinements for Phase 1 event triggers and Phase 2 discovery gates. [checkpoint: b8da19b]
 - [ ] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
 
 ## Phase 3: Final Validation and Certification

@@ -320,7 +320,7 @@ def _analyze_symbol(
                     "scope": symbol,
                     "condition": condition_name,
                     "horizon_bars": horizon,
-                    "horizon_hours": horizon / 4.0,
+                    "horizon_hours": horizon / 12.0,
                     **stats,
                 }
             )
@@ -384,7 +384,7 @@ def main() -> int:
                 "scope": "combined",
                 "condition": condition_name,
                 "horizon_bars": horizon,
-                "horizon_hours": horizon / 4.0,
+                "horizon_hours": horizon / 12.0,
                 **stats,
             }
         )
