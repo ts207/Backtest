@@ -58,6 +58,11 @@ _TEMPLATE_DIRECTION: Dict[str, int] = {
 }
 
 
+def _make_family_id(symbol: str, event_type: str, rule: str, horizon: str, cond_label: str) -> str:
+    """BH family key: stratified by symbol so FDR is controlled per-symbol (F-3 fix)."""
+    return f"{symbol}_{event_type}_{rule}_{horizon}_{cond_label}"
+
+
 def _load_gates_spec() -> Dict[str, Any]:
     path = PROJECT_ROOT / "spec" / "gates.yaml"
     if not path.exists():
@@ -539,7 +544,7 @@ def main():
             _promotion_track = "standard" if gate_phase2_final else "fallback_only"
             results.append({
                 "candidate_id": f"{event_type}_{rule}_{horizon}_{symbol}_{cond_label}",
-                "family_id": f"{event_type}_{rule}_{horizon}_{cond_label}",
+                "family_id": _make_family_id(symbol, event_type, rule, horizon, cond_label),
                 "event_type": event_type,
                 "rule_template": rule,
                 "horizon": horizon,
@@ -635,7 +640,7 @@ def main():
                         _p_track = "standard" if g_phase2_final else "fallback_only"
                         results.append({
                             "candidate_id": f"{args.event_type}_{rule}_{horizon}_{symbol}_{cond_name}",
-                            "family_id": f"{args.event_type}_{rule}_{horizon}_{cond_name}",
+                            "family_id": _make_family_id(symbol, args.event_type, rule, horizon, cond_name),
                             "event_type": args.event_type,
                             "rule_template": rule,
                             "horizon": horizon,
@@ -762,7 +767,7 @@ def main():
         "inputs": {
             "candidate_plan_hash": candidate_plan_hash
         },
-        "family_definition": "Option A (event_type, rule_template, horizon)",
+        "family_definition": "Option B (symbol, event_type, rule_template, horizon) — F-3 fix",
         "cost_coordinate": cost_coordinate,
         "thresholds": {
             "max_q_value": max_q,
