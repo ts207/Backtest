@@ -24,8 +24,8 @@ from pipelines._lib.url_utils import join_url
 from pipelines._lib.validation import ensure_utc_timestamp
 
 
-ARCHIVE_BASE = "https://data.binance.vision/data/spot"
-EARLIEST_SPOT = datetime(2017, 1, 1, tzinfo=timezone.utc)
+ARCHIVE_BASE = "https://data.binance.vision/data/futures/um"
+EARLIEST_UM_FUTURES = datetime(2019, 9, 1, tzinfo=timezone.utc)
 
 
 def _parse_date(value: str) -> datetime:
@@ -63,17 +63,17 @@ def _iter_days(start: datetime, end: datetime) -> List[datetime]:
 def _expected_bars(start: datetime, end_exclusive: datetime) -> int:
     if end_exclusive <= start:
         return 0
-    return int((end_exclusive - start).total_seconds() // 60)
+    return int((end_exclusive - start).total_seconds() // (5 * 60))
 
 
-def _read_ohlcv_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame:
+def _read_mark_price_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame:
     columns = [
         "open_time",
         "open",
         "high",
         "low",
         "close",
-        "volume",
+        "volume", # This is actually 'ignore' or similar for mark price klines
         "close_time",
         "quote_volume",
         "trade_count",
@@ -87,32 +87,24 @@ def _read_ohlcv_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame:
             df = pd.read_csv(f, header=None)
 
     if df.empty:
-        return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "symbol", "source"])
+        return pd.DataFrame(columns=["timestamp", "mark_price", "symbol", "source"])
 
     usable_cols = min(len(columns), df.shape[1])
     df = df.iloc[:, :usable_cols].copy()
     df.columns = columns[:usable_cols]
 
     if "open_time" not in df.columns:
-        raise ValueError(f"Unexpected OHLCV archive schema in {path}: missing open_time column")
+        raise ValueError(f"Unexpected markPrice archive schema in {path}: missing open_time column")
 
     df["open_time"] = pd.to_numeric(df["open_time"], errors="coerce")
     df = df[df["open_time"].notna()].copy()
     if df.empty:
-        return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "symbol", "source"])
+        return pd.DataFrame(columns=["timestamp", "mark_price", "symbol", "source"])
 
-    open_time_int = df["open_time"].astype("int64")
-    # Some spot archives encode epoch in microseconds instead of milliseconds.
-    open_time_ms = open_time_int.where(open_time_int <= 9_999_999_999_999, open_time_int // 1000)
-    df["timestamp"] = pd.to_datetime(open_time_ms, unit="ms", utc=True, errors="coerce")
-    df = df[df["timestamp"].notna()].copy()
-    if df.empty:
-        return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "quote_volume", "taker_base_volume", "symbol", "source"])
-
-    df = df[["timestamp", "open", "high", "low", "close", "volume", "quote_volume", "taker_base_volume"]].copy()
-    for col in ["open", "high", "low", "close", "volume", "quote_volume", "taker_base_volume"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-    df = df.dropna(subset=["open", "high", "low", "close", "volume", "quote_volume", "taker_base_volume"]).copy()
+    df["timestamp"] = pd.to_datetime(df["open_time"].astype("int64"), unit="ms", utc=True)
+    df["mark_price"] = pd.to_numeric(df["close"], errors="coerce")
+    df = df[["timestamp", "mark_price"]].copy()
+    df = df.dropna(subset=["mark_price"]).copy()
     df["symbol"] = symbol
     df["source"] = source
     ensure_utc_timestamp(df["timestamp"], "timestamp")
@@ -136,12 +128,12 @@ def _partition_complete(path: Path, expected_rows: int) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Ingest Binance spot OHLCV 1m from archives")
+    parser = argparse.ArgumentParser(description="Ingest Binance USD-M mark price 5m from archives")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
-    parser.add_argument("--out_root", default=str(DATA_ROOT / "lake" / "raw" / "binance" / "spot"))
+    parser.add_argument("--out_root", default=str(DATA_ROOT / "lake" / "raw" / "binance" / "perp"))
     parser.add_argument("--max_retries", type=int, default=5)
     parser.add_argument("--retry_backoff_sec", type=float, default=2.0)
     parser.add_argument("--force", type=int, default=0)
@@ -152,7 +144,7 @@ def main() -> int:
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
     requested_start = _parse_date(args.start)
     requested_end = _parse_date(args.end)
-    effective_start = max(requested_start, EARLIEST_SPOT)
+    effective_start = max(requested_start, EARLIEST_UM_FUTURES)
     effective_end = requested_end
 
     log_handlers = [logging.StreamHandler(sys.stdout)]
@@ -174,7 +166,7 @@ def main() -> int:
         "retry_backoff_sec": args.retry_backoff_sec,
         "force": int(args.force),
     }
-    manifest = start_manifest("ingest_binance_spot_ohlcv_1m", run_id, params, inputs, outputs)
+    manifest = start_manifest("ingest_binance_um_mark_price_5m", run_id, params, inputs, outputs)
 
     stats: Dict[str, object] = {"symbols": {}}
 
@@ -199,11 +191,11 @@ def main() -> int:
                 out_dir = (
                     out_root
                     / symbol
-                    / "ohlcv_1m"
+                    / "mark_price_5m"
                     / f"year={month_start.year}"
                     / f"month={month_start.month:02d}"
                 )
-                out_path = out_dir / f"ohlcv_{symbol}_1m_{month_start.year}-{month_start.month:02d}.parquet"
+                out_path = out_dir / f"mark_price_{symbol}_5m_{month_start.year}-{month_start.month:02d}.parquet"
 
                 if not args.force and _partition_complete(out_path, expected_rows):
                     partitions_skipped.append(str(out_path))
@@ -212,15 +204,15 @@ def main() -> int:
                 monthly_url = join_url(
                     ARCHIVE_BASE,
                     "monthly",
-                    "klines",
+                    "markPriceKlines",
                     symbol,
-                    "1m",
-                    f"{symbol}-1m-{month_start.year}-{month_start.month:02d}.zip",
+                    "5m",
+                    f"{symbol}-5m-{month_start.year}-{month_start.month:02d}.zip",
                 )
                 logging.info("Downloading monthly archive %s", monthly_url)
 
                 with tempfile.TemporaryDirectory() as tmpdir:
-                    temp_zip = Path(tmpdir) / "ohlcv.zip"
+                    temp_zip = Path(tmpdir) / "mark_price.zip"
                     result = download_with_retries(
                         monthly_url,
                         temp_zip,
@@ -231,7 +223,7 @@ def main() -> int:
 
                     frames: List[pd.DataFrame] = []
                     if result.status == "ok":
-                        frames.append(_read_ohlcv_from_zip(temp_zip, symbol, "archive_monthly"))
+                        frames.append(_read_mark_price_from_zip(temp_zip, symbol, "archive_monthly"))
                     else:
                         if result.status == "not_found":
                             missing_archives.append(monthly_url)
@@ -242,13 +234,13 @@ def main() -> int:
                             daily_url = join_url(
                                 ARCHIVE_BASE,
                                 "daily",
-                                "klines",
+                                "markPriceKlines",
                                 symbol,
-                                "1m",
-                                f"{symbol}-1m-{day.year}-{day.month:02d}-{day.day:02d}.zip",
+                                "5m",
+                                f"{symbol}-5m-{day.year}-{day.month:02d}-{day.day:02d}.zip",
                             )
                             logging.info("Downloading daily archive %s", daily_url)
-                            daily_zip = Path(tmpdir) / f"ohlcv_{day:%Y%m%d}.zip"
+                            daily_zip = Path(tmpdir) / f"mark_price_{day:%Y%m%d}.zip"
                             daily_result = download_with_retries(
                                 daily_url,
                                 daily_zip,
@@ -257,7 +249,7 @@ def main() -> int:
                                 session=session,
                             )
                             if daily_result.status == "ok":
-                                frames.append(_read_ohlcv_from_zip(daily_zip, symbol, "archive_daily"))
+                                frames.append(_read_mark_price_from_zip(daily_zip, symbol, "archive_daily"))
                             elif daily_result.status == "not_found":
                                 missing_archives.append(daily_url)
                             else:
@@ -268,7 +260,7 @@ def main() -> int:
                     data = data.sort_values("timestamp").drop_duplicates(subset=["timestamp"])
                     data = data[(data["timestamp"] >= range_start) & (data["timestamp"] < range_end_exclusive)]
                 else:
-                    data = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "symbol", "source"])
+                    data = pd.DataFrame(columns=["timestamp", "mark_price", "symbol", "source"])
 
                 if not data.empty:
                     if data["timestamp"].duplicated().any():

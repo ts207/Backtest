@@ -1,9 +1,9 @@
 # Implementation Plan: Phase 1 & 2 Deep Dive and Refinement
 
 ## Phase 1: Data Layer Audit and Fixes
-- [ ] Task: Audit `project/pipelines/ingest/` and `project/pipelines/clean/` for timestamp alignment and PIT violations.
-- [ ] Task: TDD - Write unit tests for identified edge cases in cleaning logic.
-- [ ] Task: Implement fixes for identified data layer risks (e.g., funding scaling, bar alignment).
+- [x] Task: Audit `project/pipelines/ingest/` and `project/pipelines/clean/` for timestamp alignment and PIT violations. [checkpoint: 16e617b]
+- [x] Task: TDD - Write unit tests for identified edge cases in cleaning logic. [checkpoint: 16e617b]
+- [x] Task: Implement fixes for identified data layer risks (e.g., funding scaling, bar alignment). [checkpoint: 16e617b]
 - [ ] Task: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md)
 
 ## Phase 2: Logic and Discovery Refinement

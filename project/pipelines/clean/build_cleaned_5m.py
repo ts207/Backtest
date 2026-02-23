@@ -143,9 +143,9 @@ def main() -> int:
 
             start_ts = raw["timestamp"].min()
             end_ts = raw["timestamp"].max()
-            end_exclusive = end_ts + timedelta(minutes=15)
+            end_exclusive = end_ts + timedelta(minutes=5)
 
-            full_index = pd.date_range(start=start_ts, end=end_exclusive - timedelta(minutes=15), freq="5min", tz=timezone.utc)
+            full_index = pd.date_range(start=start_ts, end=end_exclusive - timedelta(minutes=5), freq="5min", tz=timezone.utc)
             bars = raw.set_index("timestamp").reindex(full_index).reset_index().rename(columns={"index": "timestamp"})
             
             gap_cols = ["open", "high", "low", "close", "volume"]
