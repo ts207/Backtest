@@ -14,12 +14,12 @@
     - [x] Verify tests pass and coverage >80%
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Performance Attribution Logic' (Protocol in workflow.md)
 
-## Phase 3: Economic Evaluation (Bridge)
+## Phase 3: Economic Evaluation (Bridge) [checkpoint: 47f86b0]
 - [x] Task: Integrate Cost Model (0436c1e)
     - [x] Write failing tests for fee and slippage application
     - [x] Implement cost application logic using `project/configs/fees.yaml`
     - [x] Verify tests pass and coverage >80%
-- [ ] Task: Conductor - User Manual Verification 'Phase 3: Economic Evaluation (Bridge)' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 3: Economic Evaluation (Bridge)' (Protocol in workflow.md)
 
 ## Phase 4: Reporting & Integration
 - [ ] Task: Generate Attribution Reports
