@@ -1,0 +1,4 @@
+event_type: "liquidity_absence_window"
+reports_dir: "liquidity_absence_window"
+events_file: "liquidity_absence_window_events.csv"
+signal_column: "liquidity_absence_event"
