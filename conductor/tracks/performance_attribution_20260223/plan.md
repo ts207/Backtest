@@ -8,10 +8,10 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Foundation & Data Preparation' (Protocol in workflow.md)
 
 ## Phase 2: Performance Attribution Logic
-- [ ] Task: Calculate Regime-Specific Metrics
-    - [ ] Write failing tests for per-regime P&L and Sharpe calculation
-    - [ ] Implement metric aggregation in `project/eval/performance_attribution.py`
-    - [ ] Verify tests pass and coverage >80%
+- [x] Task: Calculate Regime-Specific Metrics (ad731c7)
+    - [x] Write failing tests for per-regime P&L and Sharpe calculation
+    - [x] Implement metric aggregation in `project/eval/performance_attribution.py`
+    - [x] Verify tests pass and coverage >80%
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Performance Attribution Logic' (Protocol in workflow.md)
 
 ## Phase 3: Economic Evaluation (Bridge)
