@@ -1,4 +1,4 @@
-ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
+ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 SHARED_VENV_PYTHON := $(abspath $(ROOT_DIR)/../..)/.venv/bin/python
 PYTHON ?= $(if $(wildcard $(ROOT_DIR)/.venv/bin/python),$(ROOT_DIR)/.venv/bin/python,$(if $(wildcard $(SHARED_VENV_PYTHON)),$(SHARED_VENV_PYTHON),python3))
 PYTHON_COMPILE ?= $(PYTHON)

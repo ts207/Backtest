@@ -210,7 +210,7 @@ def _event_metrics(
 
 def _summarize_events(events_df: pd.DataFrame, keys: List[str]) -> pd.DataFrame:
     if events_df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=keys + ["event_count", "liquidation_probability", "vol_burst_likelihood", "time_to_normalization_median", "time_to_normalization_p75", "post_event_vol_decay_mean", "post_event_vol_decay_median"])
     grouped = events_df.groupby(keys, dropna=False)
     out = grouped.agg(
         event_count=("event_idx", "count"),
@@ -1103,7 +1103,12 @@ def main() -> int:
                     )
 
     events_df = pd.DataFrame(all_event_rows)
+    if events_df.empty:
+        events_df = pd.DataFrame(columns=["symbol", "event_type", "event_idx", "liquidation_prob", "vol_burst_prob", "time_to_normalization_bars", "post_event_vol_decay", "vol_hit_bar", "liq_30_80_hit", "drawdown_30_80_hit", "mae_96", "realized_vol_mean_96"])
+    
     baseline_df = pd.DataFrame(all_baseline_rows)
+    if baseline_df.empty:
+        baseline_df = pd.DataFrame(columns=["symbol", "event_type", "event_idx", "liquidation_prob", "vol_burst_prob", "time_to_normalization_bars", "post_event_vol_decay", "vol_hit_bar", "liq_30_80_hit", "drawdown_30_80_hit", "mae_96", "realized_vol_mean_96"])
     by_symbol_base = _summarize_events(events_df, ["symbol", "event_type"])
     by_symbol, pooled = _inject_missing_event_types(by_symbol_base, symbols)
 

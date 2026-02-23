@@ -13,7 +13,7 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
 
 ## Phase 3: Final Validation and Certification
-- [ ] Task: Run full discovery pipeline on a 7-day slice (certification run).
-- [ ] Task: Verify artifact schemas and provenance against `project/schemas/`.
-- [ ] Task: Fix any remaining inconsistencies found during the certification run.
+- [x] Task: Run full discovery pipeline on a 7-day slice (certification run). [checkpoint: 60aa1f7]
+- [x] Task: Verify artifact schemas and provenance against `project/schemas/`. [checkpoint: 60aa1f7]
+- [x] Task: Fix any remaining inconsistencies found during the certification run. [checkpoint: 60aa1f7]
 - [ ] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
