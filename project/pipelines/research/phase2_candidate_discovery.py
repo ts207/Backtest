@@ -79,6 +79,11 @@ PRIMARY_OUTPUT_COLUMNS = [
     "gate_bridge_edge_cost_ratio", "gate_bridge_turnover_controls", "gate_bridge_tradable", "selection_score_executed",
     "gate_pass", "gate_all_research", "gate_all", "supporting_hypothesis_count", "supporting_hypothesis_ids",
     "fail_reasons",
+    "effect_raw", "effect_shrunk_family", "effect_shrunk_event", "effect_shrunk_state",
+    "shrinkage_weight_family", "shrinkage_weight_event", "shrinkage_weight_state",
+    "p_value_raw", "p_value_shrunk", "p_value_for_fdr", "std_return", "gate_state_information",
+    "lambda_family", "lambda_event", "lambda_state",
+    "lambda_family_status", "lambda_event_status", "lambda_state_status",
 ]
 
 # Rule template → directional multiplier applied to forward returns.
@@ -167,10 +172,11 @@ def _apply_multiplicity_controls(
     if eligible.empty:
         return out
 
+    p_col = "p_value_for_fdr" if "p_value_for_fdr" in eligible.columns else "p_value"
     family_frames: List[pd.DataFrame] = []
     for _, family_df in eligible.groupby("family_id"):
         fam = family_df.copy()
-        fam["q_value_family"] = _bh_adjust(fam["p_value"])
+        fam["q_value_family"] = _bh_adjust(fam[p_col])
         fam["is_discovery_family"] = fam["q_value_family"] <= float(max_q)
         family_frames.append(fam)
 
@@ -180,6 +186,505 @@ def _apply_multiplicity_controls(
 
     for col in ("q_value_family", "is_discovery_family", "q_value", "is_discovery"):
         out.loc[eligible_scored.index, col] = eligible_scored[col]
+    return out
+
+
+def _aggregate_effect_units(
+    df: pd.DataFrame,
+    *,
+    unit_cols: List[str],
+    n_col: str,
+    mean_col: str,
+    var_col: str,
+    prefix: str,
+) -> pd.DataFrame:
+    cols = unit_cols + [n_col, mean_col, var_col]
+    if df.empty:
+        return pd.DataFrame(columns=unit_cols + [f"n_{prefix}", f"mean_{prefix}", f"var_{prefix}"])
+
+    work = df[cols].copy()
+    work["_n"] = pd.to_numeric(work[n_col], errors="coerce").fillna(0.0).clip(lower=0.0)
+    work["_mean"] = pd.to_numeric(work[mean_col], errors="coerce").fillna(0.0)
+    work["_var"] = pd.to_numeric(work[var_col], errors="coerce").fillna(0.0).clip(lower=0.0)
+
+    rows: List[Dict[str, Any]] = []
+    for keys, g in work.groupby(unit_cols, dropna=False):
+        g = g.copy()
+        total_n = float(g["_n"].sum())
+        if total_n <= 0.0:
+            mean_u = 0.0
+            var_u = 0.0
+        else:
+            mean_u = float((g["_n"] * g["_mean"]).sum() / total_n)
+            within = float(((g["_n"] - 1.0).clip(lower=0.0) * g["_var"]).sum())
+            between = float((g["_n"] * (g["_mean"] - mean_u) ** 2).sum())
+            denom = max(total_n - 1.0, 1.0)
+            var_u = float(max(0.0, (within + between) / denom))
+
+        if not isinstance(keys, tuple):
+            keys = (keys,)
+        row = {col: val for col, val in zip(unit_cols, keys)}
+        row[f"n_{prefix}"] = total_n
+        row[f"mean_{prefix}"] = mean_u
+        row[f"var_{prefix}"] = var_u
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _estimate_adaptive_lambda(
+    units_df: pd.DataFrame,
+    *,
+    parent_cols: List[str],
+    child_col: str,
+    n_col: str,
+    mean_col: str,
+    var_col: str,
+    lambda_name: str,
+    fixed_lambda: float,
+    adaptive: bool,
+    lambda_min: float,
+    lambda_max: float,
+    eps: float,
+    min_total_samples: int,
+) -> pd.DataFrame:
+    if units_df.empty:
+        return pd.DataFrame(columns=parent_cols + [lambda_name, f"{lambda_name}_status", f"{lambda_name}_sigma_within", f"{lambda_name}_sigma_between", f"{lambda_name}_total_n", f"{lambda_name}_child_count"])
+
+    if not adaptive:
+        base = units_df[parent_cols].drop_duplicates().copy()
+        base[lambda_name] = float(fixed_lambda)
+        base[f"{lambda_name}_status"] = "fixed"
+        base[f"{lambda_name}_sigma_within"] = np.nan
+        base[f"{lambda_name}_sigma_between"] = np.nan
+        base[f"{lambda_name}_total_n"] = np.nan
+        base[f"{lambda_name}_child_count"] = np.nan
+        return base
+
+    rows: List[Dict[str, Any]] = []
+    for keys, g in units_df.groupby(parent_cols, dropna=False):
+        if not isinstance(keys, tuple):
+            keys = (keys,)
+        parent_payload = {col: val for col, val in zip(parent_cols, keys)}
+
+        n = pd.to_numeric(g[n_col], errors="coerce").fillna(0.0).clip(lower=0.0)
+        mean = pd.to_numeric(g[mean_col], errors="coerce").fillna(0.0)
+        var = pd.to_numeric(g[var_col], errors="coerce").fillna(0.0).clip(lower=0.0)
+        child_count = int((n > 0.0).sum())
+        total_n = float(n.sum())
+
+        status = "adaptive"
+        sigma_within = np.nan
+        sigma_between = np.nan
+
+        if total_n < float(max(0, int(min_total_samples))):
+            # Explicit skip: no pooling when support is too low.
+            lam = 0.0
+            status = "insufficient_data"
+        elif child_count <= 1:
+            lam = float(lambda_max)
+            status = "single_child"
+            sigma_within = float(((n - 1.0).clip(lower=0.0) * var).sum() / max(float((n - 1.0).clip(lower=0.0).sum()), 1.0))
+            sigma_between = 0.0
+        else:
+            mean_global = float((n * mean).sum() / max(total_n, 1.0))
+            denom_within = float((n - 1.0).clip(lower=0.0).sum())
+            sigma_within = float(((n - 1.0).clip(lower=0.0) * var).sum() / max(denom_within, 1.0))
+            sigma_between = float((n * (mean - mean_global) ** 2).sum() / max(total_n, 1.0))
+            lam_raw = float(sigma_within / max(sigma_between, float(eps)))
+            lam = float(np.clip(lam_raw, float(lambda_min), float(lambda_max)))
+
+        row = dict(parent_payload)
+        row[lambda_name] = float(lam)
+        row[f"{lambda_name}_status"] = status
+        row[f"{lambda_name}_sigma_within"] = float(sigma_within) if np.isfinite(sigma_within) else np.nan
+        row[f"{lambda_name}_sigma_between"] = float(sigma_between) if np.isfinite(sigma_between) else np.nan
+        row[f"{lambda_name}_total_n"] = total_n
+        row[f"{lambda_name}_child_count"] = child_count
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _apply_hierarchical_shrinkage(
+    raw_df: pd.DataFrame,
+    *,
+    lambda_state: float = 100.0,
+    lambda_event: float = 300.0,
+    lambda_family: float = 1000.0,
+    adaptive_lambda: bool = True,
+    adaptive_lambda_min: float = 5.0,
+    adaptive_lambda_max: float = 5000.0,
+    adaptive_lambda_eps: float = 1e-8,
+    adaptive_lambda_min_total_samples: int = 200,
+) -> pd.DataFrame:
+    """Empirical-Bayes partial pooling across family -> event -> state."""
+    if raw_df.empty:
+        out = raw_df.copy()
+        for col in (
+            "effect_raw",
+            "effect_shrunk_family",
+            "effect_shrunk_event",
+            "effect_shrunk_state",
+            "shrinkage_weight_family",
+            "shrinkage_weight_event",
+            "shrinkage_weight_state",
+            "p_value_raw",
+            "p_value_shrunk",
+            "p_value_for_fdr",
+        ):
+            out[col] = pd.Series(dtype=float)
+        return out
+
+    out = raw_df.copy()
+    out["effect_raw"] = pd.to_numeric(out.get("expectancy", 0.0), errors="coerce").fillna(0.0)
+    out["p_value_raw"] = pd.to_numeric(out.get("p_value", 1.0), errors="coerce").fillna(1.0).clip(0.0, 1.0)
+    out["_n"] = pd.to_numeric(out.get("n_events", out.get("sample_size", 0)), errors="coerce").fillna(0.0).clip(lower=0.0)
+    if "std_return" not in out.columns:
+        out["std_return"] = np.nan
+    out["std_return"] = pd.to_numeric(out["std_return"], errors="coerce")
+
+    family_col = out["canonical_family"] if "canonical_family" in out.columns else out.get("event_type", pd.Series("", index=out.index))
+    event_col = out["canonical_event_type"] if "canonical_event_type" in out.columns else out.get("event_type", pd.Series("", index=out.index))
+    verb_col = out["template_verb"] if "template_verb" in out.columns else out.get("rule_template", pd.Series("", index=out.index))
+    horizon_col = out["horizon"] if "horizon" in out.columns else pd.Series("", index=out.index)
+    symbol_col = out["symbol"] if "symbol" in out.columns else pd.Series("", index=out.index)
+    state_col = out["state_id"] if "state_id" in out.columns else pd.Series("", index=out.index)
+
+    out["_family"] = family_col.astype(str).str.strip().str.upper()
+    out["_event"] = event_col.astype(str).str.strip().str.upper()
+    out["_verb"] = verb_col.astype(str).str.strip()
+    out["_horizon"] = horizon_col.astype(str).str.strip()
+    out["_symbol"] = symbol_col.astype(str).str.strip().str.upper()
+    out["_state"] = state_col.fillna("").astype(str).str.strip().str.upper()
+
+    out["_var"] = (out["std_return"] ** 2).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    # Preserve condition-level candidates while shrinking along ontology levels.
+    # Adaptive lambdas are estimated per (family,event,verb,horizon), not per symbol.
+    global_cols = ["_verb", "_horizon"]
+    family_cols = global_cols + ["_family"]
+    event_cols = family_cols + ["_event"]
+    state_cols = event_cols + ["_state"]
+
+    global_stats = _aggregate_effect_units(
+        out,
+        unit_cols=global_cols,
+        n_col="_n",
+        mean_col="effect_raw",
+        var_col="_var",
+        prefix="global",
+    )
+    out = out.merge(global_stats[global_cols + ["mean_global", "n_global", "var_global"]], on=global_cols, how="left")
+
+    family_stats = _aggregate_effect_units(
+        out,
+        unit_cols=family_cols,
+        n_col="_n",
+        mean_col="effect_raw",
+        var_col="_var",
+        prefix="family",
+    )
+    out = out.merge(family_stats[family_cols + ["mean_family", "n_family", "var_family"]], on=family_cols, how="left")
+
+    lambda_family_df = _estimate_adaptive_lambda(
+        family_stats,
+        parent_cols=global_cols,
+        child_col="_family",
+        n_col="n_family",
+        mean_col="mean_family",
+        var_col="var_family",
+        lambda_name="lambda_family",
+        fixed_lambda=float(lambda_family),
+        adaptive=bool(adaptive_lambda),
+        lambda_min=float(adaptive_lambda_min),
+        lambda_max=float(adaptive_lambda_max),
+        eps=float(adaptive_lambda_eps),
+        min_total_samples=int(adaptive_lambda_min_total_samples),
+    )
+    out = out.merge(
+        lambda_family_df[
+            global_cols
+            + [
+                "lambda_family",
+                "lambda_family_status",
+                "lambda_family_sigma_within",
+                "lambda_family_sigma_between",
+                "lambda_family_total_n",
+                "lambda_family_child_count",
+            ]
+        ],
+        on=global_cols,
+        how="left",
+    )
+
+    out["shrinkage_weight_family"] = np.where(
+        out["lambda_family_status"] == "insufficient_data",
+        1.0,
+        out["n_family"] / (out["n_family"] + pd.to_numeric(out["lambda_family"], errors="coerce").fillna(float(lambda_family))),
+    )
+    out["shrinkage_weight_family"] = out["shrinkage_weight_family"].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(0.0, 1.0)
+    out["effect_shrunk_family"] = (
+        out["shrinkage_weight_family"] * out["mean_family"]
+        + (1.0 - out["shrinkage_weight_family"]) * out["mean_global"]
+    )
+
+    event_stats = _aggregate_effect_units(
+        out,
+        unit_cols=event_cols,
+        n_col="_n",
+        mean_col="effect_raw",
+        var_col="_var",
+        prefix="event",
+    )
+    out = out.merge(event_stats[event_cols + ["mean_event", "n_event", "var_event"]], on=event_cols, how="left")
+
+    lambda_event_df = _estimate_adaptive_lambda(
+        event_stats,
+        parent_cols=family_cols,
+        child_col="_event",
+        n_col="n_event",
+        mean_col="mean_event",
+        var_col="var_event",
+        lambda_name="lambda_event",
+        fixed_lambda=float(lambda_event),
+        adaptive=bool(adaptive_lambda),
+        lambda_min=float(adaptive_lambda_min),
+        lambda_max=float(adaptive_lambda_max),
+        eps=float(adaptive_lambda_eps),
+        min_total_samples=int(adaptive_lambda_min_total_samples),
+    )
+    out = out.merge(
+        lambda_event_df[
+            family_cols
+            + [
+                "lambda_event",
+                "lambda_event_status",
+                "lambda_event_sigma_within",
+                "lambda_event_sigma_between",
+                "lambda_event_total_n",
+                "lambda_event_child_count",
+            ]
+        ],
+        on=family_cols,
+        how="left",
+    )
+
+    out["shrinkage_weight_event"] = np.where(
+        out["lambda_event_status"] == "insufficient_data",
+        1.0,
+        out["n_event"] / (out["n_event"] + pd.to_numeric(out["lambda_event"], errors="coerce").fillna(float(lambda_event))),
+    )
+    out["shrinkage_weight_event"] = out["shrinkage_weight_event"].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(0.0, 1.0)
+    out["effect_shrunk_event"] = (
+        out["shrinkage_weight_event"] * out["mean_event"]
+        + (1.0 - out["shrinkage_weight_event"]) * out["effect_shrunk_family"]
+    )
+
+    state_mask = out["_state"] != ""
+    state_stats = _aggregate_effect_units(
+        out[state_mask],
+        unit_cols=state_cols,
+        n_col="_n",
+        mean_col="effect_raw",
+        var_col="_var",
+        prefix="state",
+    )
+    out = out.merge(state_stats[state_cols + ["mean_state", "n_state", "var_state"]], on=state_cols, how="left")
+
+    lambda_state_df = _estimate_adaptive_lambda(
+        state_stats,
+        parent_cols=event_cols,
+        child_col="_state",
+        n_col="n_state",
+        mean_col="mean_state",
+        var_col="var_state",
+        lambda_name="lambda_state",
+        fixed_lambda=float(lambda_state),
+        adaptive=bool(adaptive_lambda),
+        lambda_min=float(adaptive_lambda_min),
+        lambda_max=float(adaptive_lambda_max),
+        eps=float(adaptive_lambda_eps),
+        min_total_samples=int(adaptive_lambda_min_total_samples),
+    )
+    out = out.merge(
+        lambda_state_df[
+            event_cols
+            + [
+                "lambda_state",
+                "lambda_state_status",
+                "lambda_state_sigma_within",
+                "lambda_state_sigma_between",
+                "lambda_state_total_n",
+                "lambda_state_child_count",
+            ]
+        ],
+        on=event_cols,
+        how="left",
+    )
+
+    out["shrinkage_weight_state"] = np.where(
+        out["lambda_state_status"] == "insufficient_data",
+        1.0,
+        out["_n"] / (out["_n"] + pd.to_numeric(out["lambda_state"], errors="coerce").fillna(float(lambda_state))),
+    )
+    out["shrinkage_weight_state"] = out["shrinkage_weight_state"].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(0.0, 1.0)
+    out.loc[~state_mask, "lambda_state_status"] = "no_state"
+    out.loc[~state_mask, "lambda_state"] = 0.0
+    out.loc[~state_mask, "shrinkage_weight_state"] = 1.0
+
+    out["effect_shrunk_state"] = np.where(
+        state_mask,
+        out["shrinkage_weight_state"] * out["mean_state"].fillna(out["effect_raw"])
+        + (1.0 - out["shrinkage_weight_state"]) * out["effect_shrunk_event"],
+        out["effect_shrunk_event"],
+    )
+
+    # Build shrunken p-values from state-shrunk effect and raw standard error.
+    se = out["std_return"] / np.sqrt(np.maximum(out["_n"], 1.0))
+    valid_se = np.isfinite(se) & (se > 0.0) & (out["_n"] > 1.0)
+    p_shrunk = out["p_value_raw"].astype(float).copy()
+    t_shrunk = pd.Series(0.0, index=out.index, dtype=float)
+    t_shrunk.loc[valid_se] = out.loc[valid_se, "effect_shrunk_state"] / se.loc[valid_se]
+    p_shrunk.loc[valid_se] = t_shrunk.loc[valid_se].apply(_two_sided_p_from_t)
+    out["p_value_shrunk"] = pd.to_numeric(p_shrunk, errors="coerce").fillna(out["p_value_raw"]).clip(0.0, 1.0)
+    out["p_value_for_fdr"] = out["p_value_shrunk"]
+
+    drop_cols = [
+        "_n",
+        "_family",
+        "_event",
+        "_verb",
+        "_horizon",
+        "_symbol",
+        "_state",
+        "mean_global",
+        "n_global",
+        "mean_family",
+        "n_family",
+        "mean_event",
+        "n_event",
+        "var_event",
+        "mean_state",
+        "n_state",
+        "var_state",
+        "mean_global",
+        "n_global",
+        "var_global",
+        "mean_family",
+        "n_family",
+        "var_family",
+    ]
+    return out.drop(columns=[c for c in drop_cols if c in out.columns], errors="ignore")
+
+
+def _refresh_phase2_metrics_after_shrinkage(
+    df: pd.DataFrame,
+    *,
+    min_after_cost: float,
+    conservative_cost_multiplier: float,
+    min_sample_size_gate: int,
+    require_sign_stability: bool,
+    quality_floor_fallback: float,
+    min_events_fallback: int,
+    min_information_weight_state: float,
+) -> pd.DataFrame:
+    out = df.copy()
+    if out.empty:
+        return out
+
+    known_gate_prefixes = (
+        "ECONOMIC_GATE",
+        "ECONOMIC_CONSERVATIVE",
+        "STABILITY_GATE",
+        "MIN_SAMPLE_SIZE_GATE",
+        "STATE_INFORMATION_WEIGHT",
+    )
+
+    out["expectancy"] = pd.to_numeric(out["effect_shrunk_state"], errors="coerce").fillna(
+        pd.to_numeric(out.get("expectancy", 0.0), errors="coerce").fillna(0.0)
+    )
+
+    resolved_cost = pd.to_numeric(out.get("cost_bps_resolved", 0.0), errors="coerce").fillna(0.0) / 10000.0
+    out["after_cost_expectancy"] = out["expectancy"] - resolved_cost
+    out["after_cost_expectancy_per_trade"] = out["after_cost_expectancy"]
+    out["stressed_after_cost_expectancy_per_trade"] = out["expectancy"] - (resolved_cost * float(conservative_cost_multiplier))
+
+    out["p_value"] = pd.to_numeric(out.get("p_value_shrunk", out.get("p_value", 1.0)), errors="coerce").fillna(1.0).clip(0.0, 1.0)
+    out["p_value_for_fdr"] = pd.to_numeric(out.get("p_value_for_fdr", out["p_value"]), errors="coerce").fillna(out["p_value"]).clip(0.0, 1.0)
+
+    out["gate_economic"] = out["after_cost_expectancy"] >= float(min_after_cost)
+    out["gate_economic_conservative"] = out["stressed_after_cost_expectancy_per_trade"] >= float(min_after_cost)
+    out["gate_after_cost_positive"] = out["gate_economic"]
+    out["gate_after_cost_stressed_positive"] = out["gate_economic_conservative"]
+    if "gate_stability" in out.columns:
+        gate_stability_col = out["gate_stability"]
+    else:
+        gate_stability_col = pd.Series(False, index=out.index)
+    out["gate_stability"] = gate_stability_col.astype(bool)
+    out["sample_size"] = pd.to_numeric(out.get("sample_size", out.get("n_events", 0)), errors="coerce").fillna(0).astype(int)
+    out["n_events"] = pd.to_numeric(out.get("n_events", 0), errors="coerce").fillna(0).astype(int)
+
+    sample_gate_pass = (
+        out["sample_size"] >= int(min_sample_size_gate)
+        if int(min_sample_size_gate) > 0
+        else pd.Series(True, index=out.index)
+    )
+    if "state_id" in out.columns:
+        state_id_col = out["state_id"]
+    else:
+        state_id_col = pd.Series("", index=out.index)
+    if "shrinkage_weight_state" in out.columns:
+        state_weight_col = out["shrinkage_weight_state"]
+    else:
+        state_weight_col = pd.Series(1.0, index=out.index)
+    out["gate_state_information"] = (
+        state_id_col.fillna("").astype(str).str.strip() == ""
+    ) | (pd.to_numeric(state_weight_col, errors="coerce").fillna(0.0) >= float(min_information_weight_state))
+
+    stability_ok = out["gate_stability"] if require_sign_stability else pd.Series(True, index=out.index)
+    out["gate_phase2_research"] = out["gate_economic_conservative"] & sample_gate_pass & stability_ok & out["gate_state_information"]
+    out["gate_phase2_final"] = out["gate_phase2_research"]
+
+    out["robustness_score"] = (
+        out["gate_economic"].astype(float)
+        + out["gate_economic_conservative"].astype(float)
+        + out["gate_stability"].astype(float)
+        + out["gate_state_information"].astype(float)
+    ) / 4.0
+    out["phase2_quality_score"] = out["robustness_score"]
+    out["phase2_quality_components"] = out.apply(
+        lambda r: json.dumps(
+            {
+                "econ": int(bool(r["gate_economic"])),
+                "econ_cons": int(bool(r["gate_economic_conservative"])),
+                "stability": int(bool(r["gate_stability"])),
+                "state_info": int(bool(r["gate_state_information"])),
+            },
+            sort_keys=True,
+        ),
+        axis=1,
+    )
+    out["compile_eligible_phase2_fallback"] = (
+        (out["phase2_quality_score"] >= float(quality_floor_fallback))
+        & (out["n_events"] >= int(min_events_fallback))
+    )
+
+    def _refresh_fail_reasons(row: pd.Series) -> str:
+        prior = [s.strip() for s in str(row.get("fail_reasons", "")).split(",") if s.strip()]
+        keep = [s for s in prior if not s.startswith(known_gate_prefixes)]
+        if not bool(row.get("gate_economic", False)):
+            keep.append("ECONOMIC_GATE")
+        if not bool(row.get("gate_economic_conservative", False)):
+            keep.append("ECONOMIC_CONSERVATIVE")
+        if require_sign_stability and not bool(row.get("gate_stability", False)):
+            keep.append("STABILITY_GATE")
+        if int(min_sample_size_gate) > 0 and int(row.get("sample_size", 0)) < int(min_sample_size_gate):
+            keep.append("MIN_SAMPLE_SIZE_GATE")
+        if not bool(row.get("gate_state_information", True)):
+            keep.append("STATE_INFORMATION_WEIGHT")
+        return ",".join(dict.fromkeys(keep))
+
+    out["fail_reasons"] = out.apply(_refresh_fail_reasons, axis=1)
+    out["promotion_track"] = np.where(out["gate_phase2_final"], "standard", "fallback_only")
     return out
 
 
@@ -382,7 +887,7 @@ def _join_events_to_features(
     return merged
 
 
-def calculate_expectancy(
+def calculate_expectancy_stats(
     sym_events: pd.DataFrame,
     features_df: pd.DataFrame,
     rule: str,
@@ -390,7 +895,7 @@ def calculate_expectancy(
     shift_labels_k: int = 0,
     entry_lag_bars: int = 1,
     min_samples: int = 30,
-) -> Tuple[float, float, float, bool]:
+) -> Dict[str, Any]:
     """
     Real PIT expectancy calculation.
 
@@ -400,14 +905,18 @@ def calculate_expectancy(
             a *true* misalignment canary: deterministic, and tests specifically
             whether the pipeline is sensitive to label-offset errors.
 
-    Returns:
-        (mean_return, p_value, n_events, stability_pass)
-
-    stability_pass: True if sign of mean_return is consistent across first/second
-    time half of events.
+    Returns a stats payload with mean_return, p_value, n_events, stability_pass,
+    std_return, and t_stat.
     """
     if sym_events.empty or features_df.empty:
-        return 0.0, 1.0, 0.0, False
+        return {
+            "mean_return": 0.0,
+            "p_value": 1.0,
+            "n_events": 0.0,
+            "stability_pass": False,
+            "std_return": 0.0,
+            "t_stat": 0.0,
+        }
 
     if int(entry_lag_bars) < 1:
         raise ValueError("entry_lag_bars must be >= 1 to prevent same-bar entry leakage")
@@ -418,7 +927,14 @@ def calculate_expectancy(
     # Join events to features at t0
     merged = _join_events_to_features(sym_events, features_df)
     if merged.empty or "close" not in merged.columns:
-        return 0.0, 1.0, 0.0, False
+        return {
+            "mean_return": 0.0,
+            "p_value": 1.0,
+            "n_events": 0.0,
+            "stability_pass": False,
+            "std_return": 0.0,
+            "t_stat": 0.0,
+        }
 
     # Compute forward return at t0 using aligned feature rows.
     # We use the features_df index to look up close horizon_bars later.
@@ -427,8 +943,6 @@ def calculate_expectancy(
     feat_ts_idx = pd.DatetimeIndex(features_df["timestamp"])
 
     event_returns: List[float] = []
-    event_ts_list: List[pd.Timestamp] = []
-
     for _, row in merged.iterrows():
         ts = row["timestamp"]
         # Find position of this feature row in features_df
@@ -451,10 +965,17 @@ def calculate_expectancy(
 
         directional_ret = float(fwd_ret) * direction
         event_returns.append(directional_ret)
-        event_ts_list.append(ts)
 
     if len(event_returns) < min_samples:
-        return 0.0, 1.0, float(len(event_returns)), False
+        std_ret = float(pd.Series(event_returns, dtype=float).std()) if len(event_returns) > 1 else 0.0
+        return {
+            "mean_return": 0.0,
+            "p_value": 1.0,
+            "n_events": float(len(event_returns)),
+            "stability_pass": False,
+            "std_return": std_ret,
+            "t_stat": 0.0,
+        }
 
     returns_series = pd.Series(event_returns, dtype=float)
     stats = _distribution_stats(returns_series)
@@ -471,7 +992,40 @@ def calculate_expectancy(
     second_sign = second_half.mean()
     stability_pass = (np.sign(first_sign) == np.sign(second_sign)) and (first_sign != 0) and (second_sign != 0)
 
-    return mean_ret, p_value, float(n), bool(stability_pass)
+    return {
+        "mean_return": mean_ret,
+        "p_value": p_value,
+        "n_events": float(n),
+        "stability_pass": bool(stability_pass),
+        "std_return": float(stats.get("std_return", 0.0)),
+        "t_stat": float(t_stat),
+    }
+
+
+def calculate_expectancy(
+    sym_events: pd.DataFrame,
+    features_df: pd.DataFrame,
+    rule: str,
+    horizon: str,
+    shift_labels_k: int = 0,
+    entry_lag_bars: int = 1,
+    min_samples: int = 30,
+) -> Tuple[float, float, float, bool]:
+    stats = calculate_expectancy_stats(
+        sym_events=sym_events,
+        features_df=features_df,
+        rule=rule,
+        horizon=horizon,
+        shift_labels_k=shift_labels_k,
+        entry_lag_bars=entry_lag_bars,
+        min_samples=min_samples,
+    )
+    return (
+        float(stats["mean_return"]),
+        float(stats["p_value"]),
+        float(stats["n_events"]),
+        bool(stats["stability_pass"]),
+    )
 
 
 # Naming convention for analysis-only (non-runtime) bucket prefixes.
@@ -640,6 +1194,36 @@ def _make_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="If 1, allow ontology hash drift between candidate plan, run manifest, and current specs.",
+    )
+    parser.add_argument(
+        "--enable_hierarchical_shrinkage",
+        type=int,
+        default=1,
+        help="If 1, apply empirical-Bayes family->event->state shrinkage before BH-FDR.",
+    )
+    parser.add_argument(
+        "--adaptive_shrinkage_lambda",
+        type=int,
+        default=1,
+        help="If 1, estimate lambda_state/lambda_event/lambda_family via variance decomposition.",
+    )
+    parser.add_argument("--lambda_state", type=float, default=100.0, help="Shrinkage strength for state -> event pooling.")
+    parser.add_argument("--lambda_event", type=float, default=300.0, help="Shrinkage strength for event -> family pooling.")
+    parser.add_argument("--lambda_family", type=float, default=1000.0, help="Shrinkage strength for family -> global pooling.")
+    parser.add_argument("--adaptive_lambda_min", type=float, default=5.0, help="Lower clamp for adaptive lambda.")
+    parser.add_argument("--adaptive_lambda_max", type=float, default=5000.0, help="Upper clamp for adaptive lambda.")
+    parser.add_argument("--adaptive_lambda_eps", type=float, default=1e-8, help="Stabilizer for adaptive lambda denominator.")
+    parser.add_argument(
+        "--adaptive_lambda_min_total_samples",
+        type=int,
+        default=200,
+        help="Minimum total samples required per parent group before adaptive lambda is estimated.",
+    )
+    parser.add_argument(
+        "--min_information_weight_state",
+        type=float,
+        default=0.2,
+        help="Minimum state shrinkage information weight required for state-conditioned promotion gates.",
     )
     return parser
 
@@ -934,12 +1518,17 @@ def main():
             if features_df.empty:
                 continue
                 
-            effect, pval, n_joined, stability_pass = calculate_expectancy(
+            exp_stats = calculate_expectancy_stats(
                 bucket_events, features_df, rule, horizon,
                 shift_labels_k=args.shift_labels_k,
                 entry_lag_bars=args.entry_lag_bars,
                 min_samples=min_samples,
             )
+            effect = float(exp_stats["mean_return"])
+            pval = float(exp_stats["p_value"])
+            n_joined = float(exp_stats["n_events"])
+            stability_pass = bool(exp_stats["stability_pass"])
+            std_return = float(exp_stats.get("std_return", 0.0))
             
             # Helper to add results with Atlas lineage
             cost_estimate = cost_calibrator.estimate(symbol=symbol, events_df=bucket_events)
@@ -1011,6 +1600,7 @@ def main():
                 "p_value": pval,
                 "sample_size": _resolved_sample_size(n_joined, len(sym_events)),
                 "n_events": int(n_joined),
+                "std_return": std_return,
                 "sign": 1 if effect > 0 else -1,
                 "gate_economic": econ_pass,
                 "gate_economic_conservative": econ_pass_conservative,
@@ -1073,14 +1663,19 @@ def main():
                     )
                     operator_version = str(operator_def.get("operator_version", operator_registry_version)).strip() or operator_registry_version
                     # 3a. Base candidate (all events for this symbol)
-                    effect, pval, n_joined, stability_pass = calculate_expectancy(
+                    exp_stats = calculate_expectancy_stats(
                         sym_all_events, features_df, rule, horizon,
                         shift_labels_k=args.shift_labels_k,
                         entry_lag_bars=args.entry_lag_bars,
                         min_samples=args.min_samples,
                     )
+                    effect = float(exp_stats["mean_return"])
+                    pval = float(exp_stats["p_value"])
+                    n_joined = float(exp_stats["n_events"])
+                    stability_pass = bool(exp_stats["stability_pass"])
+                    std_return = float(exp_stats.get("std_return", 0.0))
                     
-                    def _add_res(eff, pv, n, stab, bucket_events_for_cost, cond_name="all"):
+                    def _add_res(eff, pv, n, stab, std_ret, bucket_events_for_cost, cond_name="all"):
                         # Economic Gate with candidate-level cost calibration.
                         cost_estimate = cost_calibrator.estimate(symbol=symbol, events_df=bucket_events_for_cost)
                         candidate_cost_bps = float(cost_estimate.cost_bps)
@@ -1158,6 +1753,7 @@ def main():
                             "p_value": pv,
                             "sample_size": _resolved_sample_size(n, len(sym_all_events)),
                             "n_events": int(n),
+                            "std_return": float(std_ret),
                             "sign": 1 if eff > 0 else -1,
                             "gate_economic": ec_pass,
                             "gate_economic_conservative": ec_pass_conservative,
@@ -1188,7 +1784,7 @@ def main():
                             "candidate_plan_hash": "",
                         })
 
-                    _add_res(effect, pval, n_joined, stability_pass, sym_all_events, "all")
+                    _add_res(effect, pval, n_joined, stability_pass, std_return, sym_all_events, "all")
 
                     # 3b. Conditioned candidates (refined buckets)
                     for col in CONDITIONING_COLS:
@@ -1211,13 +1807,18 @@ def main():
                             if len(bucket_events) < effective_min_samples:
                                 continue
                                 
-                            eff_b, pv_b, n_b, stab_b = calculate_expectancy(
+                            exp_stats_bucket = calculate_expectancy_stats(
                                 bucket_events, features_df, rule, horizon,
                                 shift_labels_k=args.shift_labels_k,
                                 entry_lag_bars=args.entry_lag_bars,
                                 min_samples=effective_min_samples,
                             )
-                            _add_res(eff_b, pv_b, n_b, stab_b, bucket_events, f"{col}_{val}")
+                            eff_b = float(exp_stats_bucket["mean_return"])
+                            pv_b = float(exp_stats_bucket["p_value"])
+                            n_b = float(exp_stats_bucket["n_events"])
+                            stab_b = bool(exp_stats_bucket["stability_pass"])
+                            std_b = float(exp_stats_bucket.get("std_return", 0.0))
+                            _add_res(eff_b, pv_b, n_b, stab_b, std_b, bucket_events, f"{col}_{val}")
 
     if not results:
         log.warning("No results produced — check features/events availability for %s. Continuing.", args.event_type)
@@ -1228,6 +1829,47 @@ def main():
         sys.exit(0)
 
     raw_df = pd.DataFrame(results)
+
+    if bool(int(args.enable_hierarchical_shrinkage)):
+        raw_df = _apply_hierarchical_shrinkage(
+            raw_df,
+            lambda_state=float(args.lambda_state),
+            lambda_event=float(args.lambda_event),
+            lambda_family=float(args.lambda_family),
+            adaptive_lambda=bool(int(args.adaptive_shrinkage_lambda)),
+            adaptive_lambda_min=float(args.adaptive_lambda_min),
+            adaptive_lambda_max=float(args.adaptive_lambda_max),
+            adaptive_lambda_eps=float(args.adaptive_lambda_eps),
+            adaptive_lambda_min_total_samples=int(args.adaptive_lambda_min_total_samples),
+        )
+    else:
+        raw_df["effect_raw"] = pd.to_numeric(raw_df.get("expectancy", 0.0), errors="coerce").fillna(0.0)
+        raw_df["effect_shrunk_family"] = raw_df["effect_raw"]
+        raw_df["effect_shrunk_event"] = raw_df["effect_raw"]
+        raw_df["effect_shrunk_state"] = raw_df["effect_raw"]
+        raw_df["shrinkage_weight_family"] = 1.0
+        raw_df["shrinkage_weight_event"] = 1.0
+        raw_df["shrinkage_weight_state"] = 1.0
+        raw_df["p_value_raw"] = pd.to_numeric(raw_df.get("p_value", 1.0), errors="coerce").fillna(1.0).clip(0.0, 1.0)
+        raw_df["p_value_shrunk"] = raw_df["p_value_raw"]
+        raw_df["p_value_for_fdr"] = raw_df["p_value_raw"]
+        raw_df["lambda_family"] = 0.0
+        raw_df["lambda_event"] = 0.0
+        raw_df["lambda_state"] = 0.0
+        raw_df["lambda_family_status"] = "disabled"
+        raw_df["lambda_event_status"] = "disabled"
+        raw_df["lambda_state_status"] = "disabled"
+
+    raw_df = _refresh_phase2_metrics_after_shrinkage(
+        raw_df,
+        min_after_cost=min_after_cost,
+        conservative_cost_multiplier=conservative_cost_multiplier,
+        min_sample_size_gate=min_sample_size_gate,
+        require_sign_stability=require_sign_stability,
+        quality_floor_fallback=quality_floor_fallback,
+        min_events_fallback=min_events_fallback,
+        min_information_weight_state=float(args.min_information_weight_state),
+    )
 
     # 4. Multiplicity Control: family BH + global BH over family-adjusted q-values.
     fdr_df = _apply_multiplicity_controls(
@@ -1263,6 +1905,14 @@ def main():
     # 5. Emit Artifacts
     ensure_dir(reports_root)
 
+    if "effect_raw" in fdr_df.columns and "effect_shrunk_state" in fdr_df.columns:
+        fdr_df["shrinkage_adjustment_abs"] = (
+            pd.to_numeric(fdr_df["effect_raw"], errors="coerce").fillna(0.0)
+            - pd.to_numeric(fdr_df["effect_shrunk_state"], errors="coerce").fillna(0.0)
+        ).abs()
+    else:
+        fdr_df["shrinkage_adjustment_abs"] = 0.0
+
     # Ensure lineage fields exist in fdr_df before writing
     lineage_cols = ["plan_row_id", "source_claim_ids", "source_concept_ids", "candidate_plan_hash"]
     for col in lineage_cols:
@@ -1279,6 +1929,26 @@ def main():
     fdr_df[["candidate_id", "q_value", "is_discovery"]].to_parquet(
         reports_root / "phase2_fdr.parquet", index=False
     )
+
+    diagnostics_cols = [
+        "candidate_id",
+        "symbol",
+        "canonical_family",
+        "canonical_event_type",
+        "template_verb",
+        "horizon",
+        "state_id",
+        "n_events",
+        "lambda_state",
+        "lambda_state_status",
+        "shrinkage_weight_state",
+        "effect_raw",
+        "effect_shrunk_state",
+        "shrinkage_adjustment_abs",
+    ]
+    diag_df = fdr_df[[c for c in diagnostics_cols if c in fdr_df.columns]].copy()
+    diag_df.to_parquet(reports_root / "phase2_shrinkage_diagnostics.parquet", index=False)
+    diag_df.to_csv(reports_root / "phase2_shrinkage_diagnostics.csv", index=False)
 
     report = {
         "spec_hashes": spec_hashes,
@@ -1302,6 +1972,16 @@ def main():
             "conservative_cost_multiplier": conservative_cost_multiplier,
             "require_sign_stability": require_sign_stability,
             "entry_lag_bars": int(args.entry_lag_bars),
+            "enable_hierarchical_shrinkage": bool(int(args.enable_hierarchical_shrinkage)),
+            "adaptive_shrinkage_lambda": bool(int(args.adaptive_shrinkage_lambda)),
+            "lambda_state": float(args.lambda_state),
+            "lambda_event": float(args.lambda_event),
+            "lambda_family": float(args.lambda_family),
+            "adaptive_lambda_min": float(args.adaptive_lambda_min),
+            "adaptive_lambda_max": float(args.adaptive_lambda_max),
+            "adaptive_lambda_eps": float(args.adaptive_lambda_eps),
+            "adaptive_lambda_min_total_samples": int(args.adaptive_lambda_min_total_samples),
+            "min_information_weight_state": float(args.min_information_weight_state),
         },
         "summary": {
             "total_tested": int(len(fdr_df)),
@@ -1313,6 +1993,12 @@ def main():
             "fallback_eligible_compile": int(fdr_df["compile_eligible_phase2_fallback"].sum()) if "compile_eligible_phase2_fallback" in fdr_df.columns else 0,
             "quality_floor_fallback": quality_floor_fallback,
             "min_events_fallback": min_events_fallback,
+            "mean_abs_shrinkage_adjustment": float(pd.to_numeric(fdr_df.get("shrinkage_adjustment_abs", 0.0), errors="coerce").fillna(0.0).mean()),
+            "median_abs_shrinkage_adjustment": float(pd.to_numeric(fdr_df.get("shrinkage_adjustment_abs", 0.0), errors="coerce").fillna(0.0).median()),
+            "mean_shrinkage_weight_state": float(pd.to_numeric(fdr_df.get("shrinkage_weight_state", 0.0), errors="coerce").fillna(0.0).mean()),
+            "mean_lambda_state": float(pd.to_numeric(fdr_df.get("lambda_state", 0.0), errors="coerce").fillna(0.0).mean()),
+            "median_lambda_state": float(pd.to_numeric(fdr_df.get("lambda_state", 0.0), errors="coerce").fillna(0.0).median()),
+            "lambda_state_status_counts": {str(k): int(v) for k, v in fdr_df.get("lambda_state_status", pd.Series(dtype="object")).fillna("").value_counts().to_dict().items()},
         },
     }
 
