@@ -1,0 +1,8 @@
+event_type: "DESIGN"
+description: "Placeholder event type for claims describing test designs rather than specific market triggers."
+reports_dir: "design"
+signal_column: "is_design_event"
+parameters: {}
+provenance:
+  source_id: "R12"
+  claim_id: ["CL_0489", "CL_0441"]

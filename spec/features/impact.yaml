@@ -1,0 +1,15 @@
+feature_family: market_quality
+version: 1.0.0
+base_timeframe: 1m
+inputs:
+  - dataset: tob_1s
+    columns: [bid_qty, ask_qty, bid_price, ask_price]
+features:
+  - name: impact
+    description: "Estimated price impact of a market order of a standard size."
+    formula: "price_change / order_size"
+    params: {standard_order_usd: 100000}
+provenance:
+  source_id: "R12"
+  claim_id: ["CL_0157", "CL_0304", "CL_0582", "CL_0526"]
+  pit_constraint: "asof <= t0"

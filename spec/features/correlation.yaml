@@ -1,0 +1,15 @@
+feature_family: microstructure
+version: 1.0.0
+base_timeframe: 1m
+inputs:
+  - dataset: perp_ohlcv_1m
+    columns: [close]
+features:
+  - name: correlation
+    description: "Rolling correlation between assets or variables."
+    formula: "corr(x, y)"
+    params: {window: 50}
+provenance:
+  source_id: "R12"
+  claim_id: ["CL_0046", "CL_0169", "CL_0324"]
+  pit_constraint: "asof <= t0"

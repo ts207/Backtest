@@ -1,0 +1,19 @@
+feature_family: copula_mispricing
+version: 1.0.0
+base_timeframe: 1h
+inputs:
+  - dataset: perp_ohlcv_1h
+    columns: [close]
+features:
+  - name: h1_2
+    description: "Conditional distribution of asset 1 return given asset 2 return using copula partial derivative."
+    formula: "dC(u1, u2) / du2"
+    params: {window: 504, copula_family: "student_t"}
+  - name: h2_1
+    description: "Conditional distribution of asset 2 return given asset 1 return using copula partial derivative."
+    formula: "dC(u1, u2) / du1"
+    params: {window: 504, copula_family: "student_t"}
+provenance:
+  source_id: "R19"
+  claim_id: ["CL_1002"]
+  pit_constraint: "asof <= t0"

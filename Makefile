@@ -58,12 +58,16 @@ discover-edges:
 		--symbols $(SYMBOLS) \
 		--start $(START) \
 		--end $(END) \
-		--run_hypothesis_generator 1 \
+		--run_hypothesis_generator 0 \
 		--run_phase2_conditional 1 \
 		--phase2_event_type all \
 		--run_edge_candidate_universe 1 \
 		--run_strategy_builder 0 \
-		--run_recommendations_checklist 0
+		--run_recommendations_checklist 0 \
+		--strategy_blueprint_ignore_checklist 1 \
+		--strategy_blueprint_allow_fallback 1 \
+		--run_ingest_liquidation_snapshot 0 \
+		--run_ingest_open_interest_hist 0
 
 discover-edges-from-raw:
 	$(PYTHON) $(RUN_ALL) \

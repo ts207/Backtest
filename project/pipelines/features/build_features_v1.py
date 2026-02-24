@@ -337,7 +337,9 @@ def main() -> int:
                     }
                 )
 
-            if market == "perp" and not funding.empty:
+            if market == "perp" and "funding_rate_scaled" in bars.columns:
+                pass
+            elif market == "perp" and not funding.empty:
                 funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
                 funding = funding.sort_values("timestamp").reset_index(drop=True)
                 if "funding_rate_scaled" in funding.columns:

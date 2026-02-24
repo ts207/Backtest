@@ -1,0 +1,15 @@
+feature_family: evaluation
+version: 1.0.0
+base_timeframe: 1d
+inputs:
+  - dataset: perp_ohlcv_1d
+    columns: [close]
+features:
+  - name: rmse
+    description: "Root Mean Square Error of predictions."
+    formula: "sqrt(mean((y_true - y_pred)^2))"
+    params: {window: 30}
+provenance:
+  source_id: "R16"
+  claim_id: ["CL_0763", "CL_0772", "CL_0782", "CL_0783", "CL_0771"]
+  pit_constraint: "asof <= t0"

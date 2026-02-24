@@ -13,12 +13,19 @@ from zipfile import ZipFile
 import pandas as pd
 import requests
 
+try:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    HAS_PYARROW = True
+except ImportError:
+    HAS_PYARROW = False
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.http_utils import download_with_retries
-from pipelines._lib.io_utils import ensure_dir, read_parquet, write_parquet
+from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.url_utils import join_url
 from pipelines._lib.validation import ensure_utc_timestamp
@@ -26,6 +33,7 @@ from pipelines._lib.validation import ensure_utc_timestamp
 
 ARCHIVE_BASE = "https://data.binance.vision/data/futures/um"
 EARLIEST_UM_FUTURES = datetime(2019, 9, 1, tzinfo=timezone.utc)
+CHUNK_SIZE = 200_000 # Memory-safe chunk size for high-freq data
 
 
 def _parse_date(value: str) -> datetime:
@@ -60,7 +68,7 @@ def _iter_days(start: datetime, end: datetime) -> List[datetime]:
     return days
 
 
-def _read_book_ticker_from_zip(path: Path, symbol: str, source: str) -> pd.DataFrame:
+def _clean_book_ticker_chunk(df: pd.DataFrame, symbol: str, source: str) -> pd.DataFrame:
     columns = [
         "event_time",
         "transaction_time",
@@ -70,11 +78,7 @@ def _read_book_ticker_from_zip(path: Path, symbol: str, source: str) -> pd.DataF
         "ask_price",
         "ask_qty",
     ]
-    with ZipFile(path) as zf:
-        csv_name = zf.namelist()[0]
-        with zf.open(csv_name) as f:
-            df = pd.read_csv(f, header=None)
-
+    
     if df.empty:
         return pd.DataFrame(columns=["timestamp", "bid_price", "bid_qty", "ask_price", "ask_qty", "symbol", "source"])
 
@@ -82,24 +86,14 @@ def _read_book_ticker_from_zip(path: Path, symbol: str, source: str) -> pd.DataF
     df = df.iloc[:, :usable_cols].copy()
     df.columns = columns[:usable_cols]
 
-    # Binance UM bookTicker sometimes has event_time, sometimes not.
-    # Usually it's: event_time, transaction_time, symbol, bid_price, bid_qty, ask_price, ask_qty
-    # If the first column is symbol, then it's different.
-    
+    # Column mapping logic
     if not pd.to_numeric(df.iloc[0, 0], errors="coerce") > 0:
-         # maybe it's symbol first?
-         # Check if symbol column exists
          if isinstance(df.iloc[0, 0], str) and df.iloc[0, 0].upper() == symbol:
-             # it is: symbol, bid_price, bid_qty, ask_price, ask_qty, event_time, transaction_time
              cols = ["symbol", "bid_price", "bid_qty", "ask_price", "ask_qty", "event_time", "transaction_time"]
              df.columns = cols[:df.shape[1]]
-         else:
-             # try to find timestamp column
-             pass
 
     ts_col = "event_time" if "event_time" in df.columns else "transaction_time"
     if ts_col not in df.columns:
-        # Fallback to first column if it's numeric
         df["timestamp_raw"] = pd.to_numeric(df.iloc[:, 0], errors="coerce")
         ts_col = "timestamp_raw"
 
@@ -114,12 +108,52 @@ def _read_book_ticker_from_zip(path: Path, symbol: str, source: str) -> pd.DataF
     return df
 
 
+def _process_csv_stream_to_parquet(
+    csv_file_obj, 
+    out_path: Path, 
+    symbol: str, 
+    source: str, 
+    range_start: datetime, 
+    range_end_exclusive: datetime,
+    writer: pq.ParquetWriter | None = None
+) -> Tuple[int, datetime | None, datetime | None, pq.ParquetWriter | None]:
+    
+    total_rows = 0
+    start_ts = None
+    end_ts = None
+    
+    reader = pd.read_csv(csv_file_obj, header=None, chunksize=CHUNK_SIZE)
+    
+    for chunk in reader:
+        df = _clean_book_ticker_chunk(chunk, symbol, source)
+        # Apply range filter
+        df = df[(df["timestamp"] >= range_start) & (df["timestamp"] < range_end_exclusive)]
+        if df.empty:
+            continue
+            
+        if writer is None:
+            if not HAS_PYARROW:
+                raise ImportError("pyarrow is required for chunked parquet writing")
+            ensure_dir(out_path.parent)
+            table = pa.Table.from_pandas(df)
+            writer = pq.ParquetWriter(out_path, table.schema, compression='snappy')
+            start_ts = df["timestamp"].min()
+            
+        writer.write_table(pa.Table.from_pandas(df))
+        total_rows += len(df)
+        if start_ts is None:
+            start_ts = df["timestamp"].min()
+        end_ts = df["timestamp"].max()
+        
+    return total_rows, start_ts, end_ts, writer
+
+
 def _partition_complete(path: Path) -> bool:
     return path.exists()
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Ingest Binance USD-M bookTicker from archives")
+    parser = argparse.ArgumentParser(description="Ingest Binance USD-M bookTicker from archives (Memory-Safe)")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--start", required=True)
@@ -143,6 +177,10 @@ def main() -> int:
         ensure_dir(Path(args.log_path).parent)
         log_handlers.append(logging.FileHandler(args.log_path))
     logging.basicConfig(level=logging.INFO, handlers=log_handlers, format="%(asctime)s %(levelname)s %(message)s")
+
+    if not HAS_PYARROW:
+        logging.error("pyarrow is required for memory-safe ingestion. Please install it.")
+        return 1
 
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
@@ -196,27 +234,40 @@ def main() -> int:
                     symbol,
                     f"{symbol}-bookTicker-{month_start.year}-{month_start.month:02d}.zip",
                 )
-                logging.info("Downloading monthly archive %s", monthly_url)
+                
+                writer: pq.ParquetWriter | None = None
+                rows_in_partition = 0
+                first_ts = None
+                last_ts = None
 
                 with tempfile.TemporaryDirectory() as tmpdir:
-                    temp_zip = Path(tmpdir) / "book_ticker.zip"
+                    temp_zip_path = Path(tmpdir) / "book_ticker.zip"
+                    logging.info("Downloading monthly archive %s", monthly_url)
                     result = download_with_retries(
                         monthly_url,
-                        temp_zip,
+                        temp_zip_path,
                         max_retries=args.max_retries,
                         backoff_sec=args.retry_backoff_sec,
                         session=session,
                     )
 
-                    frames: List[pd.DataFrame] = []
                     if result.status == "ok":
-                        frames.append(_read_book_ticker_from_zip(temp_zip, symbol, "archive_monthly"))
+                        with ZipFile(temp_zip_path) as zf:
+                            csv_name = zf.namelist()[0]
+                            with zf.open(csv_name) as f:
+                                n, start, end, writer = _process_csv_stream_to_parquet(
+                                    f, out_path, symbol, "archive_monthly", range_start, range_end_exclusive, writer
+                                )
+                                rows_in_partition += n
+                                if first_ts is None: first_ts = start
+                                last_ts = end
                     else:
                         if result.status == "not_found":
                             missing_archives.append(monthly_url)
                         else:
                             raise RuntimeError(f"Failed to download {monthly_url}: {result.error}")
 
+                        # Daily Fallback
                         for day in _iter_days(range_start, range_end_exclusive - timedelta(seconds=1)):
                             daily_url = join_url(
                                 ARCHIVE_BASE,
@@ -226,42 +277,42 @@ def main() -> int:
                                 f"{symbol}-bookTicker-{day.year}-{day.month:02d}-{day.day:02d}.zip",
                             )
                             logging.info("Downloading daily archive %s", daily_url)
-                            daily_zip = Path(tmpdir) / f"book_ticker_{day:%Y%m%d}.zip"
+                            daily_zip_path = Path(tmpdir) / f"book_ticker_{day:%Y%m%d}.zip"
                             daily_result = download_with_retries(
                                 daily_url,
-                                daily_zip,
+                                daily_zip_path,
                                 max_retries=args.max_retries,
                                 backoff_sec=args.retry_backoff_sec,
                                 session=session,
                             )
                             if daily_result.status == "ok":
-                                frames.append(_read_book_ticker_from_zip(daily_zip, symbol, "archive_daily"))
+                                with ZipFile(daily_zip_path) as zf:
+                                    csv_name = zf.namelist()[0]
+                                    with zf.open(csv_name) as f:
+                                        n, start, end, writer = _process_csv_stream_to_parquet(
+                                            f, out_path, symbol, "archive_daily", range_start, range_end_exclusive, writer
+                                        )
+                                        rows_in_partition += n
+                                        if first_ts is None: first_ts = start
+                                        last_ts = end
                             elif daily_result.status == "not_found":
                                 missing_archives.append(daily_url)
                             else:
                                 raise RuntimeError(f"Failed to download {daily_url}: {daily_result.error}")
 
-                if frames:
-                    data = pd.concat(frames, ignore_index=True)
-                    data = data.sort_values("timestamp").drop_duplicates(subset=["timestamp"])
-                    data = data[(data["timestamp"] >= range_start) & (data["timestamp"] < range_end_exclusive)]
-                else:
-                    data = pd.DataFrame(columns=["timestamp", "bid_price", "bid_qty", "ask_price", "ask_qty", "symbol", "source"])
-
-                if not data.empty:
-                    ensure_dir(out_dir)
-                    written_path, storage = write_parquet(data, out_path)
+                if writer:
+                    writer.close()
                     outputs.append(
                         {
-                            "path": str(written_path),
-                            "rows": int(len(data)),
-                            "start_ts": data["timestamp"].min().isoformat(),
-                            "end_ts": data["timestamp"].max().isoformat(),
-                            "storage": storage,
+                            "path": str(out_path),
+                            "rows": int(rows_in_partition),
+                            "start_ts": first_ts.isoformat() if first_ts else None,
+                            "end_ts": last_ts.isoformat() if last_ts else None,
+                            "storage": "parquet",
                         }
                     )
-                    partitions_written.append(str(written_path))
-                    rows_written_total += int(len(data))
+                    partitions_written.append(str(out_path))
+                    rows_written_total += rows_in_partition
                 else:
                     logging.info("No data for %s %s-%02d", symbol, month_start.year, month_start.month)
 

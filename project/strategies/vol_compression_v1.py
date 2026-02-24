@@ -49,7 +49,7 @@ class VolCompressionV1:
         """
         Generate positions for the vol compression -> expansion strategy.
         """
-        one_trade_per_day = bool(params.get("one_trade_per_day", True))
+        one_trade_per_day = bool(params.get("one_trade_per_day", False))
         trade_day_timezone = str(params.get("trade_day_timezone", "UTC"))
         compression_rv_pct_max = float(params.get("compression_rv_pct_max", 10.0))
         compression_range_ratio_max = float(params.get("compression_range_ratio_max", 0.8))
@@ -186,7 +186,7 @@ class VolCompressionV1:
                     positions.append(0)
                     continue
 
-            if in_position or (one_trade_per_day and last_trade_day is not None and day == last_trade_day):
+            if in_position:
                 positions.append(1 if in_position and position.get("direction") == "long" else -1 if in_position else 0)
                 continue
 

@@ -1,0 +1,15 @@
+feature_family: microstructure
+version: 1.0.0
+base_timeframe: 1m
+inputs:
+  - dataset: perp_ohlcv_1m
+    columns: [close, volume, taker_buy_base_volume]
+features:
+  - name: kyle
+    description: "Kyle's lambda (price impact of order flow imbalance)."
+    formula: "regress(price_change, (V_buy - V_sell))"
+    params: {window: 50}
+provenance:
+  source_id: "R12"
+  claim_id: ["CL_0505", "CL_0519", "CL_0546", "CL_0590", "CL_0591"]
+  pit_constraint: "asof <= t0"

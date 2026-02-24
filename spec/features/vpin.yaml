@@ -1,0 +1,15 @@
+feature_family: microstructure
+version: 1.0.0
+base_timeframe: 1m
+inputs:
+  - dataset: perp_ohlcv_1m
+    columns: [close, volume, taker_buy_base_volume]
+features:
+  - name: vpin
+    description: "Volume-synchronized probability of informed trading."
+    formula: "sum|V_buy - V_sell| / Total_Volume"
+    params: {window: 50}
+provenance:
+  source_id: "R12"
+  claim_id: ["CL_0504", "CL_0505", "CL_0508", "CL_0510", "CL_0511", "CL_0515", "CL_0516", "CL_0518", "CL_0519", "CL_0524", "CL_0527", "CL_0546", "CL_0548", "CL_0553", "CL_0576", "CL_0578", "CL_0581", "CL_0582", "CL_0583", "CL_0584", "CL_0586", "CL_0590", "CL_0592", "CL_0594", "CL_0597"]
+  pit_constraint: "asof <= t0"

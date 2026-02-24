@@ -18,6 +18,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from pipelines._lib.io_utils import ensure_dir, read_parquet
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from events.registry import EVENT_REGISTRY_SPECS
+from pipelines.research.feasibility_guard import FeasibilityGuard
 
 # Planner Budgets
 MAX_TOTAL_CANDIDATES = 200
@@ -67,6 +68,7 @@ def main() -> int:
     }
     
     manifest = start_manifest("generate_candidate_plan", args.run_id, params, [], [])
+    guard = FeasibilityGuard(PROJECT_ROOT.parent, DATA_ROOT, args.run_id)
 
     try:
         atlas_dir = PROJECT_ROOT.parent / args.atlas_dir
@@ -124,9 +126,10 @@ def main() -> int:
             reason = ""
             
             # 1. Spec Check
-            if not _check_spec_exists(row['target_spec_path']):
+            target_spec_path = row['target_spec_path']
+            if not _check_spec_exists(target_spec_path):
                 status = "blocked_missing_spec"
-                reason = f"spec missing at {row['target_spec_path']}"
+                reason = f"spec missing at {target_spec_path}"
             
             # 2. Registry Check
             event_type = row.get('event_type')
@@ -156,13 +159,14 @@ def main() -> int:
                 if total_count >= MAX_TOTAL_CANDIDATES or claim_candidates >= MAX_CANDIDATES_PER_CLAIM:
                     break
                 
-                # 4. Dataset check
-                if not _check_dataset_exists(symbol, args.run_id):
+                # 4. Data Feasibility Guard (Deep Check)
+                is_feasible, fail_reason = guard.check_feasibility(target_spec_path, symbol)
+                if not is_feasible:
                     feasibility_report.append({
                         "template_id": template_id,
                         "symbol": symbol,
                         "status": "blocked_missing_dataset",
-                        "reason": f"OHLCV 5m missing for {symbol}"
+                        "reason": fail_reason
                     })
                     continue
                 

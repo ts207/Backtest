@@ -1,0 +1,15 @@
+feature_family: derivatives
+version: 1.0.0
+base_timeframe: 8h
+inputs:
+  - dataset: funding_rates
+    columns: [funding_rate]
+features:
+  - name: funding
+    description: "Current funding rate for the perpetual contract."
+    formula: "funding_rate"
+    params: {}
+provenance:
+  source_id: "R12"
+  claim_id: ["CL_0075", "CL_0076", "CL_0161", "CL_0316", "CL_0389", "CL_0390", "CL_0046", "CL_0048", "CL_0061", "CL_0062", "CL_0073", "CL_0085", "CL_0118", "CL_0120", "CL_0121", "CL_0138", "CL_0139", "CL_0219", "CL_0232", "CL_0255", "CL_0265", "CL_0267", "CL_0268", "CL_0285", "CL_0286", "CL_0374", "CL_0387", "CL_0399"]
+  pit_constraint: "asof <= t0"

@@ -1,0 +1,15 @@
+feature_family: performance
+version: 1.0.0
+base_timeframe: 1d
+inputs:
+  - dataset: perp_ohlcv_1d
+    columns: [close]
+features:
+  - name: sharpe_ratio
+    description: "Annualized Sharpe Ratio of daily returns."
+    formula: "sqrt(365) * mean(r) / std(r)"
+    params: {window: 365}
+provenance:
+  source_id: "R12"
+  claim_id: ["CL_0760", "CL_1005"]
+  pit_constraint: "asof <= t0"

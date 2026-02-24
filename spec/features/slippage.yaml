@@ -1,0 +1,15 @@
+feature_family: execution
+version: 1.0.0
+base_timeframe: 1m
+inputs:
+  - dataset: tob_1s
+    columns: [bid_price, ask_price]
+features:
+  - name: slippage
+    description: "Expected execution slippage in basis points."
+    formula: "(executed_price - target_price) / target_price * 10000"
+    params: {order_size_usd: 10000}
+provenance:
+  source_id: "R18"
+  claim_id: ["CL_0903"]
+  pit_constraint: "asof <= t0"

@@ -23,7 +23,38 @@ families:
       - 5m
       - 60m
     max_candidates_per_run: 500
+  vol_aftershock_window:
+    templates:
+      - mean_reversion
+      - continuation
+      - trend_continuation
+      - liquidity_reversion_v2
+    horizons:
+      - 5m
+      - 15m
+      - 60m
+    max_candidates_per_run: 1000
+  range_compression_breakout_window:
+    templates:
+      - mean_reversion
+      - continuation
+      - liquidity_reversion_v2
+    horizons:
+      - 5m
+      - 15m
+      - 60m
+    max_candidates_per_run: 1000
+  liquidity_absence_window:
+    templates:
+      - mean_reversion
+      - continuation
+      - liquidity_reversion_v2
+    horizons:
+      - 5m
+      - 15m
+      - 60m
+    max_candidates_per_run: 1000
 
 budget:
-  global_max_candidates: 5000
-  global_max_families: 5
+  global_max_candidates: 10000
+  global_max_families: 10

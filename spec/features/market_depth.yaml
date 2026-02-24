@@ -1,0 +1,15 @@
+feature_family: market_quality
+version: 1.0.0
+base_timeframe: 1m
+inputs:
+  - dataset: tob_1s
+    columns: [bid_qty, ask_qty]
+features:
+  - name: market_depth
+    description: "Sum of size of the best ask and the best bid (in lots or USD)."
+    formula: "bid_qty + ask_qty"
+    params: {aggregation: "mean"}
+provenance:
+  source_id: "R20"
+  claim_id: ["CL_1003"]
+  pit_constraint: "asof <= t0"

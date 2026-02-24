@@ -1,0 +1,15 @@
+feature_family: market_quality
+version: 1.0.0
+base_timeframe: 1m
+inputs:
+  - dataset: tob_1s
+    columns: [bid_price, ask_price]
+features:
+  - name: spread
+    description: "Average bid-ask spread in basis points."
+    formula: "mean((ask - bid) / mid * 10000)"
+    params: {window: 5}
+provenance:
+  source_id: "R13"
+  claim_id: ["CL_0157", "CL_0304", "CL_0440", "CL_0076"]
+  pit_constraint: "asof <= t0"

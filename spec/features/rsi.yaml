@@ -1,0 +1,15 @@
+feature_family: momentum
+version: 1.0.0
+base_timeframe: 5m
+inputs:
+  - dataset: perp_ohlcv_5m
+    columns: [close]
+features:
+  - name: rsi
+    description: "Relative Strength Index (Wilder)"
+    formula: "100 - (100 / (1 + RS)) where RS = avg_gain / avg_loss"
+    params: {window: 14}
+provenance:
+  source_id: "R21"
+  claim_id: ["CL_1006"]
+  pit_constraint: "asof <= t0"

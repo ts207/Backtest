@@ -105,7 +105,7 @@ def _build_base_strategy_params(config: Dict[str, object], trade_day_timezone: s
 
     return {
         "trade_day_timezone": trade_day_timezone,
-        "one_trade_per_day": True,
+        "one_trade_per_day": False,
         "compression_rv_pct_max": float(_param("compression_rv_pct_max", 10.0)),
         "compression_range_ratio_max": float(_param("compression_range_ratio_max", 0.8)),
         "breakout_confirm_bars": int(_param("breakout_confirm_bars", 0)),

@@ -1,0 +1,15 @@
+feature_family: market_quality
+version: 1.0.0
+base_timeframe: 1m
+inputs:
+  - dataset: tob_1s
+    columns: [bid_price, ask_price]
+features:
+  - name: quoted_spread
+    description: "Difference between the lowest ask price and the highest bidding price prevailing on the venue."
+    formula: "ask - bid"
+    params: {aggregation: "mean"}
+provenance:
+  source_id: "R20"
+  claim_id: ["CL_1003"]
+  pit_constraint: "asof <= t0"

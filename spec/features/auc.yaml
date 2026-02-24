@@ -1,0 +1,15 @@
+feature_family: evaluation
+version: 1.0.0
+base_timeframe: 1d
+inputs:
+  - dataset: perp_ohlcv_1d
+    columns: [close]
+features:
+  - name: auc
+    description: "Area Under the ROC Curve for binary prediction models."
+    formula: "integral(TPR vs FPR)"
+    params: {window: 30}
+provenance:
+  source_id: "R12"
+  claim_id: ["CL_0512", "CL_0513", "CL_0517"]
+  pit_constraint: "asof <= t0"

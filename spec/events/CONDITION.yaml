@@ -1,0 +1,9 @@
+event_type: "CONDITION"
+description: "Generic conditional entry filter based on specific state thresholds (placeholder)."
+reports_dir: "condition"
+signal_column: "condition_met"
+parameters:
+  threshold: 0.5
+provenance:
+  source_id: "R12"
+  claim_id: ["CL_0482", "CL_0483"]

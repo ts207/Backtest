@@ -34,6 +34,7 @@ case "$MODE" in
     delete_contents "data/runs"
     delete_contents "data/reports"
     delete_contents "data/lake/runs"
+    delete_contents "data/lake/trades"
     ensure_gitkeep "data/runs"
     ensure_gitkeep "data/reports"
     ensure_gitkeep "data/lake"

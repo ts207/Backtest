@@ -1163,6 +1163,11 @@ def main() -> int:
         if bool(int(getattr(args, _attr, 0))):
             non_production_overrides.append(f"{_stage_name}:{_cli_flag}=1")
     def _has_hypothesis_entries(run_id: str, event_type: str) -> bool:
+        # If hypothesis generator was explicitly disabled, assume we want fallback/broad discovery
+        # and allow all event types to proceed to Phase 2.
+        if not int(args.run_hypothesis_generator):
+            return True
+
         # Check Atlas candidate plan first
         plan_path = DATA_ROOT / "reports" / "hypothesis_generator" / run_id / "candidate_plan.jsonl"
         if plan_path.exists():

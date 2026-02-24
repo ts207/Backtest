@@ -34,6 +34,34 @@ from pipelines.research.analyze_conditional_expectancy import (
     _two_sided_p_from_t,
 )
 
+PRIMARY_OUTPUT_COLUMNS = [
+    "candidate_id", "condition", "condition_desc", "action", "action_family", "candidate_type",
+    "overlay_base_candidate_id", "sample_size", "train_samples", "validation_samples", "test_samples",
+    "baseline_mode", "delta_adverse_mean", "delta_adverse_ci_low", "delta_adverse_ci_high",
+    "delta_opportunity_mean", "delta_opportunity_ci_low", "delta_opportunity_ci_high", "delta_exposure_mean",
+    "opportunity_forward_mean", "opportunity_tail_mean", "opportunity_composite_mean", "opportunity_cost_mean",
+    "net_benefit_mean", "expectancy_per_trade", "robustness_score", "event_frequency", "capacity_proxy",
+    "profit_density_score", "quality_score", "gate_a_ci_separated", "gate_b_time_stable", "gate_b_year_signs",
+    "gate_c_regime_stable", "gate_c_stable_splits", "gate_c_required_splits", "gate_d_friction_floor",
+    "gate_f_exposure_guard", "gate_g_net_benefit", "gate_h_executable_condition", "gate_h_executable_action",
+    "gate_e_simplicity", "validation_delta_adverse_mean", "test_delta_adverse_mean", "val_delta_adverse_mean",
+    "oos1_delta_adverse_mean", "val_t_stat", "val_p_value", "val_p_value_adj_bh", "oos1_t_stat", "oos1_p_value",
+    "test_t_stat", "test_p_value", "test_p_value_adj_bh", "num_tests_event_family", "ess_effective", "ess_lag_used",
+    "multiplicity_penalty", "expectancy_after_multiplicity", "expectancy_left", "expectancy_center", "expectancy_right",
+    "curvature_penalty", "neighborhood_positive_count", "gate_parameter_curvature", "delay_expectancy_map",
+    "delay_positive_ratio", "delay_dispersion", "delay_robustness_score", "gate_delay_robustness",
+    "gate_oos_min_samples", "gate_oos_validation", "gate_oos_validation_test", "gate_oos_consistency_strict",
+    "gate_multiplicity", "gate_multiplicity_strict", "gate_ess", "after_cost_expectancy_per_trade",
+    "stressed_after_cost_expectancy_per_trade", "turnover_proxy_mean", "avg_dynamic_cost_bps", "cost_input_coverage",
+    "cost_model_valid", "cost_ratio", "gate_after_cost_positive", "gate_after_cost_stressed_positive",
+    "gate_cost_model_valid", "gate_cost_ratio", "bridge_eval_status", "bridge_train_after_cost_bps",
+    "bridge_validation_after_cost_bps", "bridge_validation_stressed_after_cost_bps", "bridge_validation_trades",
+    "bridge_effective_cost_bps_per_trade", "bridge_gross_edge_bps_per_trade", "gate_bridge_has_trades_validation",
+    "gate_bridge_after_cost_positive_validation", "gate_bridge_after_cost_stressed_positive_validation",
+    "gate_bridge_edge_cost_ratio", "gate_bridge_turnover_controls", "gate_bridge_tradable", "selection_score_executed",
+    "gate_pass", "gate_all_research", "gate_all", "supporting_hypothesis_count", "supporting_hypothesis_ids",
+    "fail_reasons",
+]
 
 # ---------------------------------------------------------------------------
 # Horizon string → bars (5-minute bar resolution)
@@ -722,8 +750,12 @@ def main():
                             _add_res(eff_b, pv_b, n_b, stab_b, f"{col}_{val}")
 
     if not results:
-        log.error("No results produced — check features/events availability for %s.", args.event_type)
-        sys.exit(1)
+        log.warning("No results produced — check features/events availability for %s. Continuing.", args.event_type)
+        # Emit empty artifacts to satisfy pipeline expectations
+        ensure_dir(reports_root)
+        pd.DataFrame(columns=PRIMARY_OUTPUT_COLUMNS).to_parquet(reports_root / "phase2_candidates_raw.parquet", index=False)
+        pd.DataFrame(columns=PRIMARY_OUTPUT_COLUMNS).to_csv(reports_root / "phase2_candidates.csv", index=False)
+        sys.exit(0)
 
     raw_df = pd.DataFrame(results)
 

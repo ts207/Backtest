@@ -1,0 +1,15 @@
+feature_family: microstructure
+version: 1.0.0
+base_timeframe: 1m
+inputs:
+  - dataset: tob_1s
+    columns: [bid_price, ask_price, bid_qty, ask_qty]
+features:
+  - name: order_book
+    description: "Generic order book state feature (placeholder for complex book features)."
+    formula: "state_vector"
+    params: {levels: 5}
+provenance:
+  source_id: "R12"
+  claim_id: ["CL_0900"]
+  pit_constraint: "asof <= t0"

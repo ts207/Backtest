@@ -1,0 +1,10 @@
+event_type: "NO_FEE_IMPACT"
+description: "Identification of bars during the Binance zero-fee trading regime (post July 8, 2022) for BTC/USDT."
+reports_dir: "no_fee_impact"
+signal_column: "is_zero_fee_regime"
+parameters:
+  start_date: "2022-07-08"
+  symbols: ["BTCUSDT"]
+provenance:
+  source_id: "R20"
+  claim_id: ["CL_1003", "CL_1004"]

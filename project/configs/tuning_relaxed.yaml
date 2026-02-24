@@ -1,0 +1,8 @@
+
+strategy_defaults:
+  vol_compression_v1:
+    compression_rv_pct_max: 15.0  # Relaxed from 10.0
+    compression_range_ratio_max: 0.9 # Relaxed from 0.8
+    breakout_confirm_bars: 0 # Faster entry (default 0)
+    max_hold_bars: 96 # Increased hold
+    one_trade_per_day: False # Increased frequency

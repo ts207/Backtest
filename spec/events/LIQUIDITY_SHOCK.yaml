@@ -1,0 +1,10 @@
+event_type: "LIQUIDITY_SHOCK"
+description: "Abrupt collapse in market depth combined with a spike in bid-ask spread."
+reports_dir: "liquidity_shock"
+signal_column: "liquidity_shock_event"
+parameters:
+  depth_collapse_th: 0.5
+  spread_spike_th: 3.0
+provenance:
+  source_id: "R4"
+  claim_id: ["CL_0094", "CL_0408"]

@@ -1,0 +1,15 @@
+feature_family: derivatives
+version: 1.0.0
+base_timeframe: 5m
+inputs:
+  - dataset: open_interest_hist
+    columns: [sum_open_interest, sum_open_interest_value]
+features:
+  - name: oi
+    description: "Current open interest in base or quote units."
+    formula: "sum_open_interest"
+    params: {}
+provenance:
+  source_id: "R12"
+  claim_id: ["CL_0075", "CL_0084", "CL_0115", "CL_0161", "CL_0262", "CL_0316", "CL_0389", "CL_0398", "CL_0046", "CL_0062", "CL_0077", "CL_0085", "CL_0119", "CL_0138", "CL_0170", "CL_0219", "CL_0266", "CL_0285", "CL_0325", "CL_0374", "CL_0391", "CL_0399", "CL_0438"]
+  pit_constraint: "asof <= t0"

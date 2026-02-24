@@ -1,0 +1,8 @@
+event_type: "FAILURE"
+description: "Placeholder event type for claims describing failure modes or confounding factors."
+reports_dir: "failure"
+signal_column: "is_failure_event"
+parameters: {}
+provenance:
+  source_id: "R12"
+  claim_id: ["CL_0490"]

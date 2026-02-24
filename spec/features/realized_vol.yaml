@@ -1,0 +1,15 @@
+feature_family: volatility
+version: 1.0.0
+base_timeframe: 1m
+inputs:
+  - dataset: perp_ohlcv_1m
+    columns: [close]
+features:
+  - name: realized_vol
+    description: "Standard deviation of log returns over a rolling window."
+    formula: "std(log_returns) * sqrt(window)"
+    params: {window: 20}
+provenance:
+  source_id: "R12"
+  claim_id: ["CL_0240", "CL_0309", "CL_0119"]
+  pit_constraint: "asof <= t0"

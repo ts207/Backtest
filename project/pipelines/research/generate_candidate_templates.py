@@ -16,6 +16,7 @@ DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from pipelines._lib.io_utils import ensure_dir
 
 def _load_global_defaults() -> Dict[str, Any]:
     """Load global defaults from spec."""

@@ -252,6 +252,13 @@ PHASE1_EVENT_SOURCES: Dict[str, Phase1EventSource] = {
         controls_file="range_compression_breakout_window_controls.csv",
         summary_file="range_compression_breakout_window_summary.json",
     ),
+    "LIQUIDATION_CASCADE": Phase1EventSource(
+        event_type="LIQUIDATION_CASCADE",
+        reports_dir="liquidation_cascade",
+        events_file="liquidation_cascade_events.csv",
+        controls_file="liquidation_cascade_controls.csv",
+        summary_file="liquidation_cascade_summary.json",
+    ),
 }
 
 

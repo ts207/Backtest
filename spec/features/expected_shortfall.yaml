@@ -1,0 +1,15 @@
+feature_family: risk
+version: 1.0.0
+base_timeframe: 1h
+inputs:
+  - dataset: perp_ohlcv_1h
+    columns: [close]
+features:
+  - name: expected_shortfall
+    description: "Average loss in the tail of the distribution beyond the VaR threshold."
+    formula: "mean(returns | returns < VaR_alpha)"
+    params: {window: 504, alpha: 0.05}
+provenance:
+  source_id: "R21"
+  claim_id: ["CL_1005"]
+  pit_constraint: "asof <= t0"

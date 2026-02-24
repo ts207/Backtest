@@ -1,0 +1,15 @@
+feature_family: evaluation
+version: 1.0.0
+base_timeframe: 1d
+inputs:
+  - dataset: perp_ohlcv_1d
+    columns: [close]
+features:
+  - name: random_forest
+    description: "Prediction from a Random Forest ensemble model."
+    formula: "ensemble_mean(trees)"
+    params: {n_estimators: 100}
+provenance:
+  source_id: "R12"
+  claim_id: ["CL_0552", "CL_0569"]
+  pit_constraint: "asof <= t0"

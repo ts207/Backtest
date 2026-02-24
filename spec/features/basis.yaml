@@ -1,0 +1,17 @@
+feature_family: derivatives
+version: 1.0.0
+base_timeframe: 1m
+inputs:
+  - dataset: perp_ohlcv_1m
+    columns: [close]
+  - dataset: spot_ohlcv_1m
+    columns: [close]
+features:
+  - name: basis
+    description: "Difference between perpetual price and spot price in basis points."
+    formula: "(p_perp - p_spot) / p_spot * 10000"
+    params: {}
+provenance:
+  source_id: "R12"
+  claim_id: ["CL_0076", "CL_0390", "CL_0061", "CL_0085", "CL_0120", "CL_0138", "CL_0232", "CL_0255", "CL_0267", "CL_0285", "CL_0399"]
+  pit_constraint: "asof <= t0"

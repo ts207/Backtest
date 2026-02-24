@@ -1,0 +1,15 @@
+feature_family: momentum
+version: 1.0.0
+base_timeframe: 5m
+inputs:
+  - dataset: perp_ohlcv_5m
+    columns: [close]
+features:
+  - name: macd
+    description: "Moving Average Convergence Divergence"
+    formula: "EMA(12) - EMA(26)"
+    params: {fast_window: 12, slow_window: 26, signal_window: 9}
+provenance:
+  source_id: "R21"
+  claim_id: ["CL_1006"]
+  pit_constraint: "asof <= t0"
