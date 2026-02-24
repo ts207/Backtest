@@ -1,4 +1,4 @@
-version: 1
+version: 2
 kind: template_verb_lexicon
 
 # Canonical hypothesis operators used by Event x State x Template discovery.
@@ -40,3 +40,305 @@ verbs:
     - only_if_funding
     - only_if_oi
     - only_if_no_news_window
+
+operators:
+  mean_reversion:
+    operator_id: op.mean_reversion
+    operator_version: v1
+    requires_direction: false
+    side_policy: contrarian
+    label_target: fwd_return_h
+    test_spec: mean_gt_0
+    compatible_families: []
+    default_conditioning: {}
+    risk_metrics_required: [tail_risk_avoid]
+  continuation:
+    operator_id: op.continuation
+    operator_version: v1
+    requires_direction: true
+    side_policy: directional
+    label_target: fwd_return_h
+    test_spec: mean_gt_0
+    compatible_families: []
+    default_conditioning: {}
+    risk_metrics_required: []
+  trend_continuation:
+    operator_id: op.trend_continuation
+    operator_version: v1
+    requires_direction: true
+    side_policy: directional
+    label_target: fwd_return_h
+    test_spec: mean_gt_0
+    compatible_families: [TREND_STRUCTURE, VOLATILITY_TRANSITION]
+    default_conditioning: {}
+    risk_metrics_required: [drawdown_filter]
+  breakout_followthrough:
+    operator_id: op.breakout_followthrough
+    operator_version: v1
+    requires_direction: true
+    side_policy: directional
+    label_target: fwd_return_h
+    test_spec: mean_gt_0
+    compatible_families: [TREND_STRUCTURE, VOLATILITY_TRANSITION]
+    default_conditioning: {}
+    risk_metrics_required: []
+  false_breakout_reversal:
+    operator_id: op.false_breakout_reversal
+    operator_version: v1
+    requires_direction: true
+    side_policy: contrarian
+    label_target: fwd_return_h
+    test_spec: mean_gt_0
+    compatible_families: [TREND_STRUCTURE]
+    default_conditioning: {}
+    risk_metrics_required: []
+  overshoot_repair:
+    operator_id: op.overshoot_repair
+    operator_version: v1
+    requires_direction: false
+    side_policy: contrarian
+    label_target: fwd_return_h
+    test_spec: mean_gt_0
+    compatible_families: [LIQUIDITY_DISLOCATION, STATISTICAL_DISLOCATION]
+    default_conditioning: {}
+    risk_metrics_required: [tail_risk_avoid]
+  pullback_entry:
+    operator_id: op.pullback_entry
+    operator_version: v1
+    requires_direction: true
+    side_policy: directional
+    label_target: fwd_return_h
+    test_spec: mean_gt_0
+    compatible_families: [TREND_STRUCTURE, VOLATILITY_TRANSITION]
+    default_conditioning: {}
+    risk_metrics_required: [drawdown_filter]
+  range_reversion:
+    operator_id: op.range_reversion
+    operator_version: v1
+    requires_direction: false
+    side_policy: contrarian
+    label_target: fwd_return_h
+    test_spec: mean_gt_0
+    compatible_families: [FORCED_FLOW_AND_EXHAUSTION, STATISTICAL_DISLOCATION]
+    default_conditioning: {}
+    risk_metrics_required: []
+  momentum_fade:
+    operator_id: op.momentum_fade
+    operator_version: v1
+    requires_direction: true
+    side_policy: contrarian
+    label_target: fwd_return_h
+    test_spec: mean_gt_0
+    compatible_families: [FORCED_FLOW_AND_EXHAUSTION, TREND_STRUCTURE]
+    default_conditioning: {}
+    risk_metrics_required: []
+  acceleration_follow:
+    operator_id: op.acceleration_follow
+    operator_version: v1
+    requires_direction: true
+    side_policy: directional
+    label_target: fwd_return_h
+    test_spec: mean_gt_0
+    compatible_families: [TREND_STRUCTURE]
+    default_conditioning: {}
+    risk_metrics_required: []
+  exhaustion_reversal:
+    operator_id: op.exhaustion_reversal
+    operator_version: v1
+    requires_direction: true
+    side_policy: contrarian
+    label_target: fwd_return_h
+    test_spec: mean_gt_0
+    compatible_families: [FORCED_FLOW_AND_EXHAUSTION, POSITIONING_EXTREMES]
+    default_conditioning: {}
+    risk_metrics_required: [drawdown_filter]
+  reversal_or_squeeze:
+    operator_id: op.reversal_or_squeeze
+    operator_version: v1
+    requires_direction: true
+    side_policy: both
+    label_target: fwd_return_h
+    test_spec: mean_gt_0_or_tail_positive
+    compatible_families: [POSITIONING_EXTREMES]
+    default_conditioning: {}
+    risk_metrics_required: [tail_risk_avoid]
+  volatility_expansion_follow:
+    operator_id: op.volatility_expansion_follow
+    operator_version: v1
+    requires_direction: true
+    side_policy: directional
+    label_target: path_class_h
+    test_spec: hit_rate_gt_threshold
+    compatible_families: [VOLATILITY_TRANSITION]
+    default_conditioning: {}
+    risk_metrics_required: [drawdown_filter]
+  volatility_contraction_fade:
+    operator_id: op.volatility_contraction_fade
+    operator_version: v1
+    requires_direction: false
+    side_policy: contrarian
+    label_target: fwd_return_h
+    test_spec: mean_gt_0
+    compatible_families: [VOLATILITY_TRANSITION]
+    default_conditioning: {}
+    risk_metrics_required: []
+  tail_risk_avoid:
+    operator_id: op.tail_risk_avoid
+    operator_version: v1
+    requires_direction: false
+    side_policy: both
+    label_target: path_class_h
+    test_spec: tail_loss_lt_threshold
+    compatible_families: []
+    default_conditioning: {}
+    risk_metrics_required: [drawdown_filter]
+  drawdown_filter:
+    operator_id: op.drawdown_filter
+    operator_version: v1
+    requires_direction: false
+    side_policy: both
+    label_target: path_class_h
+    test_spec: drawdown_lt_threshold
+    compatible_families: []
+    default_conditioning: {}
+    risk_metrics_required: []
+  convexity_capture:
+    operator_id: op.convexity_capture
+    operator_version: v1
+    requires_direction: true
+    side_policy: both
+    label_target: mfe_h
+    test_spec: upper_quantile_gt_0
+    compatible_families: [POSITIONING_EXTREMES]
+    default_conditioning: {}
+    risk_metrics_required: [tail_risk_avoid]
+  stop_run_repair:
+    operator_id: op.stop_run_repair
+    operator_version: v1
+    requires_direction: false
+    side_policy: contrarian
+    label_target: fwd_return_h
+    test_spec: mean_gt_0
+    compatible_families: [LIQUIDITY_DISLOCATION]
+    default_conditioning: {}
+    risk_metrics_required: [slippage_aware_filter]
+  slippage_aware_filter:
+    operator_id: op.slippage_aware_filter
+    operator_version: v1
+    requires_direction: false
+    side_policy: both
+    label_target: path_class_h
+    test_spec: cost_ratio_lt_threshold
+    compatible_families: [LIQUIDITY_DISLOCATION, EXECUTION_FRICTION]
+    default_conditioning: {}
+    risk_metrics_required: []
+  convergence:
+    operator_id: op.convergence
+    operator_version: v1
+    requires_direction: false
+    side_policy: contrarian
+    label_target: basis_repair_h
+    test_spec: mean_gt_0
+    compatible_families: [INFORMATION_DESYNC]
+    default_conditioning: {}
+    risk_metrics_required: []
+  divergence_continuation:
+    operator_id: op.divergence_continuation
+    operator_version: v1
+    requires_direction: true
+    side_policy: directional
+    label_target: basis_repair_h
+    test_spec: hit_rate_gt_threshold
+    compatible_families: [INFORMATION_DESYNC, REGIME_TRANSITION]
+    default_conditioning: {}
+    risk_metrics_required: [tail_risk_avoid]
+  basis_repair:
+    operator_id: op.basis_repair
+    operator_version: v1
+    requires_direction: false
+    side_policy: contrarian
+    label_target: basis_repair_h
+    test_spec: mean_gt_0
+    compatible_families: [INFORMATION_DESYNC]
+    default_conditioning: {}
+    risk_metrics_required: []
+  lead_lag_follow:
+    operator_id: op.lead_lag_follow
+    operator_version: v1
+    requires_direction: true
+    side_policy: directional
+    label_target: fwd_return_h
+    test_spec: mean_gt_0
+    compatible_families: [INFORMATION_DESYNC]
+    default_conditioning: {}
+    risk_metrics_required: []
+  desync_repair:
+    operator_id: op.desync_repair
+    operator_version: v1
+    requires_direction: false
+    side_policy: contrarian
+    label_target: basis_repair_h
+    test_spec: mean_gt_0
+    compatible_families: [INFORMATION_DESYNC]
+    default_conditioning: {}
+    risk_metrics_required: []
+  only_if_regime:
+    operator_id: op.only_if_regime
+    operator_version: v1
+    requires_direction: false
+    side_policy: both
+    label_target: gate
+    test_spec: binary_gate
+    compatible_families: []
+    default_conditioning: {}
+    risk_metrics_required: []
+  only_if_liquidity:
+    operator_id: op.only_if_liquidity
+    operator_version: v1
+    requires_direction: false
+    side_policy: both
+    label_target: gate
+    test_spec: binary_gate
+    compatible_families: []
+    default_conditioning: {}
+    risk_metrics_required: []
+  only_if_trend:
+    operator_id: op.only_if_trend
+    operator_version: v1
+    requires_direction: false
+    side_policy: both
+    label_target: gate
+    test_spec: binary_gate
+    compatible_families: []
+    default_conditioning: {}
+    risk_metrics_required: []
+  only_if_funding:
+    operator_id: op.only_if_funding
+    operator_version: v1
+    requires_direction: false
+    side_policy: both
+    label_target: gate
+    test_spec: binary_gate
+    compatible_families: []
+    default_conditioning: {}
+    risk_metrics_required: []
+  only_if_oi:
+    operator_id: op.only_if_oi
+    operator_version: v1
+    requires_direction: false
+    side_policy: both
+    label_target: gate
+    test_spec: binary_gate
+    compatible_families: []
+    default_conditioning: {}
+    risk_metrics_required: []
+  only_if_no_news_window:
+    operator_id: op.only_if_no_news_window
+    operator_version: v1
+    requires_direction: false
+    side_policy: both
+    label_target: gate
+    test_spec: binary_gate
+    compatible_families: []
+    default_conditioning: {}
+    risk_metrics_required: []

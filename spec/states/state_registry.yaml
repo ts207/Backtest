@@ -1,6 +1,10 @@
 version: 1
 kind: state_registry
 
+defaults:
+  state_scope: source_only
+  min_events: 200
+
 states:
   - state_id: LOW_LIQUIDITY_STATE
     family: LIQUIDITY_DISLOCATION
@@ -101,6 +105,8 @@ states:
   - state_id: HIGH_VOL_REGIME
     family: VOLATILITY_TRANSITION
     source_event_type: VOL_CLUSTER_SHIFT
+    state_scope: family_safe
+    min_events: 300
     activation_rule: rv_percentile >= 0.66
     decay_rule: exit when rv_percentile < 0.66
     features_required: [rv_percentile_24h]
@@ -109,6 +115,8 @@ states:
   - state_id: LOW_VOL_REGIME
     family: VOLATILITY_TRANSITION
     source_event_type: VOL_CLUSTER_SHIFT
+    state_scope: family_safe
+    min_events: 300
     activation_rule: rv_percentile <= 0.33
     decay_rule: exit when rv_percentile > 0.33
     features_required: [rv_percentile_24h]
@@ -229,6 +237,8 @@ states:
   - state_id: TRENDING_STATE
     family: TREND_STRUCTURE
     source_event_type: TREND_ACCELERATION
+    state_scope: family_safe
+    min_events: 250
     activation_rule: trend slope and ADX above threshold
     decay_rule: exit when slope falls below threshold
     features_required: [trend_return_96, adx]
@@ -237,6 +247,8 @@ states:
   - state_id: CHOP_STATE
     family: TREND_STRUCTURE
     source_event_type: TREND_DECELERATION
+    state_scope: family_safe
+    min_events: 250
     activation_rule: low trend strength and high reversals
     decay_rule: exit on breakout confirmation
     features_required: [trend_return_96, reversal_count]
@@ -293,6 +305,8 @@ states:
   - state_id: RISK_ON_STATE
     family: REGIME_TRANSITION
     source_event_type: CHOP_TO_TREND_SHIFT
+    state_scope: family_safe
+    min_events: 300
     activation_rule: trend and beta/risk metrics indicate risk-on
     decay_rule: exit when risk-off condition triggers
     features_required: [beta, trend_regime]
@@ -301,6 +315,8 @@ states:
   - state_id: RISK_OFF_STATE
     family: REGIME_TRANSITION
     source_event_type: TREND_TO_CHOP_SHIFT
+    state_scope: family_safe
+    min_events: 300
     activation_rule: volatility and downside skew indicate risk-off
     decay_rule: exit on risk normalization
     features_required: [rv_96, skew]

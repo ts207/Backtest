@@ -16,6 +16,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.spec_utils import get_spec_hashes
+from pipelines._lib.ontology_contract import (
+    ontology_component_hash_fields,
+    ontology_component_hashes,
+    ontology_spec_hash,
+)
 from events.registry import EVENT_REGISTRY_SPECS
 
 
@@ -308,6 +313,12 @@ def main() -> int:
     parser.add_argument("--allow_constant_funding", type=int, default=0)
     parser.add_argument("--allow_funding_timestamp_rounding", type=int, default=0)
     parser.add_argument("--config", action="append", default=[])
+    parser.add_argument(
+        "--allow_ontology_hash_mismatch",
+        type=int,
+        default=0,
+        help="If 1, allow reusing run_id when ontology_spec_hash differs from existing run_manifest.",
+    )
 
     parser.add_argument("--run_ingest_liquidation_snapshot", type=int, default=0)
     parser.add_argument("--run_ingest_open_interest_hist", type=int, default=0)
@@ -756,6 +767,7 @@ def main() -> int:
                     "--run_id", run_id,
                     "--symbols", symbols,
                     "--atlas_dir", "atlas",
+                    "--allow_ontology_hash_mismatch", str(int(args.allow_ontology_hash_mismatch)),
                 ],
             )
         )
@@ -849,6 +861,8 @@ def main() -> int:
                 str(float(args.phase2_cost_min_tob_coverage)),
                 "--cost_tob_tolerance_minutes",
                 str(int(args.phase2_cost_tob_tolerance_minutes)),
+                "--allow_ontology_hash_mismatch",
+                str(int(args.allow_ontology_hash_mismatch)),
             ]
             if candidate_plan_path.exists():
                 phase2_args.extend(["--candidate_plan", str(candidate_plan_path)])
@@ -1192,6 +1206,10 @@ def main() -> int:
 
     stage_timings: List[Tuple[str, float]] = []
     feature_schema_version, feature_schema_hash = _feature_schema_metadata()
+    ontology_hash = ontology_spec_hash(PROJECT_ROOT.parent)
+    ontology_component_fields = ontology_component_hash_fields(
+        ontology_component_hashes(PROJECT_ROOT.parent)
+    )
     run_manifest = {
         "run_id": run_id,
         "started_at": _utc_now_iso(),
@@ -1206,6 +1224,11 @@ def main() -> int:
         "git_commit": _git_commit(PROJECT_ROOT),
         "data_hash": _data_hash(parsed_symbols),
         "spec_hashes": get_spec_hashes(PROJECT_ROOT.parent),
+        "ontology_spec_hash": ontology_hash,
+        "taxonomy_hash": ontology_component_fields.get("taxonomy_hash"),
+        "canonical_event_registry_hash": ontology_component_fields.get("canonical_event_registry_hash"),
+        "state_registry_hash": ontology_component_fields.get("state_registry_hash"),
+        "verb_lexicon_hash": ontology_component_fields.get("verb_lexicon_hash"),
         "feature_schema_version": feature_schema_version,
         "feature_schema_hash": feature_schema_hash,
         "config_digest": _config_digest([str(x) for x in args.config]),
@@ -1218,6 +1241,23 @@ def main() -> int:
         "execution_blocked_by_checklist": False,
         "non_production_overrides": [],
     }
+    existing_manifest_path = DATA_ROOT / "runs" / run_id / "run_manifest.json"
+    if existing_manifest_path.exists():
+        try:
+            existing_manifest = json.loads(existing_manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            existing_manifest = {}
+        existing_ontology_hash = str(existing_manifest.get("ontology_spec_hash", "")).strip()
+        if (
+            existing_ontology_hash
+            and existing_ontology_hash != ontology_hash
+            and not bool(int(args.allow_ontology_hash_mismatch))
+        ):
+            raise ValueError(
+                "Ontology hash mismatch for existing run_id. "
+                f"existing={existing_ontology_hash}, current={ontology_hash}. "
+                "Use --allow_ontology_hash_mismatch 1 only for explicit override."
+            )
     _write_run_manifest(run_id, run_manifest)
 
     print(f"Planned stages: {len(stages)}")

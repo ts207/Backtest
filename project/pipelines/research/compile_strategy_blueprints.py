@@ -22,6 +22,11 @@ from pipelines._lib.execution_costs import resolve_execution_costs
 from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.selection_log import append_selection_log
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from pipelines._lib.ontology_contract import (
+    load_run_manifest_hashes,
+    ontology_spec_hash,
+    ontology_spec_paths,
+)
 from events.registry import EVENT_REGISTRY_SPECS, filter_phase1_rows_for_event_type
 from strategy_dsl.policies import event_policy, overlay_defaults
 from strategy_dsl.schema import (
@@ -71,6 +76,23 @@ def _load_gates_spec() -> Dict[str, Any]:
         return {}
     with open(path, "r") as f:
         return yaml.safe_load(f)
+
+
+def _load_operator_registry() -> Dict[str, Dict[str, Any]]:
+    path = ontology_spec_paths(PROJECT_ROOT.parent).get("template_verb_lexicon")
+    if not path or not path.exists():
+        return {}
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return {}
+    operators = payload.get("operators", {})
+    if not isinstance(operators, dict):
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for key, value in operators.items():
+        if isinstance(value, dict) and str(key).strip():
+            out[str(key).strip()] = dict(value)
+    return out
 
 
 def _safe_float(value: object, default: float = 0.0) -> float:
@@ -920,6 +942,8 @@ def _build_blueprint(
     slippage_bps: float,
     min_events: int = 0,
     cost_config_digest: str = "",
+    ontology_spec_hash_value: str = "",
+    operator_registry: Dict[str, Dict[str, Any]] | None = None,
 ) -> Blueprint:
     candidate_id = str(row.get("candidate_id", "")).strip() or _candidate_id(row, 0)
     detail = phase2_lookup.get(candidate_id, {})
@@ -952,6 +976,19 @@ def _build_blueprint(
     overlays = _merge_overlays(policy_overlays, _action_overlays(str(merged.get("action", ""))))
 
     bp_id = _sanitize(f"bp_{run_id}_{event_type}_{candidate_id}_{symbol_scope.mode}")
+    template_verb = str(merged.get("template_verb", merged.get("rule_template", ""))).strip()
+    state_id = str(merged.get("state_id", "")).strip()
+    canonical_event_type = str(merged.get("canonical_event_type", event_type)).strip() or event_type
+    canonical_family = str(merged.get("canonical_family", "")).strip()
+    operator_version = ""
+    if operator_registry is not None:
+        op = operator_registry.get(template_verb, {})
+        if not op:
+            raise ValueError(f"Unknown operator for template verb {template_verb!r} while compiling blueprint")
+        operator_version = str(op.get("operator_version", "")).strip()
+        if not operator_version:
+            raise ValueError(f"Operator version missing for template verb {template_verb!r}")
+
     blueprint = Blueprint(
         id=bp_id,
         run_id=run_id,
@@ -987,6 +1024,17 @@ def _build_blueprint(
             min_events_threshold=int(min_events),
             cost_config_digest=cost_config_digest,
             promotion_track=str(merged.get("promotion_track", "fallback_only")),
+            ontology_spec_hash=str(ontology_spec_hash_value),
+            canonical_event_type=canonical_event_type,
+            canonical_family=canonical_family,
+            state_id=state_id,
+            template_verb=template_verb,
+            operator_version=operator_version,
+            constraints={
+                "gate_after_cost_positive": _as_bool(merged.get("gate_after_cost_positive", False)),
+                "gate_after_cost_stressed_positive": _as_bool(merged.get("gate_after_cost_stressed_positive", False)),
+                "gate_bridge_tradable": _as_bool(merged.get("gate_bridge_tradable", False)),
+            },
         ),
     )
     blueprint.validate()
@@ -1177,6 +1225,20 @@ def main() -> int:
     manifest = start_manifest("compile_strategy_blueprints", args.run_id, params, inputs, outputs)
 
     try:
+        current_ontology_hash = ontology_spec_hash(PROJECT_ROOT.parent)
+        run_manifest_hashes = load_run_manifest_hashes(DATA_ROOT, args.run_id)
+        manifest_ontology_hash = str(run_manifest_hashes.get("ontology_spec_hash", "") or "").strip()
+        if not manifest_ontology_hash:
+            raise ValueError(f"run_manifest missing ontology_spec_hash for run_id={args.run_id}")
+        if manifest_ontology_hash != current_ontology_hash:
+            raise ValueError(
+                "Ontology drift detected before blueprint compile: "
+                f"run_manifest={manifest_ontology_hash}, current={current_ontology_hash}"
+            )
+        operator_registry = _load_operator_registry()
+        if not operator_registry:
+            raise ValueError("Operator registry is missing or empty in template_verb_lexicon.yaml")
+
         checklist_path = DATA_ROOT / "runs" / args.run_id / "research_checklist" / "checklist.json"
         inputs.append({"path": str(checklist_path), "rows": None, "start_ts": None, "end_ts": None})
         if not int(args.ignore_checklist):
@@ -1324,6 +1386,8 @@ def main() -> int:
                         slippage_bps=float(resolved_costs.slippage_bps_per_fill),
                         min_events=int(args.min_events_floor),
                         cost_config_digest=resolved_costs.config_digest,
+                        ontology_spec_hash_value=manifest_ontology_hash,
+                        operator_registry=operator_registry,
                     )
                     blueprints.append(bp)
                     for rec in attempt_records:

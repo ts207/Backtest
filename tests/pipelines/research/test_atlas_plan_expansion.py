@@ -18,7 +18,17 @@ def mock_atlas_env(tmp_path):
         "source_claim_id": "CL_001",
         "concept_id": "C_1",
         "object_type": "event",
+        "runtime_event_type": "VOL_SHOCK",
         "event_type": "VOL_SHOCK",
+        "canonical_event_type": "VOL_SHOCK",
+        "canonical_family": "VOLATILITY_TRANSITION",
+        "ontology_in_taxonomy": True,
+        "ontology_in_canonical_registry": True,
+        "ontology_unknown_templates": [],
+        "ontology_source_states": [],
+        "ontology_family_states": [],
+        "ontology_all_states": [],
+        "ontology_spec_hash": "sha256:test",
         "target_spec_path": "spec/events/VOL_SHOCK.yaml",
         "rule_templates": ["mean_reversion"],
         "horizons": ["5m"],
@@ -69,7 +79,8 @@ def test_plan_supports_new_conditioning_keys(mock_atlas_env):
             mock_project_root = mock_atlas_env / "project"
             with patch.object(gcp, "PROJECT_ROOT", mock_project_root):
                 with patch.object(gcp, "DATA_ROOT", mock_atlas_env / "data"):
-                    res = planner_main()
+                    with patch.object(gcp, "ontology_spec_hash", return_value="sha256:test"):
+                        res = planner_main()
             assert res == 0
     
     report_path = out_dir / "plan_feasibility_report.parquet"
@@ -107,7 +118,8 @@ def test_composite_regime_feasibility_check(mock_atlas_env):
             mock_project_root = mock_atlas_env / "project"
             with patch.object(gcp, "PROJECT_ROOT", mock_project_root):
                 with patch.object(gcp, "DATA_ROOT", mock_atlas_env / "data"):
-                    res = planner_main()
+                    with patch.object(gcp, "ontology_spec_hash", return_value="sha256:test"):
+                        res = planner_main()
             assert res == 0
             
     # Check plan file

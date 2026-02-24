@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -19,6 +18,14 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.spec_loader import load_global_defaults
+from pipelines._lib.ontology_contract import (
+    ONTOLOGY_SPEC_RELATIVE_PATHS,
+    ontology_component_hashes,
+    ontology_spec_hash,
+    ontology_spec_paths,
+    validate_state_registry_source_events,
+    validate_candidate_templates_schema,
+)
 
 def _load_global_defaults() -> Dict[str, Any]:
     return load_global_defaults(project_root=PROJECT_ROOT)
@@ -37,10 +44,11 @@ DEFAULT_CONDITIONING = GLOBAL_DEFAULTS.get("conditioning", {
     "regime_vol_liquidity": ["high_vol_low_liq", "low_vol_high_liq"]
 })
 
-TAXONOMY_PATH = PROJECT_ROOT.parent / "spec" / "multiplicity" / "taxonomy.yaml"
-CANONICAL_EVENT_REGISTRY_PATH = PROJECT_ROOT.parent / "spec" / "events" / "canonical_event_registry.yaml"
-STATE_REGISTRY_PATH = PROJECT_ROOT.parent / "spec" / "states" / "state_registry.yaml"
-VERB_LEXICON_PATH = PROJECT_ROOT.parent / "spec" / "hypotheses" / "template_verb_lexicon.yaml"
+_ONTOLOGY_PATHS = ontology_spec_paths(PROJECT_ROOT.parent)
+TAXONOMY_PATH = _ONTOLOGY_PATHS["taxonomy"]
+CANONICAL_EVENT_REGISTRY_PATH = _ONTOLOGY_PATHS["canonical_event_registry"]
+STATE_REGISTRY_PATH = _ONTOLOGY_PATHS["state_registry"]
+VERB_LEXICON_PATH = _ONTOLOGY_PATHS["template_verb_lexicon"]
 
 
 def _to_str_list(value: Any) -> List[str]:
@@ -88,16 +96,6 @@ def _load_state_registry(*, strict: bool = False) -> Dict[str, Any]:
 def _load_template_verb_lexicon(*, strict: bool = False) -> Dict[str, Any]:
     return _load_yaml(VERB_LEXICON_PATH, strict=strict, required=True, name="template_verb_lexicon")
 
-
-def _ontology_spec_hash() -> str:
-    hasher = hashlib.sha256()
-    for path in [TAXONOMY_PATH, CANONICAL_EVENT_REGISTRY_PATH, STATE_REGISTRY_PATH, VERB_LEXICON_PATH]:
-        hasher.update(str(path).encode("utf-8"))
-        if path.exists():
-            hasher.update(path.read_bytes())
-        else:
-            hasher.update(b"")
-    return f"sha256:{hasher.hexdigest()}"
 
 def _norm_label(value: Any) -> str:
     return str(value).strip().upper()
@@ -435,10 +433,20 @@ def main() -> int:
         canonical_registry = _load_canonical_event_registry(strict=strict_ontology)
         state_registry = _load_state_registry(strict=strict_ontology)
         verb_lexicon = _load_template_verb_lexicon(strict=strict_ontology)
-        ontology_hash = _ontology_spec_hash()
+        ontology_hash = ontology_spec_hash(PROJECT_ROOT.parent)
+        component_hashes = ontology_component_hashes(PROJECT_ROOT.parent)
         event_ontology_index = _build_event_ontology_index(taxonomy, state_registry)
         canonical_event_info = _build_canonical_event_info(canonical_registry)
         canonical_events = set(canonical_event_info.keys())
+        state_registry_issues = validate_state_registry_source_events(
+            state_registry=state_registry,
+            canonical_event_types=canonical_events,
+        )
+        if state_registry_issues and strict_ontology:
+            raise ValueError(
+                "state_registry source_event_type validation failed: "
+                + "; ".join(state_registry_issues[:10])
+            )
         
         # 1. Load Performance Attribution (if provided)
         attribution_map = {}
@@ -514,6 +522,7 @@ def main() -> int:
                         "source_claim_id": claim_id,
                         "concept_id": row['concept_id'],
                         "object_type": "event",
+                        "runtime_event_type": raw_event_type,
                         "event_type": event_type,
                         "canonical_event_type": event_type,
                         "canonical_family": str(ontology_ctx["canonical_family"]),
@@ -567,6 +576,8 @@ def main() -> int:
                             "source_claim_id": claim_id,
                             "concept_id": row['concept_id'],
                             "object_type": "feature",
+                            "runtime_event_type": None,
+                            "event_type": None,
                             "feature_name": feat,
                             "canonical_event_type": None,
                             "canonical_family": None,
@@ -601,6 +612,8 @@ def main() -> int:
 
         # Save Global Artifacts
         templates_df = pd.DataFrame(candidate_templates)
+        if not templates_df.empty:
+            validate_candidate_templates_schema(templates_df)
         templates_df.to_parquet(atlas_dir / "candidate_templates.parquet", index=False)
         
         tasks_df = pd.DataFrame(spec_tasks)
@@ -666,11 +679,12 @@ def main() -> int:
 
         ontology_linkage = {
             "ontology_spec_hash": ontology_hash,
+            "component_hashes": component_hashes,
             "spec_paths": {
-                "taxonomy": str(TAXONOMY_PATH.relative_to(PROJECT_ROOT.parent)),
-                "canonical_event_registry": str(CANONICAL_EVENT_REGISTRY_PATH.relative_to(PROJECT_ROOT.parent)),
-                "state_registry": str(STATE_REGISTRY_PATH.relative_to(PROJECT_ROOT.parent)),
-                "template_verb_lexicon": str(VERB_LEXICON_PATH.relative_to(PROJECT_ROOT.parent)),
+                "taxonomy": ONTOLOGY_SPEC_RELATIVE_PATHS["taxonomy"],
+                "canonical_event_registry": ONTOLOGY_SPEC_RELATIVE_PATHS["canonical_event_registry"],
+                "state_registry": ONTOLOGY_SPEC_RELATIVE_PATHS["state_registry"],
+                "template_verb_lexicon": ONTOLOGY_SPEC_RELATIVE_PATHS["template_verb_lexicon"],
             },
             "spec_versions": {
                 "taxonomy": taxonomy_version,
@@ -699,6 +713,7 @@ def main() -> int:
                 "events_missing_in_canonical_registry": events_missing_in_canonical_registry,
                 "templates_missing_in_verb_lexicon": unknown_templates_list,
                 "states_with_missing_source_event": states_with_missing_source_event,
+                "state_registry_validation_issues": state_registry_issues,
             },
         }
         with (atlas_dir / "ontology_linkage.json").open("w", encoding="utf-8") as f:

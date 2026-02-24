@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from pipelines._lib.spec_utils import get_spec_hashes
+from pipelines._lib.ontology_contract import (
+    ontology_component_hash_fields,
+    ontology_component_hashes,
+    ontology_spec_hash,
+)
 
 
 def _utc_now_iso() -> str:
@@ -166,6 +171,10 @@ def start_manifest(
     outputs: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     project_root = _project_root()
+    ontology_hash = ontology_spec_hash(project_root.parent)
+    ontology_component_fields = ontology_component_hash_fields(
+        ontology_component_hashes(project_root.parent)
+    )
     manifest = {
         "run_id": run_id,
         "stage": stage_name,
@@ -174,6 +183,11 @@ def start_manifest(
         "status": "running",
         "git_commit": _git_commit(project_root),
         "spec_hashes": get_spec_hashes(project_root.parent),
+        "ontology_spec_hash": ontology_hash,
+        "taxonomy_hash": ontology_component_fields.get("taxonomy_hash"),
+        "canonical_event_registry_hash": ontology_component_fields.get("canonical_event_registry_hash"),
+        "state_registry_hash": ontology_component_fields.get("state_registry_hash"),
+        "verb_lexicon_hash": ontology_component_fields.get("verb_lexicon_hash"),
         "parameters": params,
         "inputs": inputs,
         "outputs": outputs,

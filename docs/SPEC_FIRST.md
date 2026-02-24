@@ -8,6 +8,18 @@ Specs are the source of truth for research configuration and event registry wiri
   - Defines `event_type`, `reports_dir`, `events_file`, `signal_column`.
   - Used by registry loading and event flag construction.
 
+- `spec/multiplicity/taxonomy.yaml`
+  - Atlas planning taxonomy (candidate proposal layer).
+
+- `spec/events/canonical_event_registry.yaml`
+  - Canonical ontology truth constraints for events/families.
+
+- `spec/states/state_registry.yaml`
+  - Derived state windows and source-event linkage.
+
+- `spec/hypotheses/template_verb_lexicon.yaml`
+  - Canonical template verb operator set.
+
 - `spec/gates.yaml`
   - Phase2 and downstream gating thresholds.
 
@@ -35,3 +47,12 @@ Specs are the source of truth for research configuration and event registry wiri
 ## Why This Matters
 
 Spec-first avoids hidden hardcoded behavior and gives reproducible, auditable runs.
+
+## Atlas Ontology Contract
+
+- Taxonomy proposes candidate expansions (`event × template × horizon × conditioning`).
+- Canonical event registry constrains truth (canonical family/event validity and allowed template envelope).
+- Verb lexicon constrains operator semantics (unknown template verbs are rejected in strict mode).
+- State registry defines derived conditioning context (source/family/all state sets).
+- `candidate_templates.parquet`, `atlas/ontology_linkage.json`, and run manifests carry `ontology_spec_hash`.
+- Phase-2 rejects candidate-plan rows that violate ontology contract or drift from run-manifest ontology hash unless explicit hash-mismatch override is enabled.

@@ -51,6 +51,8 @@ def test_generate_candidate_templates_enriches_event_rows_with_ontology_context(
     templates = pd.read_parquet(atlas_dir / "candidate_templates.parquet")
     assert not templates.empty
     row = templates.iloc[0]
+    assert "runtime_event_type" in templates.columns
+    assert row["runtime_event_type"] == "CROSS_VENUE_DESYNC"
     assert row["event_type"] == "CROSS_VENUE_DESYNC"
     assert row["canonical_event_type"] == "CROSS_VENUE_DESYNC"
     assert row["canonical_family"] == "INFORMATION_DESYNC"
@@ -187,6 +189,64 @@ def test_generate_candidate_templates_strict_mode_fails_closed_on_missing_canoni
     assert not (atlas_dir / "candidate_templates.parquet").exists()
 
 
+def test_generate_candidate_templates_strict_mode_fails_on_state_registry_invalid_source_event(tmp_path):
+    backlog_path = tmp_path / "backlog.csv"
+    pd.DataFrame(
+        [
+            {
+                "claim_id": "CL_STATE_SRC",
+                "concept_id": "C_STRICT",
+                "operationalizable": "Y",
+                "status": "unverified",
+                "candidate_type": "event",
+                "statement_summary": 'payload {""event_type"": ""CROSS_VENUE_DESYNC""}',
+                "next_artifact": "spec/events/{event_type}.yaml",
+                "priority_score": 1,
+                "assets": "*",
+            }
+        ]
+    ).to_csv(backlog_path, index=False)
+
+    atlas_dir = tmp_path / "atlas"
+    atlas_dir.mkdir()
+
+    import pipelines.research.generate_candidate_templates as gct
+
+    taxonomy = {
+        "families": {
+            "INFORMATION_DESYNC": {
+                "events": ["CROSS_VENUE_DESYNC"],
+                "runtime_templates": ["desync_repair"],
+            }
+        }
+    }
+    canonical_registry = {"families": {"INFORMATION_DESYNC": {"events": ["CROSS_VENUE_DESYNC"]}}}
+    state_registry = {
+        "states": [
+            {"state_id": "BROKEN_STATE", "source_event_type": "MISSING_EVENT"},
+        ]
+    }
+    verb_lexicon = {"verbs": {"cross_signal_relative_value": ["desync_repair"]}}
+
+    test_args = [
+        "generate_candidate_templates.py",
+        "--backlog",
+        str(backlog_path),
+        "--atlas_dir",
+        str(atlas_dir),
+        "--ontology_strict",
+        "1",
+    ]
+
+    with patch.object(gct, "_load_taxonomy", return_value=taxonomy):
+        with patch.object(gct, "_load_canonical_event_registry", return_value=canonical_registry):
+            with patch.object(gct, "_load_state_registry", return_value=state_registry):
+                with patch.object(gct, "_load_template_verb_lexicon", return_value=verb_lexicon):
+                    with patch.object(sys, "argv", test_args):
+                        rc = gct.main()
+    assert rc == 1
+
+
 def test_ontology_linkage_manifest_counts_and_unresolved_match_parquet(tmp_path):
     backlog_path = tmp_path / "backlog.csv"
     pd.DataFrame(
@@ -285,8 +345,17 @@ def test_generate_candidate_plan_prefers_canonical_event_type_column(tmp_path):
                 "source_claim_id": "CL_001",
                 "concept_id": "C_1",
                 "object_type": "event",
+                "runtime_event_type": "vol_shock_relaxation",
                 "event_type": "vol_shock_relaxation",
                 "canonical_event_type": "VOL_SHOCK",
+                "canonical_family": "VOLATILITY_TRANSITION",
+                "ontology_in_taxonomy": True,
+                "ontology_in_canonical_registry": True,
+                "ontology_unknown_templates": [],
+                "ontology_source_states": [],
+                "ontology_family_states": [],
+                "ontology_all_states": [],
+                "ontology_spec_hash": "sha256:test",
                 "target_spec_path": "spec/events/VOL_SHOCK.yaml",
                 "rule_templates": ["mean_reversion"],
                 "horizons": ["5m"],
@@ -335,13 +404,101 @@ def test_generate_candidate_plan_prefers_canonical_event_type_column(tmp_path):
             mock_project_root = tmp_path / "project"
             with patch.object(gcp, "PROJECT_ROOT", mock_project_root):
                 with patch.object(gcp, "DATA_ROOT", tmp_path / "data"):
-                    rc = gcp.main()
+                    with patch.object(gcp, "ontology_spec_hash", return_value="sha256:test"):
+                        rc = gcp.main()
     assert rc == 0
 
     plan_path = out_dir / "candidate_plan.jsonl"
     rows = [json.loads(x) for x in plan_path.read_text(encoding="utf-8").splitlines() if x.strip()]
     assert rows
     assert all(row["event_type"] == "VOL_SHOCK" for row in rows)
+
+
+def test_generate_candidate_plan_keeps_runtime_event_type_and_canonical_ids_unique(tmp_path):
+    run_id = "r_onto_alias"
+    atlas_dir = tmp_path / "atlas"
+    atlas_dir.mkdir()
+
+    pd.DataFrame(
+        [
+            {
+                "template_id": "CL_ALIAS@VOL_SHOCK",
+                "source_claim_id": "CL_ALIAS",
+                "concept_id": "C_ALIAS",
+                "object_type": "event",
+                "runtime_event_type": "vol_shock_relaxation",
+                "event_type": "VOL_SHOCK",
+                "canonical_event_type": "VOL_SHOCK",
+                "canonical_family": "VOLATILITY_TRANSITION",
+                "ontology_in_taxonomy": True,
+                "ontology_in_canonical_registry": True,
+                "ontology_unknown_templates": [],
+                "ontology_source_states": [],
+                "ontology_family_states": [],
+                "ontology_all_states": [],
+                "ontology_spec_hash": "sha256:test",
+                "target_spec_path": "spec/events/VOL_SHOCK.yaml",
+                "rule_templates": ["mean_reversion"],
+                "horizons": ["5m"],
+                "conditioning": {"vol_regime": ["high"]},
+                "assets_filter": "*",
+                "min_events": 50,
+            }
+        ]
+    ).to_parquet(atlas_dir / "candidate_templates.parquet", index=False)
+
+    spec_dir = tmp_path / "spec" / "events"
+    spec_dir.mkdir(parents=True)
+    (spec_dir / "VOL_SHOCK.yaml").write_text(
+        "event_type: VOL_SHOCK\n"
+        "reports_dir: vol_shock_relaxation\n"
+        "events_file: vol_shock_relaxation_events.csv\n"
+        "signal_column: vol_shock_relaxation_event\n",
+        encoding="utf-8",
+    )
+
+    lake_dir = tmp_path / "data" / "lake" / "cleaned" / "perp" / "BTCUSDT" / "bars_5m"
+    lake_dir.mkdir(parents=True)
+    pd.DataFrame({"timestamp": [pd.Timestamp.now()]}).to_parquet(lake_dir / "bars.parquet")
+
+    ctx_dir = tmp_path / "data" / "lake" / "context" / "market_state" / "BTCUSDT"
+    ctx_dir.mkdir(parents=True)
+    pd.DataFrame({"timestamp": [pd.Timestamp.now()]}).to_parquet(ctx_dir / "5m.parquet")
+
+    out_dir = tmp_path / "reports"
+    test_args = [
+        "generate_candidate_plan.py",
+        "--run_id",
+        run_id,
+        "--symbols",
+        "BTCUSDT",
+        "--atlas_dir",
+        str(atlas_dir),
+        "--out_dir",
+        str(out_dir),
+    ]
+
+    import pipelines.research.generate_candidate_plan as gcp
+
+    with patch.dict(os.environ, {"BACKTEST_DATA_ROOT": str(tmp_path / "data")}):
+        with patch.object(sys, "argv", test_args):
+            mock_project_root = tmp_path / "project"
+            with patch.object(gcp, "PROJECT_ROOT", mock_project_root):
+                with patch.object(gcp, "DATA_ROOT", tmp_path / "data"):
+                    with patch.object(gcp, "ontology_spec_hash", return_value="sha256:test"):
+                        rc = gcp.main()
+    assert rc == 0
+
+    rows = [
+        json.loads(x)
+        for x in (out_dir / "candidate_plan.jsonl").read_text(encoding="utf-8").splitlines()
+        if x.strip()
+    ]
+    assert rows
+    assert all(row["event_type"] == "VOL_SHOCK" for row in rows)
+    assert all(row["runtime_event_type"] == "vol_shock_relaxation" for row in rows)
+    plan_ids = [row["plan_row_id"] for row in rows]
+    assert len(plan_ids) == len(set(plan_ids))
 
 
 def test_event_ontology_context_resolves_alias_and_unions_states():

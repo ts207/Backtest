@@ -197,6 +197,13 @@ class LineageSpec:
     min_events_threshold: int = 0
     cost_config_digest: str = ""
     promotion_track: str = "standard"  # "standard" (discovery-backed) | "fallback_only" (exploratory)
+    ontology_spec_hash: str = ""
+    canonical_event_type: str = ""
+    canonical_family: str = ""
+    state_id: str = ""
+    template_verb: str = ""
+    operator_version: str = ""
+    constraints: Dict[str, Any] = field(default_factory=dict)
 
     def validate(self) -> None:
         _require_non_empty(self.source_path, "lineage.source_path")
@@ -212,6 +219,10 @@ class LineageSpec:
         valid_tracks = {"standard", "fallback_only"}
         if self.promotion_track not in valid_tracks:
             raise ValueError(f"lineage.promotion_track must be one of {valid_tracks}, got {self.promotion_track!r}")
+        if self.ontology_spec_hash and not str(self.ontology_spec_hash).startswith("sha256:"):
+            raise ValueError("lineage.ontology_spec_hash must start with sha256: when provided")
+        if not isinstance(self.constraints, dict):
+            raise ValueError("lineage.constraints must be a dict")
 
 
 @dataclass(frozen=True)

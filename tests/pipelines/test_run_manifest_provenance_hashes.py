@@ -22,6 +22,11 @@ def test_start_manifest_includes_git_and_spec_hashes():
     assert "git_commit" in manifest
     assert "spec_hashes" in manifest
     assert isinstance(manifest["spec_hashes"], dict)
+    assert str(manifest.get("ontology_spec_hash", "")).startswith("sha256:")
+    assert "taxonomy_hash" in manifest
+    assert "canonical_event_registry_hash" in manifest
+    assert "state_registry_hash" in manifest
+    assert "verb_lexicon_hash" in manifest
     assert "python_version" in manifest
     assert "platform" in manifest
     assert "env_snapshot" in manifest

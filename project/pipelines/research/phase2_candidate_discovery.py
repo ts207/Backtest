@@ -26,6 +26,17 @@ from pipelines._lib.io_utils import (
     choose_partition_dir,
 )
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from pipelines._lib.ontology_contract import (
+    bool_field,
+    compare_hash_fields,
+    load_run_manifest_hashes,
+    ontology_component_hash_fields,
+    ontology_component_hashes,
+    ontology_spec_paths,
+    ontology_spec_hash,
+    parse_list_field,
+)
+from pipelines._lib.bh_fdr_grouping import canonical_bh_group_key
 from pipelines._lib.execution_costs import resolve_execution_costs
 from pipelines._lib.spec_loader import load_global_defaults
 from pipelines._lib.timeframe_constants import HORIZON_BARS_BY_TIMEFRAME
@@ -40,6 +51,8 @@ from pipelines.research.analyze_conditional_expectancy import (
 )
 
 PRIMARY_OUTPUT_COLUMNS = [
+    "runtime_event_type", "canonical_event_type", "canonical_family", "state_id", "state_provenance",
+    "state_activation", "state_activation_hash", "template_verb", "operator_id", "operator_version",
     "candidate_id", "condition", "condition_desc", "action", "action_family", "candidate_type",
     "overlay_base_candidate_id", "sample_size", "train_samples", "validation_samples", "test_samples",
     "baseline_mode", "delta_adverse_mean", "delta_adverse_ci_low", "delta_adverse_ci_high",
@@ -79,9 +92,31 @@ _TEMPLATE_DIRECTION: Dict[str, int] = {
 }
 
 
-def _make_family_id(symbol: str, event_type: str, rule: str, horizon: str, cond_label: str) -> str:
-    """BH family key: stratified by symbol so FDR is controlled per-symbol (F-3 fix)."""
-    return f"{symbol}_{event_type}_{rule}_{horizon}_{cond_label}"
+def _make_family_id(
+    symbol: str,
+    event_type: str,
+    rule: str,
+    horizon: str,
+    cond_label: str,
+    *,
+    canonical_family: Optional[str] = None,
+    state_id: Optional[str] = None,
+) -> str:
+    """BH family key based on ontology axes, stratified by symbol.
+
+    Conditioning buckets are intentionally excluded to avoid multiplicity leakage.
+    """
+    base = canonical_bh_group_key(
+        canonical_family=str(canonical_family or event_type),
+        canonical_event_type=str(event_type),
+        template_verb=str(rule),
+        horizon=str(horizon),
+        state_id=(str(state_id).strip() if state_id else None),
+        symbol=None,
+        include_symbol=False,
+        direction_bucket=None,
+    )
+    return f"{str(symbol).strip().upper()}_{base}"
 
 
 def _resolved_sample_size(joined_event_count: int, symbol_event_count: int) -> int:
@@ -216,6 +251,50 @@ def _load_family_spec() -> Dict[str, Any]:
 
 def _load_global_defaults() -> Dict[str, Any]:
     return load_global_defaults(project_root=PROJECT_ROOT)
+
+
+def _load_template_verb_lexicon() -> Dict[str, Any]:
+    path = ontology_spec_paths(REPO_ROOT).get("template_verb_lexicon")
+    if not path or not path.exists():
+        return {}
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = yaml.safe_load(handle)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _operator_registry(verb_lexicon: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    operators = verb_lexicon.get("operators", {})
+    if not isinstance(operators, dict):
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for key, value in operators.items():
+        if not isinstance(value, dict):
+            continue
+        verb = str(key).strip()
+        if not verb:
+            continue
+        out[verb] = dict(value)
+    return out
+
+
+def _validate_operator_for_event(
+    *,
+    template_verb: str,
+    canonical_family: str,
+    operator_registry: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    op = operator_registry.get(str(template_verb).strip(), {})
+    if not op:
+        raise ValueError(f"Missing operator definition for template verb: {template_verb}")
+    compatible = op.get("compatible_families", [])
+    if isinstance(compatible, list) and compatible:
+        allowed = {str(x).strip().upper() for x in compatible if str(x).strip()}
+        if str(canonical_family).strip().upper() not in allowed:
+            raise ValueError(
+                f"Template verb {template_verb} is incompatible with family {canonical_family}; "
+                f"allowed={sorted(allowed)}"
+            )
+    return op
 
 
 def _resolve_phase2_gate_params(gate_v1_phase2: Dict[str, Any], event_type: str) -> Dict[str, Any]:
@@ -556,7 +635,70 @@ def _make_parser() -> argparse.ArgumentParser:
                         help="If 1, require --candidate_plan and fail if missing.")
     parser.add_argument("--min_samples", type=int, default=30,
                         help="Minimum number of events required to compute expectancy.")
+    parser.add_argument(
+        "--allow_ontology_hash_mismatch",
+        type=int,
+        default=0,
+        help="If 1, allow ontology hash drift between candidate plan, run manifest, and current specs.",
+    )
     return parser
+
+
+def _validate_candidate_plan_ontology(
+    plan_rows: List[Dict[str, Any]],
+    *,
+    run_manifest_ontology_hash: Optional[str],
+    current_ontology_hash: str,
+    allow_hash_mismatch: bool,
+) -> List[str]:
+    errors: List[str] = []
+
+    if not run_manifest_ontology_hash and not allow_hash_mismatch:
+        errors.append("run_manifest missing ontology_spec_hash while candidate_plan is provided")
+
+    if run_manifest_ontology_hash:
+        hash_mismatches = compare_hash_fields(
+            run_manifest_ontology_hash,
+            [("current_specs", current_ontology_hash)],
+        )
+        if hash_mismatches and not allow_hash_mismatch:
+            errors.extend([f"ontology hash mismatch: {msg}" for msg in hash_mismatches])
+
+    for idx, row in enumerate(plan_rows):
+        row_prefix = f"plan_row[{idx}]"
+        object_type = str(row.get("object_type", "event")).strip().lower()
+        row_hash = str(row.get("ontology_spec_hash", "")).strip()
+        if not row_hash:
+            errors.append(f"{row_prefix}: missing ontology_spec_hash")
+        if run_manifest_ontology_hash and row_hash and row_hash != run_manifest_ontology_hash:
+            errors.append(
+                f"{row_prefix}: ontology_spec_hash {row_hash} != run_manifest ontology_spec_hash {run_manifest_ontology_hash}"
+            )
+        if row_hash and row_hash != current_ontology_hash and not allow_hash_mismatch:
+            errors.append(
+                f"{row_prefix}: ontology_spec_hash {row_hash} != current ontology_spec_hash {current_ontology_hash}"
+            )
+
+        if object_type == "event":
+            in_canonical = bool_field(row.get("ontology_in_canonical_registry", False))
+            unknown_templates = parse_list_field(row.get("ontology_unknown_templates", []))
+            canonical_event = str(row.get("canonical_event_type", "")).strip()
+            runtime_event = str(row.get("runtime_event_type", "")).strip()
+            event_type = str(row.get("event_type", "")).strip()
+
+            if not in_canonical:
+                errors.append(f"{row_prefix}: ontology_in_canonical_registry must be true for event rows")
+            if unknown_templates:
+                errors.append(f"{row_prefix}: ontology_unknown_templates must be empty for event rows")
+            if not canonical_event:
+                errors.append(f"{row_prefix}: canonical_event_type missing for event row")
+            if event_type and canonical_event and event_type != canonical_event and event_type != runtime_event:
+                errors.append(
+                    f"{row_prefix}: event_type {event_type} is neither canonical_event_type {canonical_event} "
+                    f"nor runtime_event_type {runtime_event or '<missing>'}"
+                )
+
+    return errors
 
 
 def main():
@@ -573,6 +715,8 @@ def main():
 
     # 1. Lock in Invariants (Spec-Binding)
     spec_hashes = get_spec_hashes(REPO_ROOT)
+    current_ontology_hash = ontology_spec_hash(REPO_ROOT)
+    current_ontology_components = ontology_component_hash_fields(ontology_component_hashes(REPO_ROOT))
     gates_spec = _load_gates_spec()
     gates = _select_phase2_gate_spec(
         gates_spec,
@@ -581,6 +725,9 @@ def main():
     )
     gate_cfg = _resolve_phase2_gate_params(gates, args.event_type)
     families_spec = _load_family_spec()
+    verb_lexicon = _load_template_verb_lexicon()
+    operator_registry = _operator_registry(verb_lexicon)
+    operator_registry_version = str(verb_lexicon.get("version", "")).strip() or "unknown"
 
     # Resolve execution costs from spec configs — not a CLI float.
     cost_bps, cost_coordinate = _resolve_phase2_costs(args, PROJECT_ROOT)
@@ -609,6 +756,7 @@ def main():
     # 2. Minimal Template Set & Horizons
     global_defaults = _load_global_defaults()
     fam_config = families_spec.get("families", {}).get(args.event_type, {})
+    canonical_family_for_event = str(fam_config.get("canonical_family", args.event_type)).strip().upper() or str(args.event_type).strip().upper()
     templates = fam_config.get("templates", global_defaults.get("rule_templates", ["mean_reversion", "continuation", "carry"]))
     horizons = fam_config.get("horizons", global_defaults.get("horizons", ["5m", "15m", "60m"]))
     max_cands = fam_config.get("max_candidates_per_run", 1000)
@@ -720,6 +868,23 @@ def main():
         log.error("Atlas-driven mode active but no candidate plan provided/found.")
         sys.exit(1)
 
+    run_manifest_hashes = load_run_manifest_hashes(DATA_ROOT, args.run_id)
+    run_manifest_ontology_hash = run_manifest_hashes.get("ontology_spec_hash")
+    allow_hash_mismatch = bool(int(args.allow_ontology_hash_mismatch))
+    if plan_rows:
+        ontology_errors = _validate_candidate_plan_ontology(
+            plan_rows,
+            run_manifest_ontology_hash=run_manifest_ontology_hash,
+            current_ontology_hash=current_ontology_hash,
+            allow_hash_mismatch=allow_hash_mismatch,
+        )
+        if ontology_errors:
+            for msg in ontology_errors[:25]:
+                log.error("Ontology contract violation: %s", msg)
+            if len(ontology_errors) > 25:
+                log.error("Ontology contract violation: ... %d additional errors omitted", len(ontology_errors) - 25)
+            sys.exit(1)
+
     if plan_rows:
         # Atlas-driven discovery
         for plan_row in plan_rows:
@@ -727,9 +892,22 @@ def main():
             rule = plan_row["rule_template"]
             horizon = plan_row["horizon"]
             event_type = plan_row["event_type"]
+            runtime_event_type = str(plan_row.get("runtime_event_type", event_type)).strip() or str(event_type)
+            canonical_event_type = str(plan_row.get("canonical_event_type", event_type)).strip() or str(event_type)
+            canonical_family = str(plan_row.get("canonical_family", canonical_family_for_event)).strip().upper() or canonical_family_for_event
+            state_id = str(plan_row.get("state_id", "")).strip() or None
+            state_provenance = str(plan_row.get("state_provenance", "none")).strip() or "none"
+            state_activation = str(plan_row.get("state_activation", "")).strip() or None
+            state_activation_hash = str(plan_row.get("state_activation_hash", "")).strip() or None
             
             if event_type != args.event_type:
                 continue
+            operator_def = _validate_operator_for_event(
+                template_verb=str(rule),
+                canonical_family=canonical_family,
+                operator_registry=operator_registry,
+            )
+            operator_version = str(operator_def.get("operator_version", operator_registry_version)).strip() or operator_registry_version
                 
             conditioning_map = plan_row.get("conditioning", {})
             min_samples = plan_row.get("min_events", args.min_samples)
@@ -796,13 +974,28 @@ def main():
             _p2_quality_components = json.dumps({"econ": int(econ_pass), "econ_cons": int(econ_pass_conservative), "stability": int(stability_pass)}, sort_keys=True)
             _compile_eligible_fallback = _p2_quality_score >= quality_floor_fallback and int(n_joined) >= min_events_fallback
             _promotion_track = "standard" if gate_phase2_final else "fallback_only"
+            state_token = state_id or "NO_STATE"
             results.append({
-                "candidate_id": f"{event_type}_{rule}_{horizon}_{symbol}_{cond_label}",
-                "family_id": _make_family_id(symbol, event_type, rule, horizon, cond_label),
+                "candidate_id": f"{event_type}_{rule}_{horizon}_{state_token}_{symbol}_{cond_label}",
+                "family_id": _make_family_id(
+                    symbol, event_type, rule, horizon, cond_label,
+                    canonical_family=canonical_family,
+                    state_id=state_id,
+                ),
+                "runtime_event_type": runtime_event_type,
+                "canonical_event_type": canonical_event_type,
+                "canonical_family": canonical_family,
                 "event_type": event_type,
                 "rule_template": rule,
+                "template_verb": rule,
+                "operator_id": str(operator_def.get("operator_id", rule)).strip() or rule,
+                "operator_version": operator_version,
                 "horizon": horizon,
                 "symbol": symbol,
+                "state_id": state_id,
+                "state_provenance": state_provenance,
+                "state_activation": state_activation,
+                "state_activation_hash": state_activation_hash,
                 "conditioning": cond_label,
                 "expectancy": effect,
                 "after_cost_expectancy": after_cost,
@@ -873,6 +1066,12 @@ def main():
 
             for rule in templates:
                 for horizon in horizons:
+                    operator_def = _validate_operator_for_event(
+                        template_verb=str(rule),
+                        canonical_family=canonical_family_for_event,
+                        operator_registry=operator_registry,
+                    )
+                    operator_version = str(operator_def.get("operator_version", operator_registry_version)).strip() or operator_registry_version
                     # 3a. Base candidate (all events for this symbol)
                     effect, pval, n_joined, stability_pass = calculate_expectancy(
                         sym_all_events, features_df, rule, horizon,
@@ -922,13 +1121,28 @@ def main():
                         _p2_qc = json.dumps({"econ": int(ec_pass), "econ_cons": int(ec_pass_conservative), "stability": int(stab)}, sort_keys=True)
                         _fb_eligible = _p2_qs >= quality_floor_fallback and int(n) >= min_events_fallback
                         _p_track = "standard" if g_phase2_final else "fallback_only"
+                        state_id = None
                         results.append({
-                            "candidate_id": f"{args.event_type}_{rule}_{horizon}_{symbol}_{cond_name}",
-                            "family_id": _make_family_id(symbol, args.event_type, rule, horizon, cond_name),
+                            "candidate_id": f"{args.event_type}_{rule}_{horizon}_NO_STATE_{symbol}_{cond_name}",
+                            "family_id": _make_family_id(
+                                symbol, args.event_type, rule, horizon, cond_name,
+                                canonical_family=canonical_family_for_event,
+                                state_id=state_id,
+                            ),
+                            "runtime_event_type": args.event_type,
+                            "canonical_event_type": args.event_type,
+                            "canonical_family": canonical_family_for_event,
                             "event_type": args.event_type,
                             "rule_template": rule,
+                            "template_verb": rule,
+                            "operator_id": str(operator_def.get("operator_id", rule)).strip() or rule,
+                            "operator_version": operator_version,
                             "horizon": horizon,
                             "symbol": symbol,
+                            "state_id": state_id,
+                            "state_provenance": "none",
+                            "state_activation": None,
+                            "state_activation_hash": None,
                             "conditioning": cond_name,
                             "expectancy": eff,
                             "after_cost_expectancy": aft_cost,
@@ -1069,7 +1283,15 @@ def main():
     report = {
         "spec_hashes": spec_hashes,
         "inputs": {
-            "candidate_plan_hash": candidate_plan_hash
+            "candidate_plan_hash": candidate_plan_hash,
+            "ontology_spec_hash": run_manifest_ontology_hash or current_ontology_hash,
+        },
+        "ontology": {
+            "allow_hash_mismatch": bool(allow_hash_mismatch),
+            "run_manifest_ontology_spec_hash": run_manifest_ontology_hash,
+            "current_ontology_spec_hash": current_ontology_hash,
+            "operator_registry_version": operator_registry_version,
+            **current_ontology_components,
         },
         "family_definition": "Option B (symbol, event_type, rule_template, horizon) — F-3 fix",
         "cost_coordinate": cost_coordinate,
@@ -1120,6 +1342,11 @@ def main():
             "total_tested": int(len(fdr_df)),
             "discoveries_statistical": int(fdr_df["is_discovery"].sum()),
             "survivors_phase2": int(fdr_df["gate_phase2_final"].sum()),
+            "ontology_spec_hash": run_manifest_ontology_hash or current_ontology_hash,
+            "taxonomy_hash": current_ontology_components.get("taxonomy_hash"),
+            "canonical_event_registry_hash": current_ontology_components.get("canonical_event_registry_hash"),
+            "state_registry_hash": current_ontology_components.get("state_registry_hash"),
+            "verb_lexicon_hash": current_ontology_components.get("verb_lexicon_hash"),
         },
     )
 
