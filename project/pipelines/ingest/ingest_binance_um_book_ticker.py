@@ -69,43 +69,78 @@ def _iter_days(start: datetime, end: datetime) -> List[datetime]:
 
 
 def _clean_book_ticker_chunk(df: pd.DataFrame, symbol: str, source: str) -> pd.DataFrame:
-    columns = [
-        "event_time",
-        "transaction_time",
-        "symbol",
-        "bid_price",
-        "bid_qty",
-        "ask_price",
-        "ask_qty",
-    ]
+    # Standard column names we expect in the output
+    target_cols = ["timestamp", "bid_price", "bid_qty", "ask_price", "ask_qty"]
     
     if df.empty:
-        return pd.DataFrame(columns=["timestamp", "bid_price", "bid_qty", "ask_price", "ask_qty", "symbol", "source"])
+        return pd.DataFrame(columns=target_cols + ["symbol", "source"])
 
-    usable_cols = min(len(columns), df.shape[1])
-    df = df.iloc[:, :usable_cols].copy()
-    df.columns = columns[:usable_cols]
+    # Detect if the first row is a header
+    # We check if the first column of the first row is a non-numeric string
+    first_val = str(df.iloc[0, 0])
+    has_header = not first_val.isdigit() and first_val.lower() != "nan"
+    
+    if has_header:
+        headers = [str(c).lower().strip() for c in df.iloc[0]]
+        df = df.iloc[1:].copy()
+        # Map headers to standard names
+        mapping = {
+            "event_time": "timestamp",
+            "event_timestamp": "timestamp",
+            "transaction_time": "timestamp",
+            "transact_time": "timestamp",
+            "u": "update_id",
+            "update_id": "update_id",
+            "s": "symbol",
+            "symbol": "symbol",
+            "b": "bid_price",
+            "bid_price": "bid_price",
+            "bid_p": "bid_price",
+            "bq": "bid_qty",
+            "bid_qty": "bid_qty",
+            "bid_q": "bid_qty",
+            "a": "ask_price",
+            "ask_price": "ask_price",
+            "ask_p": "ask_price",
+            "aq": "ask_qty",
+            "ask_qty": "ask_qty",
+            "ask_q": "ask_qty",
+        }
+        df.columns = [mapping.get(h, h) for h in headers]
+    else:
+        # Positional fallback if no header
+        # Usually: event_time, transaction_time, symbol, bid_price, bid_qty, ask_price, ask_qty
+        cols = ["event_time", "transaction_time", "symbol", "bid_price", "bid_qty", "ask_price", "ask_qty"]
+        df.columns = cols[:df.shape[1]]
+        if "event_time" in df.columns:
+            df = df.rename(columns={"event_time": "timestamp"})
+        elif "transaction_time" in df.columns:
+            df = df.rename(columns={"transaction_time": "timestamp"})
 
-    # Column mapping logic
-    if not pd.to_numeric(df.iloc[0, 0], errors="coerce") > 0:
-         if isinstance(df.iloc[0, 0], str) and df.iloc[0, 0].upper() == symbol:
-             cols = ["symbol", "bid_price", "bid_qty", "ask_price", "ask_qty", "event_time", "transaction_time"]
-             df.columns = cols[:df.shape[1]]
+    # Ensure we have a timestamp column
+    if "timestamp" not in df.columns:
+        # Try finding any column that looks like a ms timestamp
+        for col in df.columns:
+            val = pd.to_numeric(df[col], errors="coerce").iloc[0]
+            if pd.notna(val) and val > 1e12: # ms timestamp range
+                df = df.rename(columns={col: "timestamp"})
+                break
 
-    ts_col = "event_time" if "event_time" in df.columns else "transaction_time"
-    if ts_col not in df.columns:
-        df["timestamp_raw"] = pd.to_numeric(df.iloc[:, 0], errors="coerce")
-        ts_col = "timestamp_raw"
+    if "timestamp" not in df.columns:
+        return pd.DataFrame(columns=target_cols + ["symbol", "source"])
 
-    df["timestamp"] = pd.to_datetime(df[ts_col].astype("int64"), unit="ms", utc=True)
-    df = df[["timestamp", "bid_price", "bid_qty", "ask_price", "ask_qty"]].copy()
+    # Final cleanup
+    df["timestamp"] = pd.to_datetime(pd.to_numeric(df["timestamp"], errors="coerce"), unit="ms", utc=True)
     for col in ["bid_price", "bid_qty", "ask_price", "ask_qty"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-    df = df.dropna(subset=["bid_price", "ask_price"]).copy()
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        else:
+            df[col] = 0.0
+            
+    df = df.dropna(subset=["timestamp", "bid_price", "ask_price"]).copy()
     df["symbol"] = symbol
     df["source"] = source
-    ensure_utc_timestamp(df["timestamp"], "timestamp")
-    return df
+    return df[target_cols + ["symbol", "source"]]
 
 
 def _process_csv_stream_to_parquet(
@@ -122,7 +157,7 @@ def _process_csv_stream_to_parquet(
     start_ts = None
     end_ts = None
     
-    reader = pd.read_csv(csv_file_obj, header=None, chunksize=CHUNK_SIZE)
+    reader = pd.read_csv(csv_file_obj, header=None, chunksize=CHUNK_SIZE, low_memory=False)
     
     for chunk in reader:
         df = _clean_book_ticker_chunk(chunk, symbol, source)
