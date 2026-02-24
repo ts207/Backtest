@@ -10,10 +10,36 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT / "data"))
 
+CHECKLIST_GATE_PROFILES: dict[str, dict[str, int]] = {
+    "discovery": {
+        "min_edge_candidates": 1,
+        "min_promoted_candidates": 1,
+        "min_bridge_tradable_candidates": 1,
+        "min_bridge_tradable_promoted_candidates": 1,
+        "min_expectancy_evidence": 1,
+        "min_robust_survivors": 1,
+        "require_expectancy_exists": 1,
+        "require_stability_pass": 0,
+        "require_capacity_pass": 0,
+    },
+    "promotion": {
+        "min_edge_candidates": 1,
+        "min_promoted_candidates": 1,
+        "min_bridge_tradable_candidates": 1,
+        "min_bridge_tradable_promoted_candidates": 1,
+        "min_expectancy_evidence": 1,
+        "min_robust_survivors": 1,
+        "require_expectancy_exists": 1,
+        "require_stability_pass": 1,
+        "require_capacity_pass": 1,
+    },
+}
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate a discovery-only run checklist from edge/expectancy artifacts.")
     parser.add_argument("--run_id", required=True)
+    parser.add_argument("--gate_profile", choices=["discovery", "promotion", "custom"], default="discovery")
     parser.add_argument(
         "--reports_root",
         default=str(DATA_ROOT / "reports"),
@@ -39,6 +65,18 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--require_stability_pass", type=int, default=1)
     parser.add_argument("--require_capacity_pass", type=int, default=1)
     return parser.parse_args()
+
+
+def _apply_checklist_gate_profile(args: argparse.Namespace) -> argparse.Namespace:
+    profile = str(getattr(args, "gate_profile", "custom")).strip().lower()
+    if profile == "custom":
+        return args
+    overrides = CHECKLIST_GATE_PROFILES.get(profile)
+    if not overrides:
+        raise ValueError(f"Unknown checklist gate profile: {profile}")
+    for key, value in overrides.items():
+        setattr(args, key, value)
+    return args
 
 
 def _gate_result(name: str, passed: bool, observed: Any, threshold: Any, note: str = "") -> dict[str, Any]:
@@ -174,10 +212,24 @@ def _build_payload(
             f"expectancy evidence below threshold ({expectancy_evidence_count} < {args.min_expectancy_evidence})"
         )
 
-    survivors = robustness_payload.get("survivors", [])
+    survivor_definition = str(robustness_payload.get("survivor_definition", "legacy_v0"))
+    survivors_obj = robustness_payload.get("survivors")
+    if isinstance(survivors_obj, list):
+        survivors = survivors_obj
+    else:
+        alt = robustness_payload.get("robust_survivors")
+        survivors = alt if isinstance(alt, list) else []
     survivor_count = len(survivors) if isinstance(survivors, list) else 0
     survivors_ok = survivor_count >= int(args.min_robust_survivors)
-    gates.append(_gate_result("robust_survivor_count", survivors_ok, survivor_count, int(args.min_robust_survivors)))
+    gates.append(
+        _gate_result(
+            "robust_survivor_count",
+            survivors_ok,
+            survivor_count,
+            int(args.min_robust_survivors),
+            note=f"definition={survivor_definition}",
+        )
+    )
     if not survivors_ok:
         reasons.append(f"robust survivors below threshold ({survivor_count} < {args.min_robust_survivors})")
 
@@ -203,6 +255,7 @@ def _build_payload(
         "gates": gates,
         "failure_reasons": reasons,
         "config": {
+            "gate_profile": str(getattr(args, "gate_profile", "custom")),
             "min_edge_candidates": int(args.min_edge_candidates),
             "min_promoted_candidates": int(args.min_promoted_candidates),
             "min_expectancy_evidence": int(args.min_expectancy_evidence),
@@ -263,6 +316,7 @@ def _render_markdown(payload: dict[str, Any]) -> str:
 
 def main() -> int:
     args = _parse_args()
+    args = _apply_checklist_gate_profile(args)
     reports_root = Path(args.reports_root)
     edge_candidates_path = reports_root / "edge_candidates" / args.run_id / "edge_candidates_normalized.csv"
     expectancy_path = reports_root / "expectancy" / args.run_id / "conditional_expectancy.json"

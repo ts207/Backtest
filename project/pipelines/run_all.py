@@ -441,6 +441,7 @@ def main() -> int:
         and args.phase2_event_type in {"all", "cross_venue_desync"}
     )
     run_spot_pipeline = bool(int(args.enable_cross_venue_spot_pipeline) and cross_venue_requested)
+    research_gate_profile = "promotion" if args.mode in {"production", "certification"} else "discovery"
 
     stages: List[Tuple[str, Path, List[str]]] = []
 
@@ -902,6 +903,8 @@ def main() -> int:
                     run_id,
                     "--symbols",
                     symbols,
+                    "--gate_profile",
+                    research_gate_profile,
                 ],
             )
         )
@@ -911,7 +914,7 @@ def main() -> int:
             (
                 "generate_recommendations_checklist",
                 PROJECT_ROOT / "pipelines" / "research" / "generate_recommendations_checklist.py",
-                ["--run_id", run_id],
+                ["--run_id", run_id, "--gate_profile", research_gate_profile],
             )
         )
 

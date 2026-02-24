@@ -94,6 +94,8 @@ def _as_bool(value: object) -> bool:
     if value is None:
         return False
     if isinstance(value, (int, float)):
+        if pd.isna(value):
+            return False
         return bool(value)
     text = str(value).strip().lower()
     return text in {"1", "true", "t", "yes", "y"}

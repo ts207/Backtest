@@ -138,3 +138,97 @@ def test_run_all_declared_subtype_families_are_not_noop():
     chain_map = {event: script for event, script, _ in run_all.PHASE2_EVENT_CHAIN}
     for event_type, expected_script in expected_scripts.items():
         assert chain_map.get(event_type) == expected_script
+
+
+def test_run_all_research_gate_profile_wiring(monkeypatch, tmp_path):
+    captured: list[tuple[str, list[str]]] = []
+
+    def fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        return True
+
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path / "data")
+    monkeypatch.setattr(run_all, "_git_commit", lambda _project_root: "test-sha")
+    monkeypatch.setattr(run_all, "_run_stage", fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-02",
+            "--run_expectancy_robustness",
+            "1",
+            "--run_recommendations_checklist",
+            "1",
+            "--run_strategy_blueprint_compiler",
+            "0",
+            "--run_strategy_builder",
+            "0",
+            "--run_phase2_conditional",
+            "0",
+            "--run_hypothesis_generator",
+            "0",
+            "--mode",
+            "research",
+        ],
+    )
+
+    rc = run_all.main()
+    assert rc == 0
+    stage_map = {stage: args for stage, args in captured}
+    robust_args = stage_map["validate_expectancy_traps"]
+    checklist_args = stage_map["generate_recommendations_checklist"]
+    assert _arg_value(robust_args, "--gate_profile") == "discovery"
+    assert _arg_value(checklist_args, "--gate_profile") == "discovery"
+
+
+def test_run_all_production_gate_profile_wiring(monkeypatch, tmp_path):
+    captured: list[tuple[str, list[str]]] = []
+
+    def fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        return True
+
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path / "data")
+    monkeypatch.setattr(run_all, "_git_commit", lambda _project_root: "test-sha")
+    monkeypatch.setattr(run_all, "_run_stage", fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-02",
+            "--run_expectancy_robustness",
+            "1",
+            "--run_recommendations_checklist",
+            "1",
+            "--run_strategy_blueprint_compiler",
+            "0",
+            "--run_strategy_builder",
+            "0",
+            "--run_phase2_conditional",
+            "0",
+            "--run_hypothesis_generator",
+            "0",
+            "--mode",
+            "production",
+        ],
+    )
+
+    rc = run_all.main()
+    assert rc == 0
+    stage_map = {stage: args for stage, args in captured}
+    robust_args = stage_map["validate_expectancy_traps"]
+    checklist_args = stage_map["generate_recommendations_checklist"]
+    assert _arg_value(robust_args, "--gate_profile") == "promotion"
+    assert _arg_value(checklist_args, "--gate_profile") == "promotion"

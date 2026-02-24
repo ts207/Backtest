@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from dataclasses import dataclass
@@ -22,7 +23,7 @@ from pipelines._lib.io_utils import (
     read_parquet,
     run_scoped_lake_path,
 )
-from pipelines.research.analyze_conditional_expectancy import build_walk_forward_split_labels
+from pipelines.research.analyze_conditional_expectancy import _bh_adjust, build_walk_forward_split_labels
 
 
 @dataclass
@@ -58,6 +59,49 @@ EVENT_ROW_COLUMNS = [
     "event_return",
     "event_directional_return",
 ]
+
+ROBUST_GATE_PROFILES: Dict[str, Dict[str, float | int]] = {
+    "discovery": {
+        "min_samples": 60,
+        "tstat_threshold": 1.64,
+        "robust_hac_t_threshold": 1.64,
+        "robust_bootstrap_alpha": 0.20,
+        "robust_fdr_q": 0.20,
+        "robust_hac_max_lag": 8,
+        "robust_bootstrap_iters": 400,
+        "robust_bootstrap_block_size": 8,
+        "robust_bootstrap_seed": 7,
+        "oos_min_samples": 20,
+        "require_oos_positive": 1,
+        "require_oos_sign_consistency": 0,
+    },
+    "promotion": {
+        "min_samples": 100,
+        "tstat_threshold": 2.0,
+        "robust_hac_t_threshold": 1.96,
+        "robust_bootstrap_alpha": 0.10,
+        "robust_fdr_q": 0.10,
+        "robust_hac_max_lag": 12,
+        "robust_bootstrap_iters": 800,
+        "robust_bootstrap_block_size": 8,
+        "robust_bootstrap_seed": 7,
+        "oos_min_samples": 40,
+        "require_oos_positive": 1,
+        "require_oos_sign_consistency": 1,
+    },
+}
+
+
+def _apply_gate_profile_defaults(args: argparse.Namespace) -> argparse.Namespace:
+    profile = str(getattr(args, "gate_profile", "custom")).strip().lower()
+    if profile == "custom":
+        return args
+    overrides = ROBUST_GATE_PROFILES.get(profile)
+    if not overrides:
+        raise ValueError(f"Unknown gate profile: {profile}")
+    for key, value in overrides.items():
+        setattr(args, key, value)
+    return args
 
 
 def _parse_horizons(value: str) -> List[int]:
@@ -125,6 +169,241 @@ def _distribution_stats(returns: pd.Series) -> Dict[str, float]:
         "p75": float(clean.quantile(0.75)),
         "t_stat": t_stat,
     }
+
+
+def _normal_cdf(x: float) -> float:
+    return 0.5 * (1.0 + math.erf(float(x) / math.sqrt(2.0)))
+
+
+def _two_sided_p_from_t(t_stat: float) -> float:
+    if not np.isfinite(t_stat):
+        return 1.0
+    z = abs(float(t_stat))
+    return float(max(0.0, min(1.0, 2.0 * (1.0 - _normal_cdf(z)))))
+
+
+def _newey_west_t_stat(values: pd.Series, max_lag: int) -> Tuple[float, float, int]:
+    clean = pd.to_numeric(values, errors="coerce").dropna().astype(float).to_numpy()
+    n = int(len(clean))
+    if n < 2:
+        return 0.0, 1.0, 0
+    if max_lag < 0:
+        max_lag = int(np.floor(4.0 * (n / 100.0) ** (2.0 / 9.0)))
+    lag = int(max(0, min(max_lag, n - 1)))
+    mean_val = float(clean.mean())
+    residuals = clean - mean_val
+    gamma0 = float(np.dot(residuals, residuals) / n)
+    long_run_var = gamma0
+    for l in range(1, lag + 1):
+        gamma_l = float(np.dot(residuals[l:], residuals[:-l]) / n)
+        weight = 1.0 - (l / (lag + 1.0))
+        long_run_var += 2.0 * weight * gamma_l
+    long_run_var = max(float(long_run_var), 1e-18)
+    se = float(np.sqrt(long_run_var / n))
+    if se <= 0.0 or not np.isfinite(se):
+        return 0.0, 1.0, lag
+    t_stat = float(mean_val / se)
+    return t_stat, _two_sided_p_from_t(t_stat), lag
+
+
+def _circular_block_bootstrap_pvalue(values: pd.Series, *, block_size: int, n_boot: int, seed: int) -> float:
+    clean = pd.to_numeric(values, errors="coerce").dropna().astype(float).to_numpy()
+    n = int(len(clean))
+    if n < 2 or n_boot <= 0:
+        return 1.0
+    observed = float(clean.mean())
+    if not np.isfinite(observed):
+        return 1.0
+    centered = clean - observed
+    block = int(max(1, min(block_size, n)))
+    blocks_per_draw = int(np.ceil(n / block))
+    rng = np.random.default_rng(int(seed))
+    exceed = 0
+    for _ in range(int(n_boot)):
+        starts = rng.integers(0, n, size=blocks_per_draw)
+        sample = np.empty(blocks_per_draw * block, dtype=float)
+        pos = 0
+        for s in starts:
+            idx = (int(s) + np.arange(block)) % n
+            sample[pos : pos + block] = centered[idx]
+            pos += block
+        draw_mean = float(sample[:n].mean())
+        if abs(draw_mean) >= abs(observed):
+            exceed += 1
+    # Add-one smoothing avoids exact zero p-values in finite Monte Carlo draws.
+    return float((exceed + 1) / (int(n_boot) + 1))
+
+
+def _stable_row_seed(condition: str, horizon: int, base_seed: int) -> int:
+    acc = (int(base_seed) + int(horizon) * 1009) % (2**32 - 1)
+    for ch in str(condition):
+        acc = (acc * 131 + ord(ch)) % (2**32 - 1)
+    return int(acc)
+
+
+def _oos_diagnostics(
+    event_frame: pd.DataFrame,
+    *,
+    ret_col: str,
+    oos_min_samples: int,
+    require_oos_positive: int,
+    require_oos_sign_consistency: int,
+) -> Dict[str, object]:
+    if event_frame.empty or ret_col not in event_frame.columns:
+        return {
+            "oos_samples": 0,
+            "train_mean": np.nan,
+            "validation_mean": np.nan,
+            "test_mean": np.nan,
+            "oos_mean": np.nan,
+            "oos_positive": False,
+            "oos_sign_consistent": False,
+            "oos_pass": False,
+        }
+    values = pd.to_numeric(event_frame[ret_col], errors="coerce")
+    split = (
+        event_frame["split_label"].astype(str)
+        if "split_label" in event_frame.columns
+        else pd.Series("", index=event_frame.index, dtype="object")
+    )
+    train_vals = values[split == "train"].dropna()
+    val_vals = values[split == "validation"].dropna()
+    test_vals = values[split == "test"].dropna()
+    oos_vals = pd.concat([val_vals, test_vals], ignore_index=True)
+    train_mean = float(train_vals.mean()) if not train_vals.empty else np.nan
+    val_mean = float(val_vals.mean()) if not val_vals.empty else np.nan
+    test_mean = float(test_vals.mean()) if not test_vals.empty else np.nan
+    oos_mean = float(oos_vals.mean()) if not oos_vals.empty else np.nan
+    oos_positive = bool(np.isfinite(oos_mean) and oos_mean > 0.0)
+    oos_sign_consistent = bool(
+        np.isfinite(train_mean)
+        and np.isfinite(oos_mean)
+        and train_mean != 0.0
+        and oos_mean != 0.0
+        and np.sign(train_mean) == np.sign(oos_mean)
+    )
+    oos_pass = bool(
+        len(oos_vals) >= int(oos_min_samples)
+        and (not int(require_oos_positive) or oos_positive)
+        and (not int(require_oos_sign_consistency) or oos_sign_consistent)
+    )
+    return {
+        "oos_samples": int(len(oos_vals)),
+        "train_mean": train_mean,
+        "validation_mean": val_mean,
+        "test_mean": test_mean,
+        "oos_mean": oos_mean,
+        "oos_positive": oos_positive,
+        "oos_sign_consistent": oos_sign_consistent,
+        "oos_pass": oos_pass,
+    }
+
+
+def _robust_row_fields(
+    *,
+    event_frame: pd.DataFrame,
+    ret_col: str,
+    condition: str,
+    horizon: int,
+    hac_max_lag: int,
+    bootstrap_block_size: int,
+    bootstrap_iters: int,
+    bootstrap_seed: int,
+    oos_min_samples: int,
+    require_oos_positive: int,
+    require_oos_sign_consistency: int,
+) -> Dict[str, object]:
+    series = (
+        pd.to_numeric(event_frame[ret_col], errors="coerce")
+        if ret_col in event_frame.columns
+        else pd.Series(dtype=float)
+    )
+    hac_t, hac_p, hac_used_lag = _newey_west_t_stat(series, max_lag=hac_max_lag)
+    boot_seed = _stable_row_seed(condition=condition, horizon=horizon, base_seed=bootstrap_seed)
+    bootstrap_p = _circular_block_bootstrap_pvalue(
+        series,
+        block_size=int(bootstrap_block_size),
+        n_boot=int(bootstrap_iters),
+        seed=boot_seed,
+    )
+    oos = _oos_diagnostics(
+        event_frame,
+        ret_col=ret_col,
+        oos_min_samples=int(oos_min_samples),
+        require_oos_positive=int(require_oos_positive),
+        require_oos_sign_consistency=int(require_oos_sign_consistency),
+    )
+    return {
+        "hac_t": float(hac_t),
+        "hac_p": float(hac_p),
+        "hac_used_lag": int(hac_used_lag),
+        "bootstrap_p": float(bootstrap_p),
+        **oos,
+    }
+
+
+def _apply_robust_survivor_gates(
+    trap_df: pd.DataFrame,
+    *,
+    min_samples: int,
+    legacy_tstat_threshold: float,
+    robust_hac_t_threshold: float,
+    bootstrap_alpha: float,
+    fdr_q: float,
+    oos_min_samples: int,
+    require_oos_positive: int,
+    require_oos_sign_consistency: int,
+) -> pd.DataFrame:
+    out = trap_df.copy()
+    if out.empty:
+        return out
+    for col, default in (
+        ("event_samples", 0.0),
+        ("event_mean", 0.0),
+        ("event_t", 0.0),
+        ("hac_t", 0.0),
+        ("hac_p", 1.0),
+        ("bootstrap_p", 1.0),
+        ("oos_samples", 0.0),
+        ("oos_mean", np.nan),
+    ):
+        if col not in out.columns:
+            out[col] = default
+        out[col] = pd.to_numeric(out[col], errors="coerce").fillna(default)
+    if "oos_sign_consistent" not in out.columns:
+        out["oos_sign_consistent"] = False
+    out["oos_sign_consistent"] = out["oos_sign_consistent"].astype(bool)
+    if "oos_positive" not in out.columns:
+        out["oos_positive"] = out["oos_mean"] > 0.0
+    out["oos_positive"] = out["oos_positive"].astype(bool)
+    if "oos_pass" not in out.columns:
+        out["oos_pass"] = False
+    out["oos_pass"] = out["oos_pass"].astype(bool)
+
+    out["composite_p_value"] = np.maximum(out["hac_p"], out["bootstrap_p"]).clip(lower=0.0, upper=1.0)
+    out["fdr_q_value"] = _bh_adjust(out["composite_p_value"]).astype(float)
+
+    out["gate_legacy_survivor"] = (
+        (out["event_samples"] >= int(min_samples))
+        & (out["event_mean"] > 0.0)
+        & (out["event_t"] >= float(legacy_tstat_threshold))
+    )
+    out["gate_robust_survivor"] = (
+        (out["event_samples"] >= int(min_samples))
+        & (out["event_mean"] > 0.0)
+        & (out["hac_t"] >= float(robust_hac_t_threshold))
+        & (out["bootstrap_p"] <= float(bootstrap_alpha))
+        & (out["fdr_q_value"] <= float(fdr_q))
+        & (out["oos_samples"] >= int(oos_min_samples))
+        & ((not int(require_oos_positive)) | out["oos_positive"])
+        & ((not int(require_oos_sign_consistency)) | out["oos_sign_consistent"])
+    )
+    out["gate_oos"] = (
+        (out["oos_samples"] >= int(oos_min_samples))
+        & ((not int(require_oos_positive)) | out["oos_positive"])
+        & ((not int(require_oos_sign_consistency)) | out["oos_sign_consistent"])
+    )
+    return out
 
 
 def _tail_report(returns: pd.Series) -> Dict[str, float]:
@@ -528,14 +807,26 @@ def main() -> int:
     parser.add_argument("--max_event_duration", type=int, default=96)
     parser.add_argument("--expansion_lookahead", type=int, default=192)
     parser.add_argument("--mfe_horizon", type=int, default=96)
+    parser.add_argument("--gate_profile", choices=["discovery", "promotion", "custom"], default="discovery")
     parser.add_argument("--tstat_threshold", type=float, default=2.0)
     parser.add_argument("--min_samples", type=int, default=100)
+    parser.add_argument("--robust_hac_t_threshold", type=float, default=1.96)
+    parser.add_argument("--robust_bootstrap_alpha", type=float, default=0.10)
+    parser.add_argument("--robust_fdr_q", type=float, default=0.10)
+    parser.add_argument("--robust_hac_max_lag", type=int, default=12)
+    parser.add_argument("--robust_bootstrap_iters", type=int, default=800)
+    parser.add_argument("--robust_bootstrap_block_size", type=int, default=8)
+    parser.add_argument("--robust_bootstrap_seed", type=int, default=7)
+    parser.add_argument("--oos_min_samples", type=int, default=40)
+    parser.add_argument("--require_oos_positive", type=int, default=1)
+    parser.add_argument("--require_oos_sign_consistency", type=int, default=1)
     parser.add_argument("--embargo_bars", type=int, default=0)
     parser.add_argument("--stability_sample_delta", type=int, default=20)
     parser.add_argument("--stability_tstat_delta", type=float, default=0.5)
     parser.add_argument("--capacity_min_events_per_day", type=float, default=0.5)
     parser.add_argument("--out_dir", default=None)
     args = parser.parse_args()
+    args = _apply_gate_profile_defaults(args)
 
     symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
     horizons = _parse_horizons(args.horizons)
@@ -594,7 +885,21 @@ def main() -> int:
         for horizon in horizons:
             bar_stats = _bar_condition_stats(master_bars, condition, horizon)
             event_frame, ret_col = _event_condition_frame(events_df, condition, horizon)
-            event_stats = _distribution_stats(event_frame[ret_col] if ret_col in event_frame else pd.Series(dtype=float))
+            event_series = event_frame[ret_col] if ret_col in event_frame else pd.Series(dtype=float)
+            event_stats = _distribution_stats(event_series)
+            robust_fields = _robust_row_fields(
+                event_frame=event_frame,
+                ret_col=ret_col,
+                condition=condition,
+                horizon=int(horizon),
+                hac_max_lag=int(args.robust_hac_max_lag),
+                bootstrap_block_size=int(args.robust_bootstrap_block_size),
+                bootstrap_iters=int(args.robust_bootstrap_iters),
+                bootstrap_seed=int(args.robust_bootstrap_seed),
+                oos_min_samples=int(args.oos_min_samples),
+                require_oos_positive=int(args.require_oos_positive),
+                require_oos_sign_consistency=int(args.require_oos_sign_consistency),
+            )
 
             trap_rows.append(
                 {
@@ -606,6 +911,7 @@ def main() -> int:
                     "event_samples": event_stats["samples"],
                     "event_mean": event_stats["mean_return"],
                     "event_t": event_stats["t_stat"],
+                    **robust_fields,
                 }
             )
 
@@ -674,17 +980,25 @@ def main() -> int:
         )
 
     trap_df = pd.DataFrame(trap_rows)
+    trap_df = _apply_robust_survivor_gates(
+        trap_df,
+        min_samples=int(args.min_samples),
+        legacy_tstat_threshold=float(args.tstat_threshold),
+        robust_hac_t_threshold=float(args.robust_hac_t_threshold),
+        bootstrap_alpha=float(args.robust_bootstrap_alpha),
+        fdr_q=float(args.robust_fdr_q),
+        oos_min_samples=int(args.oos_min_samples),
+        require_oos_positive=int(args.require_oos_positive),
+        require_oos_sign_consistency=int(args.require_oos_sign_consistency),
+    )
     split_df = pd.DataFrame(split_rows)
     tail_df = pd.DataFrame(tail_rows)
     symmetry_df = pd.DataFrame(symmetry_rows)
     expansion_df = pd.DataFrame(expansion_rows)
     event_summary_df = pd.DataFrame(event_summary_rows)
 
-    survivors = trap_df[
-        (trap_df["event_samples"] >= args.min_samples)
-        & (trap_df["event_mean"] > 0)
-        & (trap_df["event_t"] >= args.tstat_threshold)
-    ]
+    legacy_survivors = trap_df[trap_df["gate_legacy_survivor"]].copy()
+    survivors = trap_df[trap_df["gate_robust_survivor"]].copy()
     stability = _parameter_stability_diagnostics(
         trap_df,
         base_min_samples=args.min_samples,
@@ -703,10 +1017,25 @@ def main() -> int:
             "expansion_lookahead": args.expansion_lookahead,
             "mfe_horizon": args.mfe_horizon,
             "embargo_bars": args.embargo_bars,
+            "gate_profile": args.gate_profile,
+            "survivor_definition": "promotion_grade_v1",
+            "min_samples": args.min_samples,
+            "legacy_tstat_threshold": args.tstat_threshold,
+            "robust_hac_t_threshold": args.robust_hac_t_threshold,
+            "robust_bootstrap_alpha": args.robust_bootstrap_alpha,
+            "robust_fdr_q": args.robust_fdr_q,
+            "robust_hac_max_lag": args.robust_hac_max_lag,
+            "robust_bootstrap_iters": args.robust_bootstrap_iters,
+            "robust_bootstrap_block_size": args.robust_bootstrap_block_size,
+            "robust_bootstrap_seed": args.robust_bootstrap_seed,
+            "oos_min_samples": args.oos_min_samples,
+            "require_oos_positive": args.require_oos_positive,
+            "require_oos_sign_consistency": args.require_oos_sign_consistency,
             "stability_sample_delta": args.stability_sample_delta,
             "stability_tstat_delta": args.stability_tstat_delta,
             "capacity_min_events_per_day": args.capacity_min_events_per_day,
         },
+        "survivor_definition": "promotion_grade_v1",
         "event_summary": event_summary_df.to_dict(orient="records"),
         "trap_1_overlap_bar_vs_event": trap_df.to_dict(orient="records"),
         "trap_2_leakage": {"feature_leakage": leakage, "split_overlap": split_overlap},
@@ -716,6 +1045,7 @@ def main() -> int:
         "event_expansion_metrics": expansion_df.to_dict(orient="records"),
         "stability_diagnostics": stability,
         "capacity_diagnostics": capacity,
+        "survivors_legacy": legacy_survivors.to_dict(orient="records"),
         "survivors": survivors.to_dict(orient="records"),
     }
 
@@ -733,9 +1063,10 @@ def main() -> int:
         "## Survivors (event-level)",
     ]
     if survivors.empty:
-        lines.append("No condition survived event-level thresholds.")
+        lines.append("No condition survived promotion-grade robust thresholds.")
     else:
         lines.append(survivors.to_markdown(index=False))
+    lines.extend(["", f"Legacy survivors (pre-upgrade): **{len(legacy_survivors)}**"])
 
     lines.extend(["", "## Trap 2 Leakage", json.dumps({"feature_leakage": leakage, "split_overlap": split_overlap}, indent=2), ""])
     lines.extend(["## Trap 1 Overlap (Bar vs Event)", trap_df.to_markdown(index=False) if not trap_df.empty else "No rows", ""])

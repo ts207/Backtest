@@ -50,6 +50,8 @@ _NUMERIC_CONDITION_PATTERN = re.compile(
 # The compiler currently uses actions primarily to derive delay/cooldown semantics.
 _ALLOWED_ACTIONS = {
     "no_action",
+    "enter_long_market",
+    "enter_short_market",
     "entry_gate_skip",
     "risk_throttle_0.5",
     "risk_throttle_0.0",

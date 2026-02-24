@@ -91,6 +91,8 @@ def _split_fail_reasons(series: pd.Series) -> List[str]:
 
 
 def _gate_pass_series(df: pd.DataFrame) -> pd.Series:
+    if "gate_phase2_final" in df.columns:
+        return pd.to_numeric(df["gate_phase2_final"], errors="coerce").fillna(0.0).astype(float) > 0.0
     if "gate_pass" in df.columns:
         return pd.to_numeric(df["gate_pass"], errors="coerce").fillna(0.0).astype(float) > 0.0
     if "gate_all" in df.columns:
@@ -143,7 +145,16 @@ def build_summary(*, run_id: str, phase2_root: Path, top_fail_reasons: int) -> d
         candidates_path = event_dir / "phase2_candidates.csv"
         frame = _load_candidates(candidates_path) if candidates_path.exists() else pd.DataFrame()
         if frame.empty:
-            frame = pd.DataFrame(columns=["candidate_id", "gate_pass", "fail_reasons", "gate_all", "gate_bridge_tradable"])
+            frame = pd.DataFrame(
+                columns=[
+                    "candidate_id",
+                    "gate_phase2_final",
+                    "gate_pass",
+                    "fail_reasons",
+                    "gate_all",
+                    "gate_bridge_tradable",
+                ]
+            )
         frame["event_type"] = family
         source_files[family] = str(candidates_path)
 
@@ -152,10 +163,7 @@ def build_summary(*, run_id: str, phase2_root: Path, top_fail_reasons: int) -> d
         family_row.update(summary)
 
         family_row["phase2_candidates"] = int(len(frame))
-        if "gate_all" in frame.columns:
-            family_row["phase2_gate_all_pass"] = int(pd.to_numeric(frame["gate_all"], errors="coerce").fillna(0.0).astype(float).gt(0).sum())
-        else:
-            family_row["phase2_gate_all_pass"] = int(_gate_pass_series(frame).sum())
+        family_row["phase2_gate_all_pass"] = int(_gate_pass_series(frame).sum())
 
         phase2_reasons = _split_fail_reasons(frame.get("fail_reasons", pd.Series(dtype=str)))
         family_fail_counter[family].update(phase2_reasons)
