@@ -20,16 +20,17 @@ Prints a table of the audit rows and returns exit code 0 if all assertions pass.
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent / "project"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from strategy_dsl.contract_v1 import normalize_entry_condition, is_executable_condition
-from pipelines.research.phase2_candidate_discovery import _condition_routing, _BUCKET_PREFIXES
+from pipelines.research.phase2_candidate_discovery import _condition_routing
 
 # ── Synthetic candidates ────────────────────────────────────────────────────
 
@@ -214,4 +215,6 @@ def run_certification() -> int:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run condition enforcement certification.")
+    parser.parse_args()
     sys.exit(run_certification())

@@ -35,19 +35,26 @@ def _load_event_specs() -> Dict[str, EventRegistrySpec]:
     if not spec_dir.exists():
         return {}
 
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    required = {"event_type", "reports_dir", "events_file", "signal_column"}
     specs = {}
     for yaml_file in sorted(spec_dir.glob("*.yaml")):
         with open(yaml_file, "r") as f:
             data = yaml.safe_load(f)
-            if not data:
-                continue
-            spec = EventRegistrySpec(
-                event_type=data["event_type"],
-                reports_dir=data["reports_dir"],
-                events_file=data["events_file"],
-                signal_column=data["signal_column"],
-            )
-            specs[spec.event_type] = spec
+        if not data:
+            continue
+        missing = required - set(data.keys())
+        if missing:
+            _log.debug("Skipping %s — missing registry fields: %s", yaml_file.name, missing)
+            continue
+        spec = EventRegistrySpec(
+            event_type=data["event_type"],
+            reports_dir=data["reports_dir"],
+            events_file=data["events_file"],
+            signal_column=data["signal_column"],
+        )
+        specs[spec.event_type] = spec
     return specs
 
 

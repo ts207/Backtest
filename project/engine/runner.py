@@ -25,20 +25,14 @@ from pipelines._lib.io_utils import (
 from pipelines._lib.validation import ensure_utc_timestamp
 from features.funding_persistence import FP_DEF_VERSION
 from strategies.registry import get_strategy
+from pipelines._lib.timeframe_constants import BARS_PER_YEAR_BY_TIMEFRAME
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 LOGGER = logging.getLogger(__name__)
 
-# Bars-per-year lookup for Sharpe annualization.  Add entries as new timeframes land.
-BARS_PER_YEAR: Dict[str, int] = {
-    "1m":  525_600,   # 365 * 24 * 60
-    "5m":  105_120,   # 365 * 24 * 12
-    "15m":  35_040,   # 365 * 24 * 4
-    "1h":    8_760,   # 365 * 24
-    "4h":    2_190,   # 365 * 6
-    "1d":      365,
-}
+# Bars-per-year lookup for Sharpe annualization (canonical source in pipelines._lib).
+BARS_PER_YEAR: Dict[str, int] = dict(BARS_PER_YEAR_BY_TIMEFRAME)
 
 # Default execution timeframe — matches the research pipeline's feature lake layout.
 # Changing this requires the feature builder and cleaned bar builder to produce data
@@ -897,4 +891,3 @@ def run_engine(
         "metrics": metrics,
         "diagnostics": metrics.get("diagnostics", {}),
     }
-

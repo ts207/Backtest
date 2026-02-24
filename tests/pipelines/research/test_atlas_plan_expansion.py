@@ -31,10 +31,15 @@ def mock_atlas_env(tmp_path):
     }
     pd.DataFrame([template]).to_parquet(atlas_dir / "candidate_templates.parquet")
     
-    # Create required spec file
+    # Create required spec file — must be valid YAML so FeasibilityGuard passes it
     spec_dir = tmp_path / "spec" / "events"
     spec_dir.mkdir(parents=True)
-    (spec_dir / "vol_shock_relaxation.yaml").touch()
+    (spec_dir / "vol_shock_relaxation.yaml").write_text(
+        "event_type: vol_shock_relaxation\n"
+        "reports_dir: vol_shock_relaxation\n"
+        "events_file: vol_shock_relaxation_events.csv\n"
+        "signal_column: vol_shock_relaxation_event\n"
+    )
     
     # Mock lake structure
     lake_dir = tmp_path / "data" / "lake" / "cleaned" / "perp" / "BTCUSDT" / "bars_5m"

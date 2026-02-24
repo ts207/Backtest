@@ -18,8 +18,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from pipelines._lib.timeframe_constants import BARS_PER_YEAR_BY_TIMEFRAME
 
-BARS_PER_YEAR_5M = 365 * 24 * 12
+BARS_PER_YEAR_5M = BARS_PER_YEAR_BY_TIMEFRAME["5m"]
 NUMERIC_CONDITION_PATTERN = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(>=|<=|==|>|<)\s*(-?\d+(?:\.\d+)?)\s*$")
 
 PHASE1_EVENT_FILES: Dict[str, Tuple[str, str]] = {

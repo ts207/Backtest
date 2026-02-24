@@ -21,6 +21,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.execution_costs import resolve_execution_costs
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from pipelines._lib.timeframe_constants import BARS_PER_YEAR_BY_TIMEFRAME
 from pipelines._lib.validation import strategy_family_allowed_keys, validate_strategy_family_params
 from engine.pnl import compute_pnl
 from engine.runner import BARS_PER_YEAR, run_engine
@@ -38,7 +39,7 @@ from strategy_dsl.schema import (
 )
 
 INITIAL_EQUITY = 1_000_000.0
-BARS_PER_YEAR_5M = 365 * 24 * 12
+BARS_PER_YEAR_5M = BARS_PER_YEAR_BY_TIMEFRAME["5m"]
 
 STRATEGY_EXECUTION_FAMILY = {
     "vol_compression_v1": "breakout",
@@ -232,6 +233,11 @@ def _blueprint_from_dict(raw: Dict[str, object]) -> Blueprint:
             source_path=str(lineage.get("source_path", "")),
             compiler_version=str(lineage.get("compiler_version", "")),
             generated_at_utc=str(lineage.get("generated_at_utc", "")),
+            bridge_embargo_days_used=(
+                None
+                if lineage.get("bridge_embargo_days_used") in (None, "")
+                else int(lineage.get("bridge_embargo_days_used"))
+            ),
             promotion_track=str(lineage.get("promotion_track", "standard")),
         ),
     )

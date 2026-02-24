@@ -160,6 +160,11 @@ def _build_blueprint(raw: Dict[str, object]) -> Blueprint:
             source_path=str(lineage.get("source_path", "")),
             compiler_version=str(lineage.get("compiler_version", "")),
             generated_at_utc=str(lineage.get("generated_at_utc", "")),
+            bridge_embargo_days_used=(
+                None
+                if lineage.get("bridge_embargo_days_used") in (None, "")
+                else int(lineage.get("bridge_embargo_days_used"))
+            ),
         ),
     )
     bp.validate()

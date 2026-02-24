@@ -2024,3 +2024,38 @@ def _build_symbol_evaluation_table(
                 if non_zero_split_signs
                 else 0.0
             )
+# Delegated module split for testable components.
+from pipelines.research import phase2_event_analyzer as _phase2_event_analyzer
+from pipelines.research import phase2_statistical_gates as _phase2_statistical_gates
+from pipelines.research import phase2_cost_integration as _phase2_cost_integration
+
+ConditionSpec = _phase2_event_analyzer.ConditionSpec
+ActionSpec = _phase2_event_analyzer.ActionSpec
+_build_conditions = _phase2_event_analyzer.build_conditions
+_build_actions = _phase2_event_analyzer.build_actions
+_candidate_type_from_action = _phase2_event_analyzer.candidate_type_from_action
+_assign_candidate_types_and_overlay_bases = _phase2_event_analyzer.assign_candidate_types_and_overlay_bases
+_attach_forward_opportunity = _phase2_event_analyzer.attach_forward_opportunity
+_attach_event_market_features = _phase2_event_analyzer.attach_event_market_features
+_prepare_baseline = _phase2_event_analyzer.prepare_baseline
+_apply_action_proxy = _phase2_event_analyzer.apply_action_proxy
+_expectancy_from_effect_vectors = _phase2_event_analyzer.expectancy_from_effect_vectors
+_expectancy_for_action = _phase2_event_analyzer.expectancy_for_action
+_combine_with_delay_override = _phase2_event_analyzer.combine_with_delay_override
+_compute_drawdown_profile = _phase2_event_analyzer.compute_drawdown_profile
+
+_turnover_proxy_for_action = _phase2_cost_integration.turnover_proxy_for_action
+_candidate_cost_fields = _phase2_cost_integration.candidate_cost_fields
+
+_condition_mask_for_numeric_expr = _phase2_statistical_gates.condition_mask_for_numeric_expr
+_curvature_metrics = _phase2_statistical_gates.curvature_metrics
+_delay_robustness_fields = _phase2_statistical_gates.delay_robustness_fields
+_gate_year_stability = _phase2_statistical_gates.gate_year_stability
+_gate_regime_stability = _phase2_statistical_gates.gate_regime_stability
+_split_count = _phase2_statistical_gates.split_count
+_split_mean = _phase2_statistical_gates.split_mean
+_split_t_stat_and_p_value = _phase2_statistical_gates.split_t_stat_and_p_value
+_capacity_proxy_from_frame = _phase2_statistical_gates.capacity_proxy_from_frame
+_effective_sample_size = _phase2_statistical_gates.effective_sample_size
+_multiplicity_penalty = _phase2_statistical_gates.multiplicity_penalty
+_apply_multiplicity_adjustments = _phase2_statistical_gates.apply_multiplicity_adjustments

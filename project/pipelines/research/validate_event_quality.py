@@ -14,6 +14,7 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
+from pipelines._lib.timeframe_constants import DEFAULT_EVENT_HORIZON_BARS
 
 
 def _load_gates_spec() -> Dict[str, Any]:
@@ -243,7 +244,7 @@ def validate_event_quality(
     horizons_bars: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
     if horizons_bars is None:
-        horizons_bars = [1, 3, 12]  # 5m, 15m, 60m in 5-minute bars
+        horizons_bars = list(DEFAULT_EVENT_HORIZON_BARS)
 
     if events_df.empty:
         return {"pass": False, "reason": "No events detected"}

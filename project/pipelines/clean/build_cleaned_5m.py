@@ -24,6 +24,7 @@ from pipelines._lib.run_manifest import (
     validate_input_provenance,
 )
 from pipelines._lib.sanity import (
+    FUNDING_SCALE_NAME_TO_MULTIPLIER,
     assert_funding_event_grid,
     assert_funding_sane,
     assert_monotonic_utc_timestamp,
@@ -96,6 +97,7 @@ def main() -> int:
     parser.add_argument("--start", required=False)
     parser.add_argument("--end", required=False)
     parser.add_argument("--force", type=int, default=0)
+    parser.add_argument("--funding_scale", choices=["auto", "decimal", "percent", "bps"], default="auto")
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
@@ -116,6 +118,7 @@ def main() -> int:
         "start": args.start,
         "end": args.end,
         "force": int(args.force),
+        "funding_scale": str(args.funding_scale),
         "source_vendor": "binance",
     }
     inputs: List[Dict[str, object]] = []
@@ -137,6 +140,7 @@ def main() -> int:
             if raw.empty:
                 logging.warning("No raw OHLCV 5m data for %s", symbol)
                 continue
+            assert_ohlcv_schema(raw)
 
             raw["timestamp"] = pd.to_datetime(raw["timestamp"], utc=True)
             raw = raw.sort_values("timestamp").drop_duplicates(subset=["timestamp"]).reset_index(drop=True)
@@ -158,7 +162,27 @@ def main() -> int:
 
             if market == "perp" and not funding.empty:
                 funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
-                funding, _ = infer_and_apply_funding_scale(funding, "funding_rate")
+                explicit_scale = None
+                if str(args.funding_scale).strip().lower() != "auto":
+                    explicit_scale = float(FUNDING_SCALE_NAME_TO_MULTIPLIER[str(args.funding_scale).strip().lower()])
+                funding, inferred_scale, scale_confidence = infer_and_apply_funding_scale(
+                    funding,
+                    "funding_rate",
+                    explicit_scale=explicit_scale,
+                )
+                logging.info(
+                    "Funding scale inference symbol=%s mode=%s scale=%.6g confidence=%.4f",
+                    symbol,
+                    args.funding_scale,
+                    inferred_scale,
+                    scale_confidence,
+                )
+                if str(args.funding_scale).strip().lower() == "auto" and float(scale_confidence) < 0.99:
+                    raise ValueError(
+                        f"Low confidence funding scale inference for {symbol}: "
+                        f"confidence={scale_confidence:.4f} (<0.99). "
+                        "Set --funding_scale explicitly (decimal|percent|bps)."
+                    )
                 aligned_funding, _ = _align_funding(bars, funding)
                 bars = bars.merge(
                     aligned_funding[["timestamp", "funding_event_ts", "funding_rate_scaled", "funding_missing"]],
@@ -213,6 +237,7 @@ def main() -> int:
                 "start": start_ts.isoformat(),
                 "end": end_ts.isoformat(),
                 "rows": int(len(bars)),
+                "funding_scale_mode": str(args.funding_scale),
             }
 
         finalize_manifest(manifest, "success", stats=stats)

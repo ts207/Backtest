@@ -988,6 +988,11 @@ def _build_blueprint(
             source_path=str(merged.get("source_path", "")),
             compiler_version=COMPILER_VERSION,
             generated_at_utc=DETERMINISTIC_TS,
+            bridge_embargo_days_used=(
+                None
+                if merged.get("bridge_embargo_days_used") in (None, "")
+                else _safe_int(merged.get("bridge_embargo_days_used"), -1)
+            ),
             events_count_used_for_gate=_safe_int(merged.get("n_events", merged.get("sample_size", 0)), 0),
             min_events_threshold=int(min_events),
             cost_config_digest=cost_config_digest,

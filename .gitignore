@@ -46,3 +46,9 @@ data/lake/runs/
 
 .gemini/
 gha-creds-*.json
+
+# Root debug scratch scripts (canonical location: project/scripts/debug/)
+/debug_*.py
+/show_candidates.py
+/check_diagnostics.py
+/run_condition_certification.py

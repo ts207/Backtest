@@ -317,7 +317,7 @@ def main() -> int:
     parser.add_argument("--bridge_min_validation_trades", type=int, default=20)
     parser.add_argument("--bridge_train_frac", type=float, default=0.6)
     parser.add_argument("--bridge_validation_frac", type=float, default=0.2)
-    parser.add_argument("--bridge_embargo_days", type=int, default=0)
+    parser.add_argument("--bridge_embargo_days", type=int, default=1)
     parser.add_argument("--run_discovery_quality_summary", type=int, default=1)
 
     parser.add_argument("--run_edge_candidate_universe", type=int, default=0)
@@ -459,7 +459,7 @@ def main() -> int:
                     "--end",
                     end,
                     "--force",
-                    "1", # Forced to 1 for debugging
+                    force_flag,
                 ],
             )
         )
@@ -1194,6 +1194,8 @@ def main() -> int:
                 pass
         return False
 
+    pipeline_started = time.perf_counter()
+    total_stages = len(stages)
     for idx, (stage, script, base_args) in enumerate(stages, start=1):
         # Event-specific gating: skip if queue has no entries for this event type.
         skip_stage = False
@@ -1210,12 +1212,23 @@ def main() -> int:
         if skip_stage:
             continue
 
-        print(f"[{idx}/{len(stages)}] Starting stage: {stage}")
+        elapsed_pipeline_before = time.perf_counter() - pipeline_started
+        print(
+            f"[{idx}/{total_stages}] Starting stage: {stage} "
+            f"(pipeline_elapsed={elapsed_pipeline_before:.1f}s)"
+        )
         started = time.perf_counter()
         ok = _run_stage(stage, script, base_args, run_id)
         elapsed_sec = time.perf_counter() - started
         stage_timings.append((stage, elapsed_sec))
-        print(f"[{idx}/{len(stages)}] Finished stage: {stage} ({elapsed_sec:.1f}s)")
+        elapsed_pipeline = time.perf_counter() - pipeline_started
+        avg_stage = elapsed_pipeline / float(idx)
+        remaining = max(0, total_stages - idx)
+        eta = remaining * avg_stage
+        print(
+            f"[{idx}/{total_stages}] Finished stage: {stage} ({elapsed_sec:.1f}s) "
+            f"| pipeline_elapsed={elapsed_pipeline:.1f}s | eta~{eta:.1f}s"
+        )
         if not ok:
             run_manifest["finished_at"] = _utc_now_iso()
             run_manifest["ended_at"] = run_manifest["finished_at"]
