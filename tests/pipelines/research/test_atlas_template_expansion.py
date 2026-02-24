@@ -8,7 +8,7 @@ from pipelines.research.generate_candidate_templates import DEFAULT_RULE_TEMPLAT
 def test_new_templates_defined():
     """Verify that the new archetypes are included in the default rule templates."""
     assert "trend_continuation" in DEFAULT_RULE_TEMPLATES
-    assert "liquidity_reversion_v2" in DEFAULT_RULE_TEMPLATES
+    assert "pullback_entry" in DEFAULT_RULE_TEMPLATES
 
 def test_granular_conditioning_defined():
     """Verify that the new conditioning keys are included in the default configuration."""

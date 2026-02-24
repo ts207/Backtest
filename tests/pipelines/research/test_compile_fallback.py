@@ -1,6 +1,10 @@
 import pytest
 import pandas as pd
-from pipelines.research.compile_strategy_blueprints import _passes_fallback_gate, _choose_event_rows
+from pipelines.research.compile_strategy_blueprints import (
+    _passes_fallback_gate,
+    _choose_event_rows,
+    _validate_promoted_candidates_frame,
+)
 
 def test_passes_fallback_gate():
     gates = {
@@ -46,3 +50,14 @@ def test_choose_event_rows_fallback():
     )
     assert len(selected) == 1
     assert selected[0]["candidate_id"] == "test_1"
+
+
+def test_validate_promoted_candidates_frame_rejects_non_promoted():
+    df = pd.DataFrame(
+        [
+            {"candidate_id": "c1", "status": "PROMOTED", "event": "VOL_SHOCK"},
+            {"candidate_id": "c2", "status": "REJECTED", "event": "VOL_SHOCK"},
+        ]
+    )
+    with pytest.raises(ValueError, match="non-promoted"):
+        _validate_promoted_candidates_frame(df, source_label="unit_test")

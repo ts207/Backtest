@@ -35,7 +35,7 @@ GLOBAL_DEFAULTS = _load_global_defaults()
 
 # Default configuration for expansion
 DEFAULT_HORIZONS = GLOBAL_DEFAULTS.get("horizons", ["5m", "15m", "60m"])
-DEFAULT_RULE_TEMPLATES = GLOBAL_DEFAULTS.get("rule_templates", ["mean_reversion", "continuation", "trend_continuation", "liquidity_reversion_v2"])
+DEFAULT_RULE_TEMPLATES = GLOBAL_DEFAULTS.get("rule_templates", ["mean_reversion", "continuation", "trend_continuation", "pullback_entry"])
 DEFAULT_CONDITIONING = GLOBAL_DEFAULTS.get("conditioning", {
     "vol_regime": ["high", "low"],
     "carry_state": ["pos", "neg", "neutral"],

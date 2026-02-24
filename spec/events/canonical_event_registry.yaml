@@ -156,3 +156,16 @@ planned_events:
   - ZSCORE_STRETCH
 
 unlisted_event_status: planned
+default_unlisted_event_status: planned
+implementation_status_by_event:
+  CROSS_VENUE_DESYNC: implemented
+  FORCED_FLOW_EXHAUSTION: implemented
+  FUNDING_EXTREME_ONSET: implemented
+  FUNDING_NORMALIZATION_TRIGGER: implemented
+  FUNDING_PERSISTENCE_TRIGGER: implemented
+  LIQUIDATION_CASCADE: implemented
+  LIQUIDITY_VACUUM: implemented
+  OI_FLUSH: implemented
+  OI_SPIKE_NEGATIVE: implemented
+  OI_SPIKE_POSITIVE: implemented
+  VOL_SHOCK: implemented

@@ -33,7 +33,10 @@ families:
     runtime_templates:
       - "mean_reversion"
       - "continuation"
-      - "liquidity_reversion_v2"
+      - "stop_run_repair"
+      - "overshoot_repair"
+      - "only_if_liquidity"
+      - "slippage_aware_filter"
 
   VOLATILITY_TRANSITION:
     description: "Variance regime change and post-shock relaxation/aftershock behavior."
@@ -350,6 +353,19 @@ planned_events:
   - "ZSCORE_STRETCH"
 
 unlisted_event_status: planned
+default_unlisted_event_status: planned
+implementation_status_by_event:
+  CROSS_VENUE_DESYNC: implemented
+  FORCED_FLOW_EXHAUSTION: implemented
+  FUNDING_EXTREME_ONSET: implemented
+  FUNDING_NORMALIZATION_TRIGGER: implemented
+  FUNDING_PERSISTENCE_TRIGGER: implemented
+  LIQUIDATION_CASCADE: implemented
+  LIQUIDITY_VACUUM: implemented
+  OI_FLUSH: implemented
+  OI_SPIKE_NEGATIVE: implemented
+  OI_SPIKE_POSITIVE: implemented
+  VOL_SHOCK: implemented
 
 # Feature (non-event) templates remain separate from event/state discovery templates.
 default_feature_templates: ["feature_conditioned_prediction"]

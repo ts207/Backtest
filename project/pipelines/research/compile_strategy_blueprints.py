@@ -126,6 +126,39 @@ def _as_bool(value: object) -> bool:
     return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
 
 
+def _validate_promoted_candidates_frame(df: pd.DataFrame, *, source_label: str) -> pd.DataFrame:
+    if df.empty:
+        raise ValueError(f"Promoted candidates file is empty: {source_label}")
+    if "status" not in df.columns:
+        raise ValueError(f"Promoted candidates file missing status column: {source_label}")
+    promoted_mask = df["status"].astype(str).str.strip().str.upper() == "PROMOTED"
+    if not promoted_mask.all():
+        invalid = sorted(
+            {
+                str(v).strip() or "<empty>"
+                for v in df.loc[~promoted_mask, "status"].tolist()
+            }
+        )
+        raise ValueError(
+            f"Promoted candidates file contains non-promoted rows ({invalid}) in {source_label}"
+        )
+    out = df.copy()
+    if "event" not in out.columns:
+        if "event_type" not in out.columns:
+            raise ValueError(
+                f"Promoted candidates file missing event/event_type columns: {source_label}"
+            )
+        out["event"] = out["event_type"]
+    if "event_type" not in out.columns:
+        out["event_type"] = out["event"]
+    out["event"] = out["event"].astype(str).str.strip()
+    out["event_type"] = out["event_type"].astype(str).str.strip()
+    out = out[(out["event"] != "") | (out["event_type"] != "")].copy()
+    if out.empty:
+        raise ValueError(f"Promoted candidates file has no usable event identifiers: {source_label}")
+    return out
+
+
 def _checklist_decision(run_id: str) -> str:
     path = DATA_ROOT / "runs" / run_id / "research_checklist" / "checklist.json"
     if not path.exists():
@@ -1174,6 +1207,12 @@ def main() -> int:
     parser.add_argument("--max_total_compiles_per_run", type=int, default=100)
     parser.add_argument("--mode", choices=["discovery", "fallback", "both"], default="discovery", help="Promotion track selection mode")
     args = parser.parse_args()
+    if bool(int(args.allow_fallback_blueprints)):
+        print(
+            "--allow_fallback_blueprints=1 is not supported: compiler is promoted-candidates only.",
+            file=sys.stderr,
+        )
+        return 1
 
     run_symbols = _parse_symbols(args.symbols)
     if not run_symbols:
@@ -1260,31 +1299,31 @@ def main() -> int:
             else:
                 edge_df = pd.DataFrame()
         else:
-            edge_path = DATA_ROOT / "reports" / "edge_candidates" / args.run_id / "edge_candidates_normalized.csv"
+            edge_path = DATA_ROOT / "reports" / "promotions" / args.run_id / "promoted_candidates.parquet"
             inputs.append({"path": str(edge_path), "rows": None, "start_ts": None, "end_ts": None})
             if edge_path.exists():
-                edge_df = pd.read_csv(edge_path)
+                edge_df = pd.read_parquet(edge_path)
             else:
                 edge_df = pd.DataFrame()
-
-        if not edge_df.empty:
-            if "gate_bridge_tradable" not in edge_df.columns:
-                _msg = (
-                    "gate_bridge_tradable column missing from candidates — bridge stage may not have run "
-                    f"(run_id={args.run_id}, path={edge_path}). "
-                    "All candidates would silently pass the bridge gate. "
-                    "Re-run the bridge scoring stage or use --ignore_checklist 1 to bypass for non-production use."
-                )
-                if not int(args.ignore_checklist):
-                    raise ValueError(_msg)
-                print(f"WARNING: {_msg}", file=sys.stderr)
-            if "candidate_id" not in edge_df.columns:
-                edge_df["candidate_id"] = [
-                    _candidate_id(row, idx) for idx, row in enumerate(edge_df.to_dict(orient="records"))
-                ]
-            edge_rows = edge_df.to_dict(orient="records")
-        else:
-            edge_rows = []
+        if edge_df.empty:
+            raise ValueError(
+                f"Missing promoted candidates artifact for compile: {edge_path}. "
+                "Run promote_candidates stage first."
+            )
+        edge_df = _validate_promoted_candidates_frame(edge_df, source_label=str(edge_path))
+        if "gate_bridge_tradable" not in edge_df.columns:
+            _msg = (
+                "gate_bridge_tradable column missing from promoted candidates — bridge stage may not have run "
+                f"(run_id={args.run_id}, path={edge_path})."
+            )
+            if not int(args.ignore_checklist):
+                raise ValueError(_msg)
+            print(f"WARNING: {_msg}", file=sys.stderr)
+        if "candidate_id" not in edge_df.columns:
+            edge_df["candidate_id"] = [
+                _candidate_id(row, idx) for idx, row in enumerate(edge_df.to_dict(orient="records"))
+            ]
+        edge_rows = edge_df.to_dict(orient="records")
 
         naive_validation: Dict[Tuple[str, str], bool] = {}
         if not int(args.allow_naive_entry_fail):
@@ -1299,9 +1338,15 @@ def main() -> int:
             )
 
         phase2_root = DATA_ROOT / "reports" / "phase2" / args.run_id
-        event_types = sorted([p.name for p in phase2_root.iterdir() if p.is_dir()]) if phase2_root.exists() else []
-        if not event_types and edge_rows:
-            event_types = sorted({str(row.get("event", "")).strip() for row in edge_rows if str(row.get("event", "")).strip()})
+        event_types = sorted(
+            {
+                str(row.get("event", row.get("event_type", ""))).strip()
+                for row in edge_rows
+                if str(row.get("event", row.get("event_type", ""))).strip()
+            }
+        )
+        if not event_types and phase2_root.exists():
+            event_types = sorted([p.name for p in phase2_root.iterdir() if p.is_dir()])
 
         blueprints: List[Blueprint] = []
         fallback_count = 0

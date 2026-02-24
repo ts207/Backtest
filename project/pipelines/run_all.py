@@ -127,6 +127,7 @@ def _print_artifact_summary(run_id: str) -> None:
         ("bridge_eval", DATA_ROOT / "reports" / "bridge_eval" / run_id),
         ("edge_candidates", DATA_ROOT / "reports" / "edge_candidates" / run_id / "edge_candidates_normalized.csv"),
         ("promotions", DATA_ROOT / "reports" / "promotions" / run_id / "promotion_report.json"),
+        ("edge_registry", DATA_ROOT / "runs" / run_id / "research" / "edge_registry.parquet"),
         ("strategy_builder", DATA_ROOT / "reports" / "strategy_builder" / run_id),
         ("report", DATA_ROOT / "reports" / "vol_compression_expansion_v1" / run_id / "summary.md"),
     ]
@@ -396,6 +397,16 @@ def main() -> int:
     parser.add_argument("--naive_min_trades", type=int, default=100)
     parser.add_argument("--naive_min_expectancy_after_cost", type=float, default=0.0)
     parser.add_argument("--naive_max_drawdown", type=float, default=-0.25)
+    parser.add_argument("--run_candidate_promotion", type=int, default=1)
+    parser.add_argument("--candidate_promotion_max_q_value", type=float, default=0.10)
+    parser.add_argument("--candidate_promotion_min_events", type=int, default=100)
+    parser.add_argument("--candidate_promotion_min_stability_score", type=float, default=0.05)
+    parser.add_argument("--candidate_promotion_min_sign_consistency", type=float, default=0.67)
+    parser.add_argument("--candidate_promotion_min_cost_survival_ratio", type=float, default=0.75)
+    parser.add_argument("--candidate_promotion_max_negative_control_pass_rate", type=float, default=0.01)
+    parser.add_argument("--candidate_promotion_require_hypothesis_audit", type=int, default=0)
+    parser.add_argument("--candidate_promotion_allow_missing_negative_controls", type=int, default=1)
+    parser.add_argument("--run_edge_registry_update", type=int, default=1)
     parser.add_argument("--run_strategy_blueprint_compiler", type=int, default=1)
     parser.add_argument("--strategy_blueprint_max_per_event", type=int, default=2)
     parser.add_argument("--strategy_blueprint_ignore_checklist", type=int, default=0)
@@ -535,6 +546,14 @@ def main() -> int:
                     file=sys.stderr,
                 )
                 return 1
+
+    if int(args.run_strategy_blueprint_compiler) and not int(args.run_candidate_promotion):
+        print(
+            "compile_strategy_blueprints requires promoted candidates. "
+            "Enable --run_candidate_promotion 1.",
+            file=sys.stderr,
+        )
+        return 1
 
     cross_venue_requested = bool(
         int(args.run_phase2_conditional)
@@ -972,6 +991,46 @@ def main() -> int:
             )
         )
 
+    if int(args.run_candidate_promotion) and int(args.run_phase2_conditional):
+        stages.append(
+            (
+                "promote_candidates",
+                PROJECT_ROOT / "pipelines" / "research" / "promote_candidates.py",
+                [
+                    "--run_id",
+                    run_id,
+                    "--max_q_value",
+                    str(float(args.candidate_promotion_max_q_value)),
+                    "--min_events",
+                    str(int(args.candidate_promotion_min_events)),
+                    "--min_stability_score",
+                    str(float(args.candidate_promotion_min_stability_score)),
+                    "--min_sign_consistency",
+                    str(float(args.candidate_promotion_min_sign_consistency)),
+                    "--min_cost_survival_ratio",
+                    str(float(args.candidate_promotion_min_cost_survival_ratio)),
+                    "--max_negative_control_pass_rate",
+                    str(float(args.candidate_promotion_max_negative_control_pass_rate)),
+                    "--require_hypothesis_audit",
+                    str(int(args.candidate_promotion_require_hypothesis_audit)),
+                    "--allow_missing_negative_controls",
+                    str(int(args.candidate_promotion_allow_missing_negative_controls)),
+                ],
+            )
+        )
+
+    if int(args.run_edge_registry_update) and int(args.run_candidate_promotion) and int(args.run_phase2_conditional):
+        stages.append(
+            (
+                "update_edge_registry",
+                PROJECT_ROOT / "pipelines" / "research" / "update_edge_registry.py",
+                [
+                    "--run_id",
+                    run_id,
+                ],
+            )
+        )
+
     if int(args.run_edge_candidate_universe):
         stages.append(
             (
@@ -1034,6 +1093,7 @@ def main() -> int:
         )
 
     if int(args.run_strategy_blueprint_compiler):
+        promoted_candidates_path = DATA_ROOT / "reports" / "promotions" / run_id / "promoted_candidates.parquet"
         stages.append(
             (
                 "compile_strategy_blueprints",
@@ -1055,6 +1115,8 @@ def main() -> int:
                     str(int(args.strategy_blueprint_allow_naive_entry_fail)),
                     "--min_events_floor",
                     str(int(args.strategy_blueprint_min_events_floor)),
+                    "--candidates_file",
+                    str(promoted_candidates_path),
                 ],
             )
         )

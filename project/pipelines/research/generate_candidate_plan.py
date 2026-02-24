@@ -470,8 +470,24 @@ def main() -> int:
                             int(args.min_events_per_state),
                             state_min_events,
                         )
+                    rule_templates_for_state = [
+                        str(rule).strip() for rule in row["rule_templates"] if str(rule).strip()
+                    ]
+                    allowed_templates = {
+                        str(t).strip() for t in state_row.get("allowed_templates", []) if str(t).strip()
+                    }
+                    if state_id and allowed_templates:
+                        filtered_rules = [rule for rule in rule_templates_for_state if rule in allowed_templates]
+                        if not filtered_rules:
+                            if state_expansion_strict:
+                                raise ValueError(
+                                    f"State {state_id} for {canonical_event_type} has no compatible templates. "
+                                    f"Candidate templates={rule_templates_for_state}, allowed={sorted(allowed_templates)}"
+                                )
+                            continue
+                        rule_templates_for_state = filtered_rules
 
-                    for rule in row['rule_templates']:
+                    for rule in rule_templates_for_state:
                         for horizon in row['horizons'][:MAX_HORIZONS_PER_TEMPLATE]:
                         # conditioning variants
                             cond_config = row['conditioning']

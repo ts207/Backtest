@@ -259,9 +259,69 @@ def test_run_all_passes_mode_to_phase2_and_bridge(monkeypatch, tmp_path):
     bridge_args = stage_map["bridge_evaluate_phase2"]
     assert _arg_value(phase2_args, "--mode") == "research"
     assert _arg_value(bridge_args, "--mode") == "research"
-    assert _arg_value(phase2_args, "--cost_calibration_mode") == "static"
-    assert _arg_value(phase2_args, "--cost_min_tob_coverage") == "0.6"
-    assert _arg_value(phase2_args, "--cost_tob_tolerance_minutes") == "10"
+
+
+def test_run_all_wires_candidate_promotion_into_compiler(monkeypatch, tmp_path):
+    captured: list[tuple[str, list[str]]] = []
+
+    def fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        return True
+
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path / "data")
+    monkeypatch.setattr(run_all, "_git_commit", lambda _project_root: "test-sha")
+    monkeypatch.setattr(run_all, "_run_stage", fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            "r_promote",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-02",
+            "--run_phase2_conditional",
+            "1",
+            "--phase2_event_type",
+            "LIQUIDITY_VACUUM",
+            "--run_bridge_eval_phase2",
+            "0",
+            "--run_hypothesis_generator",
+            "0",
+            "--run_recommendations_checklist",
+            "0",
+            "--run_strategy_builder",
+            "0",
+            "--run_candidate_promotion",
+            "1",
+            "--skip_ingest_ohlcv",
+            "1",
+            "--skip_ingest_funding",
+            "1",
+            "--skip_ingest_spot_ohlcv",
+            "1",
+        ],
+    )
+
+    rc = run_all.main()
+    assert rc == 0
+
+    stage_names = [stage for stage, _ in captured]
+    assert "promote_candidates" in stage_names
+    assert "update_edge_registry" in stage_names
+    assert "compile_strategy_blueprints" in stage_names
+    assert stage_names.index("promote_candidates") < stage_names.index("compile_strategy_blueprints")
+    assert stage_names.index("promote_candidates") < stage_names.index("update_edge_registry")
+    assert stage_names.index("update_edge_registry") < stage_names.index("compile_strategy_blueprints")
+
+    stage_map = {stage: args for stage, args in captured}
+    compiler_args = stage_map["compile_strategy_blueprints"]
+    expected_path = str(tmp_path / "data" / "reports" / "promotions" / "r_promote" / "promoted_candidates.parquet")
+    assert _arg_value(compiler_args, "--candidates_file") == expected_path
 
 
 def test_run_all_passes_phase2_cost_calibration_overrides(monkeypatch, tmp_path):

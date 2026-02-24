@@ -5,7 +5,7 @@ def test_taxonomy_mapping_canonical_events():
     templates = _get_templates_for_event("LIQUIDITY_VACUUM")
     assert "mean_reversion" in templates
     assert "continuation" in templates
-    assert "liquidity_reversion_v2" in templates
+    assert "stop_run_repair" in templates
 
     templates = _get_templates_for_event("VOL_SHOCK")
     assert "continuation" in templates

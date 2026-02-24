@@ -287,6 +287,7 @@ def normalize_state_registry_records(state_registry: Dict[str, Any]) -> List[Dic
         if state_scope not in {"source_only", "family_safe", "global"}:
             state_scope = "source_only"
         min_events = int(raw.get("min_events", default_min_events) or default_min_events)
+        allowed_templates = parse_list_field(raw.get("allowed_templates", []))
         out.append(
             {
                 "state_id": state_id,
@@ -297,6 +298,7 @@ def normalize_state_registry_records(state_registry: Dict[str, Any]) -> List[Dic
                 "activation_rule": str(raw.get("activation_rule", "")).strip(),
                 "decay_rule": str(raw.get("decay_rule", "")).strip(),
                 "max_duration": raw.get("max_duration"),
+                "allowed_templates": [str(x).strip() for x in allowed_templates if str(x).strip()],
             }
         )
     return out
