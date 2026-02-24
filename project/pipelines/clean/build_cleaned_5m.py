@@ -36,6 +36,9 @@ from pipelines._lib.sanity import (
 from pipelines._lib.validation import validate_columns
 from schemas.data_contracts import Cleaned5mBarsSchema
 
+FUNDING_EVENT_HOURS = 8
+FUNDING_MAX_STALENESS = pd.Timedelta(hours=FUNDING_EVENT_HOURS)
+
 
 def _month_start(ts: datetime) -> datetime:
     return ts.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -62,6 +65,31 @@ def _gap_lengths(is_gap: pd.Series) -> pd.Series:
     return lengths.where(is_gap, 0).astype(int)
 
 
+def _parse_optional_utc(ts_raw: str | None) -> pd.Timestamp | None:
+    raw = str(ts_raw or "").strip()
+    if not raw:
+        return None
+    ts = pd.Timestamp(raw)
+    if ts.tzinfo is None:
+        return ts.tz_localize(timezone.utc)
+    return ts.tz_convert(timezone.utc)
+
+
+def _resolve_requested_window(start_raw: str | None, end_raw: str | None) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+    start_ts = _parse_optional_utc(start_raw)
+    end_ts = _parse_optional_utc(end_raw)
+    end_exclusive: pd.Timestamp | None = None
+    if end_ts is not None:
+        end_text = str(end_raw or "").strip()
+        if len(end_text) == 10 and "T" not in end_text:
+            end_exclusive = end_ts + timedelta(days=1)
+        else:
+            end_exclusive = end_ts
+    if start_ts is not None and end_exclusive is not None and end_exclusive <= start_ts:
+        raise ValueError("--end must be after --start")
+    return start_ts, end_exclusive
+
+
 def _align_funding(bars: pd.DataFrame, funding: pd.DataFrame) -> Tuple[pd.DataFrame, float]:
     if funding.empty:
         aligned = bars[["timestamp"]].copy()
@@ -70,7 +98,14 @@ def _align_funding(bars: pd.DataFrame, funding: pd.DataFrame) -> Tuple[pd.DataFr
         aligned["funding_missing"] = True
         return aligned, 1.0
 
-    funding_sorted = funding.sort_values("timestamp").copy()
+    funding_sorted = funding.copy()
+    funding_sorted["timestamp"] = pd.to_datetime(funding_sorted["timestamp"], utc=True, errors="coerce")
+    funding_sorted = funding_sorted.dropna(subset=["timestamp"]).sort_values("timestamp").drop_duplicates(
+        subset=["timestamp"], keep="last"
+    )
+    assert_monotonic_utc_timestamp(funding_sorted, "timestamp")
+    assert_funding_sane(funding_sorted, "funding_rate_scaled")
+    assert_funding_event_grid(funding_sorted, "timestamp", expected_hours=FUNDING_EVENT_HOURS)
     funding_sorted = funding_sorted.rename(columns={"timestamp": "funding_event_ts"})
     merged = pd.merge_asof(
         bars.sort_values("timestamp"),
@@ -78,10 +113,10 @@ def _align_funding(bars: pd.DataFrame, funding: pd.DataFrame) -> Tuple[pd.DataFr
         left_on="timestamp",
         right_on="funding_event_ts",
         direction="backward",
+        tolerance=FUNDING_MAX_STALENESS,
     )
     if "funding_rate_scaled" in merged.columns:
-        interval_hours = 8
-        bars_per_event = int((interval_hours * 60) / 5)
+        bars_per_event = int((FUNDING_EVENT_HOURS * 60) / 5)
         merged["funding_rate_event_scaled"] = merged["funding_rate_scaled"]
         merged["funding_rate_scaled"] = merged["funding_rate_scaled"] / bars_per_event
     
@@ -102,6 +137,7 @@ def main() -> int:
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
+    requested_start, requested_end_exclusive = _resolve_requested_window(args.start, args.end)
 
     run_id = args.run_id
     symbols = [s.strip().upper() for s in str(args.symbols).split(",") if s.strip()]
@@ -145,6 +181,18 @@ def main() -> int:
 
             raw["timestamp"] = pd.to_datetime(raw["timestamp"], utc=True)
             raw = raw.sort_values("timestamp").drop_duplicates(subset=["timestamp"]).reset_index(drop=True)
+            if requested_start is not None:
+                raw = raw[raw["timestamp"] >= requested_start].copy()
+            if requested_end_exclusive is not None:
+                raw = raw[raw["timestamp"] < requested_end_exclusive].copy()
+            if raw.empty:
+                logging.warning(
+                    "No raw OHLCV 5m data for %s in requested window start=%s end=%s",
+                    symbol,
+                    requested_start,
+                    requested_end_exclusive,
+                )
+                continue
             inputs.append(
                 {
                     "path": str(raw_dir),
@@ -188,6 +236,13 @@ def main() -> int:
 
             if market == "perp" and not funding.empty:
                 funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
+                funding = funding.dropna(subset=["timestamp"]).sort_values("timestamp").drop_duplicates(
+                    subset=["timestamp"], keep="last"
+                )
+                funding_window_start = start_ts - FUNDING_MAX_STALENESS
+                funding = funding[funding["timestamp"] >= funding_window_start].copy()
+                if requested_end_exclusive is not None:
+                    funding = funding[funding["timestamp"] < requested_end_exclusive].copy()
                 inputs.append(
                     {
                         "path": str(funding_dir),
@@ -231,10 +286,9 @@ def main() -> int:
                     on="timestamp",
                     how="left",
                 )
-                bars["funding_rate_scaled"] = bars["funding_rate_scaled"].fillna(0.0) # Fill NaN after merge
-                bars["funding_missing"] = bars["funding_missing"].fillna(True) # Fill NaN after merge
+                bars["funding_missing"] = bars["funding_missing"].fillna(True).astype(bool)
             else:
-                bars["funding_rate_scaled"] = 0.0
+                bars["funding_rate_scaled"] = np.nan
                 bars["funding_missing"] = True
 
             cleaned_dir = DATA_ROOT / "lake" / "cleaned" / market / symbol / "bars_5m"
@@ -283,6 +337,11 @@ def main() -> int:
                 "end": end_ts.isoformat(),
                 "rows": int(len(bars)),
                 "funding_scale_mode": str(args.funding_scale),
+                "requested_start": requested_start.isoformat() if requested_start is not None else None,
+                "requested_end_exclusive": (
+                    requested_end_exclusive.isoformat() if requested_end_exclusive is not None else None
+                ),
+                "funding_missing_pct": float(pd.to_numeric(bars["funding_missing"], errors="coerce").mean()),
             }
 
         validate_input_provenance(inputs)

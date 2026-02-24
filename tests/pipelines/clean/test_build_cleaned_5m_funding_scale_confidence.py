@@ -15,7 +15,7 @@ from pipelines._lib import sanity
 def test_infer_funding_scale_reports_low_confidence_for_ambiguous_data():
     frame = pd.DataFrame(
         {
-            "timestamp": pd.to_datetime(["2026-01-01T00:00:00Z", "2026-01-01T01:00:00Z"], utc=True),
+            "timestamp": pd.to_datetime(["2026-01-01T00:00:00Z", "2026-01-01T08:00:00Z"], utc=True),
             "funding_rate": [0.0001, 0.0002],
             "source": ["unknown", "unknown"],
         }
@@ -28,7 +28,7 @@ def test_infer_funding_scale_reports_low_confidence_for_ambiguous_data():
 def test_infer_funding_scale_explicit_override_is_high_confidence():
     frame = pd.DataFrame(
         {
-            "timestamp": pd.to_datetime(["2026-01-01T00:00:00Z", "2026-01-01T01:00:00Z"], utc=True),
+            "timestamp": pd.to_datetime(["2026-01-01T00:00:00Z", "2026-01-01T08:00:00Z"], utc=True),
             "funding_rate": [0.0001, 0.0002],
             "source": ["unknown", "unknown"],
         }
@@ -59,7 +59,7 @@ def _raw_frame() -> pd.DataFrame:
 def _ambiguous_funding_frame() -> pd.DataFrame:
     return pd.DataFrame(
         {
-            "timestamp": pd.to_datetime(["2026-01-01T00:00:00Z", "2026-01-01T01:00:00Z"], utc=True),
+            "timestamp": pd.to_datetime(["2026-01-01T00:00:00Z", "2026-01-01T08:00:00Z"], utc=True),
             "funding_rate": [0.0001, 0.0002],
             "source": ["unknown", "unknown"],
         }

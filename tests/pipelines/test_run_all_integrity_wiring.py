@@ -133,6 +133,7 @@ def test_run_all_progress_logs_elapsed_and_eta(monkeypatch, tmp_path, capsys):
 def test_run_all_declared_subtype_families_are_not_noop():
     expected_scripts = {
         "funding_extreme_onset": "analyze_funding_episode_events.py",
+        "funding_acceleration": "analyze_funding_episode_events.py",
         "funding_persistence_window": "analyze_funding_episode_events.py",
         "funding_normalization": "analyze_funding_episode_events.py",
         "oi_spike_positive": "analyze_oi_shock_events.py",

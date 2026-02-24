@@ -30,6 +30,7 @@ PHASE2_EVENT_CHAIN = [
     ("range_compression_breakout_window", "analyze_range_compression_breakout_window.py", []),
     ("funding_episodes", "analyze_funding_episode_events.py", []),
     ("funding_extreme_onset", "analyze_funding_episode_events.py", []),
+    ("funding_acceleration", "analyze_funding_episode_events.py", []),
     ("funding_persistence_window", "analyze_funding_episode_events.py", []),
     ("funding_normalization", "analyze_funding_episode_events.py", []),
     ("oi_shocks", "analyze_oi_shock_events.py", []),
@@ -312,7 +313,7 @@ def _run_research_chain(
         else:
             logging.warning("Missing hypothesis generator script (skipping): %s", hypothesis_script)
 
-    phase2_script_path = PROJECT_ROOT / "pipelines" / "research" / "phase2_conditional_hypotheses.py"
+    phase2_script_path = PROJECT_ROOT / "pipelines" / "research" / "phase2_candidate_discovery.py"
     registry_script_path = PROJECT_ROOT / "pipelines" / "research" / "build_event_registry.py"
     bridge_script_path = PROJECT_ROOT / "pipelines" / "research" / "bridge_evaluate_phase2.py"
     for event_type, script, extra_args in PHASE2_EVENT_CHAIN:
@@ -360,6 +361,8 @@ def _run_research_chain(
             event_type,
             "--symbols",
             symbols,
+            "--mode",
+            "research",
         ]
         phase2_result = subprocess.run(phase2_cmd)
         if phase2_result.returncode != 0:

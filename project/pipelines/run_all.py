@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import List, Tuple
-from omegaconf import OmegaConf
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -33,6 +32,7 @@ PHASE2_EVENT_CHAIN: List[Tuple[str, str, List[str]]] = [
     ("range_compression_breakout_window", "analyze_range_compression_breakout_window.py", []),
     ("funding_episodes", "analyze_funding_episode_events.py", []),
     ("funding_extreme_onset", "analyze_funding_episode_events.py", []),
+    ("funding_acceleration", "analyze_funding_episode_events.py", []),
     ("funding_persistence_window", "analyze_funding_episode_events.py", []),
     ("funding_normalization", "analyze_funding_episode_events.py", []),
     ("oi_shocks", "analyze_oi_shock_events.py", []),
@@ -160,6 +160,12 @@ def _validate_phase2_event_chain() -> List[str]:
         script_path = research_root / script
         if not script_path.exists():
             issues.append(f"Missing phase2 analyzer script for {event}: {script_path}")
+    missing_registry_events = sorted(set(EVENT_REGISTRY_SPECS.keys()) - seen)
+    if missing_registry_events:
+        issues.append(
+            "PHASE2_EVENT_CHAIN is missing registry-declared event families: "
+            + ", ".join(missing_registry_events)
+        )
     return issues
 
 
@@ -405,19 +411,6 @@ def main() -> int:
     parser.add_argument("--mode", choices=["research", "production", "certification"], default="research")
 
     args = parser.parse_args()
-
-    # Create OmegaConf from CLI arguments to support future transition
-    base_cfg = OmegaConf.load(PROJECT_ROOT.parent / "conf" / "config.yaml") if (PROJECT_ROOT.parent / "conf" / "config.yaml").exists() else OmegaConf.create()
-    cli_cfg = OmegaConf.create(vars(args))
-    cfg = OmegaConf.merge(base_cfg, cli_cfg)
-    
-    # Map back to 'args' namespace for compatibility during transition
-    class ArgsWrapper:
-        def __init__(self, d):
-            for k, v in d.items():
-                setattr(self, k, v)
-    
-    args = ArgsWrapper(OmegaConf.to_container(cfg, resolve=True))
 
 
     chain_issues = _validate_phase2_event_chain()

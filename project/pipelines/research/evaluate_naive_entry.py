@@ -7,7 +7,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
@@ -19,31 +19,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.timeframe_constants import BARS_PER_YEAR_BY_TIMEFRAME
+from events.registry import EVENT_REGISTRY_SPECS, filter_phase1_rows_for_event_type
 
 BARS_PER_YEAR_5M = BARS_PER_YEAR_BY_TIMEFRAME["5m"]
 NUMERIC_CONDITION_PATTERN = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(>=|<=|==|>|<)\s*(-?\d+(?:\.\d+)?)\s*$")
-
-PHASE1_EVENT_FILES: Dict[str, Tuple[str, str]] = {
-    "vol_shock_relaxation": ("vol_shock_relaxation", "vol_shock_relaxation_events.csv"),
-    "liquidity_refill_lag_window": ("liquidity_refill_lag_window", "liquidity_refill_lag_window_events.csv"),
-    "liquidity_absence_window": ("liquidity_absence_window", "liquidity_absence_window_events.csv"),
-    "vol_aftershock_window": ("vol_aftershock_window", "vol_aftershock_window_events.csv"),
-    "directional_exhaustion_after_forced_flow": (
-        "directional_exhaustion_after_forced_flow",
-        "directional_exhaustion_after_forced_flow_events.csv",
-    ),
-    "cross_venue_desync": ("cross_venue_desync", "cross_venue_desync_events.csv"),
-    "liquidity_vacuum": ("liquidity_vacuum", "liquidity_vacuum_events.csv"),
-    "funding_extreme_reversal_window": ("funding_extreme_reversal_window", "funding_extreme_reversal_window_events.csv"),
-    "range_compression_breakout_window": ("range_compression_breakout_window", "range_compression_breakout_window_events.csv"),
-    "funding_extreme_onset": ("funding_events", "funding_episode_events.csv"),
-    "funding_persistence_window": ("funding_events", "funding_episode_events.csv"),
-    "funding_normalization": ("funding_events", "funding_episode_events.csv"),
-    "oi_spike_positive": ("oi_shocks", "oi_shock_events.csv"),
-    "oi_spike_negative": ("oi_shocks", "oi_shock_events.csv"),
-    "oi_flush": ("oi_shocks", "oi_shock_events.csv"),
-    "LIQUIDATION_CASCADE": ("liquidation_cascade", "liquidation_cascade_events.csv"),
-}
 
 MOMENTUM_EVENT_TYPES = {
     "range_compression_breakout_window",
@@ -186,13 +165,21 @@ def _max_drawdown(returns: pd.Series) -> float:
 
 
 def _load_phase1_events(run_id: str, event_type: str) -> pd.DataFrame:
-    report_dir, file_name = PHASE1_EVENT_FILES.get(event_type, (event_type, f"{event_type}_events.csv"))
+    spec = EVENT_REGISTRY_SPECS.get(str(event_type))
+    report_dir = spec.reports_dir if spec is not None else str(event_type)
+    file_name = spec.events_file if spec is not None else f"{event_type}_events.csv"
     path = DATA_ROOT / "reports" / report_dir / run_id / file_name
     if not path.exists():
         raise FileNotFoundError(f"Missing Phase-1 events file for event_type={event_type}: {path}")
     events = pd.read_csv(path)
     if events.empty:
         raise ValueError(f"Phase-1 events file is empty for event_type={event_type}: {path}")
+    if spec is not None:
+        events = filter_phase1_rows_for_event_type(events, spec.event_type)
+        if events.empty:
+            raise ValueError(
+                f"Phase-1 events file has no rows matching event_type={event_type} after subtype filter: {path}"
+            )
     return events
 
 

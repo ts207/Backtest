@@ -1,9 +1,16 @@
 
+import sys
+from pathlib import Path
+from datetime import timezone
+
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta, timezone
 import pytest
-from pipelines.clean.build_cleaned_5m import _align_funding, _gap_lengths
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3] / "project"
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from pipelines.clean.build_cleaned_5m import _align_funding, _gap_lengths, FUNDING_MAX_STALENESS
 
 def test_gap_lengths():
     is_gap = pd.Series([False, True, True, False, True, False])
@@ -44,22 +51,38 @@ def test_align_funding_missing():
     assert np.isnan(aligned["funding_rate_scaled"].iloc[0])
 
 def test_full_index_generation_residue():
-    # This test demonstrates the 15m residue issue
+    # 5m bar builder should use a 5m exclusive end residue.
     start_ts = pd.Timestamp("2026-01-01 00:00:00", tz=timezone.utc)
     end_ts = pd.Timestamp("2026-01-01 23:55:00", tz=timezone.utc)
-    
-    # Current logic:
-    end_exclusive = end_ts + timedelta(minutes=15) # 00:10
-    full_index = pd.date_range(start=start_ts, end=end_exclusive - timedelta(minutes=15), freq="5min", tz=timezone.utc)
-    
+
+    end_exclusive = end_ts + pd.Timedelta(minutes=5)
+    full_index = pd.date_range(start=start_ts, end=end_exclusive - pd.Timedelta(minutes=5), freq="5min", tz=timezone.utc)
+
     assert full_index[-1] == end_ts
-    assert len(full_index) == 288 # (24 * 60) / 5
-    
-    # If we had 5m residue logic:
-    end_exclusive_fixed = end_ts + timedelta(minutes=5)
-    full_index_fixed = pd.date_range(start=start_ts, end=end_exclusive_fixed - timedelta(minutes=5), freq="5min", tz=timezone.utc)
-    
-    assert full_index_fixed[-1] == end_ts
-    assert len(full_index_fixed) == 288
-    
-    # The residue doesn't break 288 bars case, but it's confusing and potentially wrong if end_ts is not aligned.
+    assert len(full_index) == 288  # (24 * 60) / 5
+
+
+def test_align_funding_marks_stale_rows_missing():
+    bars = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(
+                [
+                    "2026-01-02 08:05:00",
+                    "2026-01-02 08:10:00",
+                ],
+                utc=True,
+            )
+        }
+    )
+    funding = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(["2026-01-01 00:00:00"], utc=True),
+            "funding_rate_scaled": [0.0001],
+        }
+    )
+
+    aligned, missing_pct = _align_funding(bars, funding)
+    assert missing_pct == 1.0
+    assert aligned["funding_missing"].all()
+    assert aligned["funding_rate_scaled"].isna().all()
+    assert FUNDING_MAX_STALENESS == pd.Timedelta("8h")

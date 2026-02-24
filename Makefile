@@ -137,7 +137,7 @@ clean-repo:
 debloat: clean-repo
 
 check-hygiene:
-	$(ROOT_DIR)/project/scripts/check_repo_hygiene.sh
+	bash $(ROOT_DIR)/project/scripts/check_repo_hygiene.sh
 
 clean-hygiene:
 	find $(ROOT_DIR) -type f \

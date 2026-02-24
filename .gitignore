@@ -58,3 +58,7 @@ gha-creds-*.json
 /diag_out.txt
 /ingest_run.log
 /nohup.out
+/out.log
+/verify_hydra.py
+/artifacts/
+/outputs/
