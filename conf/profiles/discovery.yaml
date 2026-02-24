@@ -1,0 +1,12 @@
+# Discovery Profile
+mode: research
+atlas_mode: 0
+run_backtest: 0
+run_walkforward_eval: 0
+
+phase2:
+  run_conditional: 1
+
+builder:
+  run_strategy_builder: 1
+  allow_missing_candidate_detail: 1

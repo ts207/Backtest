@@ -1,0 +1,63 @@
+defaults:
+  - profiles: discovery
+  - _self_
+
+run_id: null
+symbols: null
+start: null
+end: null
+force: 0
+
+mode: research
+atlas_mode: 0
+run_backtest: 0
+run_walkforward_eval: 0
+run_make_report: 0
+
+ingest:
+  skip_ohlcv: 0
+  skip_funding: 0
+  skip_spot_ohlcv: 0
+  enable_cross_venue_spot_pipeline: 1
+  run_ingest_liquidation_snapshot: 0
+  run_ingest_open_interest_hist: 0
+  open_interest_period: "5m"
+
+funding:
+  allow_missing: 0
+  allow_constant: 0
+  allow_timestamp_rounding: 0
+
+phase2:
+  run_conditional: 0
+  event_type: "vol_shock_relaxation"
+  max_conditions: 20
+  max_actions: 9
+  min_regime_stable_splits: 2
+  require_phase1_pass: 1
+  min_ess: 150.0
+  ess_max_lag: 24
+  multiplicity_k: 1.0
+  parameter_curvature_max_penalty: 0.50
+  delay_grid_bars: "0,4,8,16,30"
+  min_delay_positive_ratio: 0.60
+  min_delay_robustness_score: 0.60
+  shift_labels_k: 0
+
+bridge:
+  run_eval_phase2: 1
+  edge_cost_k: 2.0
+  stressed_cost_multiplier: 1.5
+  min_validation_trades: 20
+  train_frac: 0.6
+  validation_frac: 0.2
+  embargo_days: 1
+
+builder:
+  run_strategy_builder: 1
+  top_k_per_event: 2
+  max_candidates: 20
+  include_alpha_bundle: 1
+  ignore_checklist: 0
+  allow_non_promoted: 0
+  allow_missing_candidate_detail: 0

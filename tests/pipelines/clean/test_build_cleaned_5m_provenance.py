@@ -15,6 +15,7 @@ def _raw_frame() -> pd.DataFrame:
     return pd.DataFrame(
         {
             "timestamp": pd.to_datetime(["2026-01-01T00:00:00Z", "2026-01-01T00:05:00Z"], utc=True),
+            "symbol": ["BTCUSDT", "BTCUSDT"],
             "open": [100.0, 101.0],
             "high": [101.0, 102.0],
             "low": [99.0, 100.0],

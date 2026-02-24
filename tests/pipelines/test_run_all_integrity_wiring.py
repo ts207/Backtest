@@ -206,6 +206,61 @@ def test_run_all_research_gate_profile_wiring(monkeypatch, tmp_path):
     assert _arg_value(checklist_args, "--gate_profile") == "discovery"
 
 
+def test_run_all_passes_mode_to_phase2_and_bridge(monkeypatch, tmp_path):
+    captured: list[tuple[str, list[str]]] = []
+
+    def fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        return True
+
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path / "data")
+    monkeypatch.setattr(run_all, "_git_commit", lambda _project_root: "test-sha")
+    monkeypatch.setattr(run_all, "_run_stage", fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-02",
+            "--run_phase2_conditional",
+            "1",
+            "--phase2_event_type",
+            "liquidity_vacuum",
+            "--run_bridge_eval_phase2",
+            "1",
+            "--run_strategy_blueprint_compiler",
+            "0",
+            "--run_strategy_builder",
+            "0",
+            "--run_recommendations_checklist",
+            "0",
+            "--run_hypothesis_generator",
+            "0",
+            "--skip_ingest_ohlcv",
+            "1",
+            "--skip_ingest_funding",
+            "1",
+            "--skip_ingest_spot_ohlcv",
+            "1",
+            "--mode",
+            "research",
+        ],
+    )
+
+    rc = run_all.main()
+    assert rc == 0
+    stage_map = {stage: args for stage, args in captured}
+    phase2_args = stage_map["phase2_conditional_hypotheses"]
+    bridge_args = stage_map["bridge_evaluate_phase2"]
+    assert _arg_value(phase2_args, "--mode") == "research"
+    assert _arg_value(bridge_args, "--mode") == "research"
+
+
 def test_run_all_production_gate_profile_wiring(monkeypatch, tmp_path):
     captured: list[tuple[str, list[str]]] = []
 

@@ -294,7 +294,7 @@ def _safe_float(value: object) -> float:
 def _build_match_fields(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     out["tod_slot"] = out["timestamp"].dt.hour * 4 + (out["timestamp"].dt.minute // 15)
-    out["vol_q"] = pd.qcut(out["rv_96"].astype(float), q=4, labels=["Q1", "Q2", "Q3", "Q4"], duplicates="drop")
+    out["vol_q"] = pd.qcut(out["rv_96"].astype(float), q=4, labels=False, duplicates="drop")
     return out
 
 

@@ -22,6 +22,7 @@ from events.registry import (
     write_event_registry_artifacts,
 )
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from schemas.data_contracts import EventRegistrySchema
 
 
 def _parse_symbols(symbols_csv: str) -> List[str]:
@@ -75,6 +76,11 @@ def main() -> int:
             run_id=args.run_id,
             timeframe=str(args.timeframe),
         )
+
+        events["enter_ts"] = events["enter_ts"].astype("int64") // 10**6
+        events["exit_ts"] = events["exit_ts"].astype("int64") // 10**6
+        EventRegistrySchema.validate(events)
+
         paths = write_event_registry_artifacts(
             data_root=DATA_ROOT,
             run_id=args.run_id,

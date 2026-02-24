@@ -428,6 +428,9 @@ def load_registry_events(
     symbols: Sequence[str] | None = None,
 ) -> pd.DataFrame:
     events = _read_registry_stem(data_root=data_root, run_id=run_id, stem="events")
+    if not events.empty:
+        events["enter_ts"] = pd.to_datetime(events["enter_ts"], unit="ms", utc=True, errors="coerce")
+        events["exit_ts"] = pd.to_datetime(events["exit_ts"], unit="ms", utc=True, errors="coerce")
     events = _normalize_registry_events_frame(events)
     if events.empty:
         return _empty_registry_events()

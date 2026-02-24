@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import List, Tuple
+from omegaconf import OmegaConf
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -404,6 +405,20 @@ def main() -> int:
     parser.add_argument("--mode", choices=["research", "production", "certification"], default="research")
 
     args = parser.parse_args()
+
+    # Create OmegaConf from CLI arguments to support future transition
+    base_cfg = OmegaConf.load(PROJECT_ROOT.parent / "conf" / "config.yaml") if (PROJECT_ROOT.parent / "conf" / "config.yaml").exists() else OmegaConf.create()
+    cli_cfg = OmegaConf.create(vars(args))
+    cfg = OmegaConf.merge(base_cfg, cli_cfg)
+    
+    # Map back to 'args' namespace for compatibility during transition
+    class ArgsWrapper:
+        def __init__(self, d):
+            for k, v in d.items():
+                setattr(self, k, v)
+    
+    args = ArgsWrapper(OmegaConf.to_container(cfg, resolve=True))
+
 
     chain_issues = _validate_phase2_event_chain()
     if chain_issues:
@@ -808,6 +823,8 @@ def main() -> int:
                 symbols,
                 "--shift_labels_k",
                 str(int(args.phase2_shift_labels_k)),
+                "--mode",
+                str(args.mode),
             ]
             if candidate_plan_path.exists():
                 phase2_args.extend(["--candidate_plan", str(candidate_plan_path)])
@@ -853,6 +870,8 @@ def main() -> int:
                             str(float(args.bridge_stressed_cost_multiplier)),
                             "--min_validation_trades",
                             str(int(args.bridge_min_validation_trades)),
+                            "--mode",
+                            str(args.mode),
                         ],
                     )
                 )
@@ -869,7 +888,7 @@ def main() -> int:
             )
         )
 
-    if int(args.run_naive_entry_eval):
+    if int(args.run_naive_entry_eval) and int(args.run_phase2_conditional):
         stages.append(
             (
                 "evaluate_naive_entry",

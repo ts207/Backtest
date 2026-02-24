@@ -65,7 +65,7 @@ discover-edges:
 		--run_strategy_builder 0 \
 		--run_recommendations_checklist 0 \
 		--strategy_blueprint_ignore_checklist 1 \
-		--strategy_blueprint_allow_fallback 1 \
+		--strategy_blueprint_allow_fallback 0 \
 		--run_ingest_liquidation_snapshot 0 \
 		--run_ingest_open_interest_hist 0
 

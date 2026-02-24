@@ -34,6 +34,7 @@ from pipelines._lib.sanity import (
     is_constant_series,
 )
 from pipelines._lib.validation import validate_columns
+from schemas.data_contracts import Cleaned5mBarsSchema
 
 
 def _month_start(ts: datetime) -> datetime:
@@ -175,6 +176,15 @@ def main() -> int:
             
             bars["is_gap"] = bars[gap_cols].isna().any(axis=1)
             bars["gap_len"] = _gap_lengths(bars["is_gap"])
+            bars["symbol"] = symbol
+            
+            # Forward fill prices for gaps
+            price_cols = ["open", "high", "low", "close"]
+            bars[price_cols] = bars[price_cols].ffill()
+            
+            # Zero fill volume for gaps
+            vol_cols = [c for c in gap_cols if c not in price_cols]
+            bars[vol_cols] = bars[vol_cols].fillna(0.0)
 
             if market == "perp" and not funding.empty:
                 funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
@@ -249,6 +259,9 @@ def main() -> int:
                     / f"month={month_start.month:02d}"
                     / f"bars_{symbol}_5m_{month_start.year}-{month_start.month:02d}.parquet"
                 )
+
+                # Enforce Runtime Data Contract
+                Cleaned5mBarsSchema.validate(bars_month)
 
                 logging.info("Writing cleaned data to out_path: %s", out_path)
                 ensure_dir(out_path.parent)

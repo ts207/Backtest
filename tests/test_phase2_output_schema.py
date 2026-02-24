@@ -29,7 +29,18 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1] / "project"
 DATA_ROOT = Path(__file__).resolve().parents[1] / "data"
 sys.path.insert(0, str(PROJECT_ROOT))
 
-_RULE_TEMPLATE_ENUM = {"mean_reversion", "continuation", "carry", "breakout"}
+_RULE_TEMPLATE_ENUM_BASE = {"mean_reversion", "continuation", "carry", "breakout"}
+try:
+    from pipelines.research._hypothesis_defaults import load_hypothesis_defaults
+
+    _spec_defaults = load_hypothesis_defaults(project_root=PROJECT_ROOT)
+    _RULE_TEMPLATE_ENUM = {
+        str(x).strip().lower()
+        for x in _spec_defaults.get("rule_templates", [])
+        if str(x).strip()
+    } | _RULE_TEMPLATE_ENUM_BASE
+except Exception:
+    _RULE_TEMPLATE_ENUM = set(_RULE_TEMPLATE_ENUM_BASE)
 _CONDITION_SOURCE_ENUM = {"runtime", "bucket_non_runtime", "unconditional", "permissive_fallback", "blocked"}
 
 # ── Helpers ────────────────────────────────────────────────────────────────

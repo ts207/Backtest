@@ -1,4 +1,35 @@
 families:
+  # --- Focused signal families (mean_reversion only at 60m to minimize BH FDR inflated pool) ---
+  funding_normalization:
+    templates:
+      - mean_reversion
+    horizons:
+      - 60m
+    max_candidates_per_run: 500
+  funding_extreme_reversal_window:
+    templates:
+      - mean_reversion
+    horizons:
+      - 60m
+    max_candidates_per_run: 500
+  directional_exhaustion_after_forced_flow:
+    templates:
+      - mean_reversion
+    horizons:
+      - 60m
+    max_candidates_per_run: 500
+  vol_shock_relaxation:
+    templates:
+      - mean_reversion
+    horizons:
+      - 60m
+    max_candidates_per_run: 500
+  vol_aftershock_window:
+    templates:
+      - mean_reversion
+    horizons:
+      - 60m
+    max_candidates_per_run: 500
   liquidity_vacuum:
     templates:
       - mean_reversion

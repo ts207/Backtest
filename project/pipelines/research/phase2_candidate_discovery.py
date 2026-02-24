@@ -95,8 +95,18 @@ def _resolved_sample_size(joined_event_count: int, symbol_event_count: int) -> i
     return max(0, min(joined, symbol_total if symbol_total > 0 else joined))
 
 
-def _apply_multiplicity_controls(raw_df: pd.DataFrame, max_q: float) -> pd.DataFrame:
-    """Apply BH correction per-family, then a global BH over family-adjusted q-values."""
+def _apply_multiplicity_controls(
+    raw_df: pd.DataFrame,
+    max_q: float,
+    *,
+    mode: str = "production",
+    min_sample_size: int = 0,
+) -> pd.DataFrame:
+    """Apply BH correction per-family, then a global BH over family-adjusted q-values.
+
+    In research mode, rows with sample_size below min_sample_size are retained for
+    diagnostics but excluded from the multiplicity pool.
+    """
     if raw_df.empty:
         out = raw_df.copy()
         out["q_value_family"] = pd.Series(dtype=float)
@@ -105,16 +115,34 @@ def _apply_multiplicity_controls(raw_df: pd.DataFrame, max_q: float) -> pd.DataF
         out["is_discovery"] = pd.Series(dtype=bool)
         return out
 
+    out = raw_df.copy()
+    out["q_value_family"] = 1.0
+    out["is_discovery_family"] = False
+    out["q_value"] = 1.0
+    out["is_discovery"] = False
+
+    eligible_mask = pd.Series(True, index=out.index)
+    if str(mode) == "research" and int(min_sample_size) > 0 and "sample_size" in out.columns:
+        sample = pd.to_numeric(out["sample_size"], errors="coerce").fillna(0.0)
+        eligible_mask = sample >= float(int(min_sample_size))
+
+    eligible = out[eligible_mask].copy()
+    if eligible.empty:
+        return out
+
     family_frames: List[pd.DataFrame] = []
-    for _, family_df in raw_df.groupby("family_id"):
+    for _, family_df in eligible.groupby("family_id"):
         fam = family_df.copy()
         fam["q_value_family"] = _bh_adjust(fam["p_value"])
         fam["is_discovery_family"] = fam["q_value_family"] <= float(max_q)
         family_frames.append(fam)
 
-    out = pd.concat(family_frames, ignore_index=True)
-    out["q_value"] = _bh_adjust(out["q_value_family"])
-    out["is_discovery"] = out["q_value"] <= float(max_q)
+    eligible_scored = pd.concat(family_frames, axis=0)
+    eligible_scored["q_value"] = _bh_adjust(eligible_scored["q_value_family"])
+    eligible_scored["is_discovery"] = eligible_scored["q_value"] <= float(max_q)
+
+    for col in ("q_value_family", "is_discovery_family", "q_value", "is_discovery"):
+        out.loc[eligible_scored.index, col] = eligible_scored[col]
     return out
 
 
@@ -414,6 +442,12 @@ def _make_parser() -> argparse.ArgumentParser:
                         help="If > 0, shift labels by k bars (true misalignment canary).")
     parser.add_argument("--entry_lag_bars", type=int, default=1,
                         help="Entry lag in bars after event timestamp. Must be >= 1 (default: 1).")
+    parser.add_argument(
+        "--mode",
+        choices=["research", "production", "certification"],
+        default="production",
+        help="Run mode. Research mode enables diagnostics-first candidate handling.",
+    )
     parser.add_argument("--candidate_plan", default=None,
                         help="Path to Atlas candidate plan (jsonl). If provided, drives discovery.")
     parser.add_argument("--atlas_mode", type=int, default=0,
@@ -445,6 +479,7 @@ def main():
 
     max_q = gates.get("max_q_value", 0.05)
     min_after_cost = gates.get("min_after_cost_expectancy_bps", 0.1) / 10000.0  # bps → decimal
+    min_sample_size_gate = int(gates.get("min_sample_size", 0) or 0)
     quality_floor_fallback = float(gates.get("quality_floor_fallback", 0.66))
     min_events_fallback = int(gates.get("min_events_fallback", 100))
 
@@ -616,7 +651,12 @@ def main():
             if not econ_pass: fail_reasons.append("ECONOMIC_GATE")
             if not econ_pass_conservative: fail_reasons.append("ECONOMIC_CONSERVATIVE")
             if not stability_pass: fail_reasons.append("STABILITY_GATE")
-            gate_phase2_final = econ_pass_conservative and stability_pass
+            sample_size = _resolved_sample_size(n_joined, len(sym_events))
+            sample_gate_pass = int(sample_size) >= int(min_sample_size_gate) if int(min_sample_size_gate) > 0 else True
+            if not sample_gate_pass:
+                fail_reasons.append("MIN_SAMPLE_SIZE_GATE")
+            gate_phase2_research = econ_pass_conservative and stability_pass and sample_gate_pass
+            gate_phase2_final = gate_phase2_research
 
             # Compute condition routing before building result
             _cond_str, _cond_source = _condition_routing(cond_label)
@@ -648,6 +688,7 @@ def main():
                 "gate_economic": econ_pass,
                 "gate_economic_conservative": econ_pass_conservative,
                 "gate_stability": stability_pass,
+                "gate_phase2_research": gate_phase2_research,
                 "gate_phase2_final": gate_phase2_final,
                 "robustness_score": _p2_quality_score,
                 # Explicit semantic columns — do not conflate these
@@ -677,6 +718,9 @@ def main():
 
         for symbol in symbols:
             sym_all_events = events_df[events_df["symbol"] == symbol] if "symbol" in events_df.columns else events_df
+            if sym_all_events.empty:
+                log.info("No events available for %s/%s; skipping candidate expansion for this symbol.", args.event_type, symbol)
+                continue
             features_df = _load_features(args.run_id, symbol)
 
             if features_df.empty:
@@ -711,9 +755,14 @@ def main():
                             f_reasons.append("ECONOMIC_CONSERVATIVE")
                         if not stab:
                             f_reasons.append("STABILITY_GATE")
+                        resolved_sample_size = _resolved_sample_size(n, len(sym_all_events))
+                        sample_gate_pass = int(resolved_sample_size) >= int(min_sample_size_gate) if int(min_sample_size_gate) > 0 else True
+                        if not sample_gate_pass:
+                            f_reasons.append("MIN_SAMPLE_SIZE_GATE")
 
                         # Composite Phase 2 gate (economic + stability).
-                        g_phase2_final = ec_pass_conservative and stab
+                        g_phase2_research = ec_pass_conservative and stab and sample_gate_pass
+                        g_phase2_final = g_phase2_research
 
                         # Condition routing
                         _cond_str, _cond_source = _condition_routing(cond_name)
@@ -745,6 +794,7 @@ def main():
                             "gate_economic": ec_pass,
                             "gate_economic_conservative": ec_pass_conservative,
                             "gate_stability": stab,
+                            "gate_phase2_research": g_phase2_research,
                             "gate_phase2_final": g_phase2_final,
                             "robustness_score": _p2_qs,
                             # Explicit semantic columns
@@ -806,13 +856,24 @@ def main():
     raw_df = pd.DataFrame(results)
 
     # 4. Multiplicity Control: family BH + global BH over family-adjusted q-values.
-    fdr_df = _apply_multiplicity_controls(raw_df=raw_df, max_q=max_q)
+    fdr_df = _apply_multiplicity_controls(
+        raw_df=raw_df,
+        max_q=max_q,
+        mode=str(args.mode),
+        min_sample_size=min_sample_size_gate,
+    )
 
     # After multiplicity control: refresh promotion_track and
     # compile_eligible_phase2_fallback from final discovery status.
 
     # Invariant: Phase 2 Final Pass REQUIRES discovery (multiplicity pass)
-    fdr_df["gate_phase2_final"] = fdr_df["gate_phase2_final"] & fdr_df["is_discovery"]
+    if str(args.mode) == "research":
+        if "gate_phase2_research" not in fdr_df.columns:
+            fdr_df["gate_phase2_research"] = fdr_df["gate_phase2_final"].astype(bool)
+        fdr_df["gate_phase2_final"] = fdr_df["gate_phase2_research"].astype(bool) & fdr_df["is_discovery"].astype(bool)
+    else:
+        # Preserve current strict behavior for production/certification.
+        fdr_df["gate_phase2_final"] = fdr_df["gate_phase2_final"] & fdr_df["is_discovery"]
 
     # Refresh promotion_track: standard only if gate_phase2_final, else fallback_only
     fdr_df["promotion_track"] = np.where(fdr_df["gate_phase2_final"], "standard", "fallback_only")

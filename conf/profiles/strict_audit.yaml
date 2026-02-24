@@ -1,0 +1,13 @@
+# Strict Audit Profile
+mode: certification
+atlas_mode: 0
+run_backtest: 1
+run_walkforward_eval: 1
+
+phase2:
+  run_conditional: 1
+
+builder:
+  run_strategy_builder: 1
+  ignore_checklist: 0
+  allow_non_promoted: 0

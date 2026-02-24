@@ -298,8 +298,29 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--edge_cost_k", type=float, default=2.0)
     parser.add_argument("--stressed_cost_multiplier", type=float, default=1.5)
     parser.add_argument("--min_validation_trades", type=int, default=20)
+    parser.add_argument(
+        "--mode",
+        choices=["research", "production", "certification"],
+        default="production",
+        help="Run mode. Research mode evaluates pre-discovery research survivors.",
+    )
     parser.add_argument("--out_dir", default="")
     return parser.parse_args()
+
+
+def _select_bridge_candidates(full_candidates: pd.DataFrame, mode: str) -> pd.DataFrame:
+    if full_candidates.empty:
+        return pd.DataFrame()
+    if str(mode) == "research":
+        if "gate_phase2_research" in full_candidates.columns:
+            return full_candidates[full_candidates["gate_phase2_research"].map(_as_bool)].copy()
+        # Backward-compatible fallback for older artifacts.
+        return full_candidates[
+            full_candidates["gate_phase2_final"].map(_as_bool) & full_candidates["is_discovery"].map(_as_bool)
+        ].copy()
+    return full_candidates[
+        full_candidates["gate_phase2_final"].map(_as_bool) & full_candidates["is_discovery"].map(_as_bool)
+    ].copy()
 
 
 def main() -> int:
@@ -313,13 +334,7 @@ def main() -> int:
     phase2_candidates_path = phase2_dir / "phase2_candidates.csv"
     full_candidates = _load_candidates(phase2_candidates_path)
     
-    # Bridge only evaluates candidates that pass Phase 2 Discovery and Final Gates
-    if not full_candidates.empty:
-        # survivors must pass both the final gate and be discoveries
-        mask = full_candidates["gate_phase2_final"].map(_as_bool) & full_candidates["is_discovery"].map(_as_bool)
-        survivors = full_candidates[mask].copy()
-    else:
-        survivors = pd.DataFrame()
+    survivors = _select_bridge_candidates(full_candidates=full_candidates, mode=str(args.mode))
 
     out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "bridge_eval" / args.run_id / event_type
     ensure_dir(out_dir)
@@ -360,6 +375,18 @@ def main() -> int:
             empty_metrics = pd.DataFrame(columns=["candidate_id", *BRIDGE_FIELDS, "bridge_fail_reasons", "bridge_embargo_days_used"])
             empty_metrics.to_csv(out_candidate_metrics, index=False)
             pd.DataFrame(columns=["candidate_id", "overlay_base_candidate_id", "delta_validation_after_cost_bps", "delta_validation_stressed_after_cost_bps"]).to_csv(out_overlay_metrics, index=False)
+            if not full_candidates.empty:
+                updated = full_candidates.copy()
+                updated["bridge_embargo_days_used"] = int(args.embargo_days)
+                updated["gate_bridge_tradable"] = False
+                updated["gate_bridge_has_trades_validation"] = False
+                updated["gate_bridge_after_cost_positive_validation"] = False
+                updated["gate_bridge_after_cost_stressed_positive_validation"] = False
+                updated["gate_bridge_edge_cost_ratio"] = False
+                updated["gate_bridge_turnover_controls"] = False
+                updated["bridge_fail_reasons"] = "NO_BRIDGE_ELIGIBLE_CANDIDATES"
+                updated["gate_all"] = False
+                updated.to_csv(phase2_candidates_path, index=False)
             summary_payload = {
                 "run_id": args.run_id,
                 "event_type": event_type,
