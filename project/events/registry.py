@@ -77,6 +77,39 @@ REGISTRY_EVENT_COLUMNS = [
     "features_at_event",
 ]
 
+# Some phase-1 analyzers emit multiple event families into one shared CSV.
+# For subtype specs we strictly keep exact matches; for aggregate specs we map
+# to an explicit union of child family labels.
+AGGREGATE_EVENT_TYPE_UNIONS: Dict[str, Sequence[str]] = {
+    "funding_episodes": (
+        "funding_extreme_onset",
+        "funding_acceleration",
+        "funding_persistence_window",
+        "funding_normalization",
+    ),
+    "oi_shocks": (
+        "oi_spike_positive",
+        "oi_spike_negative",
+        "oi_flush",
+    ),
+}
+
+
+def expected_event_types_for_spec(event_type: str) -> Sequence[str]:
+    normalized = str(event_type).strip()
+    if not normalized:
+        return ()
+    return AGGREGATE_EVENT_TYPE_UNIONS.get(normalized, (normalized,))
+
+
+def filter_phase1_rows_for_event_type(events: pd.DataFrame, event_type: str) -> pd.DataFrame:
+    if events.empty or "event_type" not in events.columns:
+        return events
+    allowed = set(expected_event_types_for_spec(event_type))
+    if not allowed:
+        return events.iloc[0:0].copy()
+    return events[events["event_type"].astype(str).isin(allowed)].copy()
+
 
 def _empty_registry_events() -> pd.DataFrame:
     return pd.DataFrame(columns=REGISTRY_EVENT_COLUMNS)
@@ -132,7 +165,9 @@ def normalize_phase1_events(events: pd.DataFrame, spec: EventRegistrySpec, run_i
     if events.empty:
         return _empty_registry_events()
 
-    out = events.copy()
+    out = filter_phase1_rows_for_event_type(events.copy(), spec.event_type)
+    if out.empty:
+        return _empty_registry_events()
     timestamp_col = _first_existing_column(out, ["enter_ts", "anchor_ts", "timestamp", "event_ts", "start_ts"])
     if timestamp_col is None:
         return _empty_registry_events()

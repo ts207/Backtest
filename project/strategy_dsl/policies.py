@@ -78,6 +78,14 @@ EVENT_POLICIES: Dict[str, Dict[str, object]] = {
         "target_type": "percent",
         "overlays": ["funding_guard", "liquidity_guard"],
     },
+    "funding_episodes": {
+        "direction": "conditional",
+        "triggers": ["funding_episodes"],
+        "confirmations": ["funding_normalization_pass", "oos_validation_pass"],
+        "stop_type": "percent",
+        "target_type": "percent",
+        "overlays": ["funding_guard", "liquidity_guard"],
+    },
     "range_compression_breakout_window": {
         "direction": "conditional",
         "triggers": ["range_compression_breakout_event"],
@@ -85,6 +93,22 @@ EVENT_POLICIES: Dict[str, Dict[str, object]] = {
         "stop_type": "range_pct",
         "target_type": "range_pct",
         "overlays": ["session_guard"],
+    },
+    "oi_shocks": {
+        "direction": "conditional",
+        "triggers": ["oi_shocks"],
+        "confirmations": ["spread_guard_pass", "oos_validation_pass"],
+        "stop_type": "percent",
+        "target_type": "percent",
+        "overlays": ["liquidity_guard", "spread_guard"],
+    },
+    "liquidation_cascade": {
+        "direction": "conditional",
+        "triggers": ["liquidation_cascade_event"],
+        "confirmations": ["spread_guard_pass", "oos_validation_pass"],
+        "stop_type": "percent",
+        "target_type": "percent",
+        "overlays": ["liquidity_guard", "spread_guard", "session_guard"],
     },
 }
 

@@ -475,7 +475,11 @@ def _signal_list_mask(frame: pd.DataFrame, signal_names: List[str], blueprint: B
     if not signal_names:
         return pd.Series(True, index=frame.index, dtype=bool)
 
-    unknown = sorted(set(signal_names) - KNOWN_ENTRY_SIGNALS)
+    unknown = sorted(
+        signal
+        for signal in set(signal_names)
+        if signal not in KNOWN_ENTRY_SIGNALS and signal not in REGISTRY_SIGNAL_COLUMNS
+    )
     if unknown:
         joined = ", ".join(unknown)
         raise ValueError(f"Blueprint `{blueprint.id}` has unknown {signal_kind} signals: {joined}")

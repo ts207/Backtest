@@ -22,7 +22,7 @@ from pipelines._lib.execution_costs import resolve_execution_costs
 from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.selection_log import append_selection_log
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
-from events.registry import EVENT_REGISTRY_SPECS
+from events.registry import EVENT_REGISTRY_SPECS, filter_phase1_rows_for_event_type
 from strategy_dsl.policies import event_policy, overlay_defaults
 from strategy_dsl.schema import (
     Blueprint,
@@ -172,6 +172,8 @@ def _event_stats(run_id: str, event_type: str) -> Dict[str, np.ndarray]:
         df = pd.read_csv(path)
     except Exception:
         return {"half_life": np.array([]), "adverse": np.array([]), "favorable": np.array([])}
+    if spec is not None:
+        df = filter_phase1_rows_for_event_type(df, spec.event_type)
     if df.empty:
         return {"half_life": np.array([]), "adverse": np.array([]), "favorable": np.array([])}
 

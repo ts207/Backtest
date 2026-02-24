@@ -124,3 +124,17 @@ def test_run_all_progress_logs_elapsed_and_eta(monkeypatch, tmp_path, capsys):
     captured = capsys.readouterr()
     assert "pipeline_elapsed=" in captured.out
     assert "eta~" in captured.out
+
+
+def test_run_all_declared_subtype_families_are_not_noop():
+    expected_scripts = {
+        "funding_extreme_onset": "analyze_funding_episode_events.py",
+        "funding_persistence_window": "analyze_funding_episode_events.py",
+        "funding_normalization": "analyze_funding_episode_events.py",
+        "oi_spike_positive": "analyze_oi_shock_events.py",
+        "oi_spike_negative": "analyze_oi_shock_events.py",
+        "oi_flush": "analyze_oi_shock_events.py",
+    }
+    chain_map = {event: script for event, script, _ in run_all.PHASE2_EVENT_CHAIN}
+    for event_type, expected_script in expected_scripts.items():
+        assert chain_map.get(event_type) == expected_script
