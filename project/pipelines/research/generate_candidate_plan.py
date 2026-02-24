@@ -17,11 +17,7 @@ DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.io_utils import (
-    choose_partition_dir,
     ensure_dir,
-    list_parquet_files,
-    read_parquet,
-    run_scoped_lake_path,
 )
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.ontology_contract import (
@@ -45,6 +41,11 @@ from pipelines.research.hypothesis_spec_translator import (
     load_template_side_policy,
     translate_candidate_hypotheses,
 )
+from pipelines.research.condition_key_contract import (
+    format_available_key_sample,
+    load_symbol_joined_condition_contract,
+    load_symbol_joined_condition_keys,
+)
 
 # Planner Budgets
 MAX_TOTAL_CANDIDATES = 200
@@ -67,33 +68,6 @@ def _check_market_context_exists(symbol: str, run_id: str) -> bool:
     run_scoped = DATA_ROOT / "lake" / "runs" / run_id / "context" / "market_state" / symbol / "5m.parquet"
     return path.exists() or run_scoped.exists()
 
-
-def _load_symbol_available_condition_keys(symbol: str, run_id: str, *, strict: bool) -> Set[str]:
-    keys: Set[str] = set()
-
-    def _collect_columns(paths: List[Path]) -> None:
-        src = choose_partition_dir(paths)
-        files = list_parquet_files(src) if src else []
-        if not files:
-            return
-        frame = read_parquet([files[0]])
-        if frame.empty:
-            return
-        keys.update([str(col).strip() for col in frame.columns if str(col).strip()])
-
-    feature_paths = [
-        run_scoped_lake_path(DATA_ROOT, run_id, "features", "perp", symbol, "5m", "features_v1"),
-        DATA_ROOT / "lake" / "features" / "perp" / symbol / "5m" / "features_v1",
-    ]
-    context_paths = [
-        run_scoped_lake_path(DATA_ROOT, run_id, "context", "market_state", symbol, "5m.parquet"),
-        DATA_ROOT / "lake" / "context" / "market_state" / symbol / "5m.parquet",
-    ]
-    _collect_columns(feature_paths)
-    _collect_columns(context_paths)
-    if not strict:
-        keys.update({"severity_bucket", "vol_regime", "carry_state", "funding_rate_bps"})
-    return keys
 
 def _match_assets(filter_str: str, universe: List[str]) -> List[str]:
     if not filter_str or filter_str == "*":
@@ -199,6 +173,11 @@ def main() -> int:
             else []
         )
         template_side_policy = load_template_side_policy(PROJECT_ROOT.parent)
+        implemented_event_types = {
+            str(event_type).strip().upper()
+            for event_type in EVENT_REGISTRY_SPECS.keys()
+            if str(event_type).strip()
+        }
         template_ontology_hash = choose_template_ontology_hash(templates_df)
         if not template_ontology_hash:
             raise ValueError("candidate_templates missing or inconsistent ontology_spec_hash values")
@@ -226,6 +205,7 @@ def main() -> int:
         plan_duplicates = 0
         feasibility_report = []
         hypothesis_audit_rows: List[Dict[str, object]] = []
+        condition_contract_cache: Dict[str, Dict[str, Set[str]]] = {}
         total_count = 0
         # Load Atlas Exclusions
         exclusions_path = DATA_ROOT / "reports" / "atlas_verification" / args.run_id / "planner_excluded_claims.json"
@@ -261,6 +241,7 @@ def main() -> int:
                 row["hypothesis_id"] = "HYPOTHESIS_UNBOUND"
                 row["hypothesis_version"] = 0
                 row["hypothesis_spec_path"] = ""
+                row["hypothesis_spec_hash"] = ""
                 row["template_id"] = str(row.get("rule_template", "")).strip()
                 row["horizon_bars"] = 12
                 row["entry_lag_bars"] = int(row.get("entry_lag_bars", 0) or 0)
@@ -286,6 +267,7 @@ def main() -> int:
                 row["candidate_id"] = "cand_" + hashlib.sha256(
                     str(row.get("plan_row_id", "")).encode("utf-8")
                 ).hexdigest()[:24]
+                row["candidate_hash_inputs"] = ""
                 return [row]
 
             translated_rows, translated_audit = translate_candidate_hypotheses(
@@ -294,6 +276,7 @@ def main() -> int:
                 available_condition_keys=available_condition_keys,
                 template_side_policy=template_side_policy,
                 strict=hypothesis_spec_strict,
+                implemented_event_types=implemented_event_types,
             )
             for a in translated_audit:
                 audit_row = dict(a)
@@ -440,11 +423,28 @@ def main() -> int:
                         "reason": fail_reason
                     })
                     continue
-                available_condition_keys = _load_symbol_available_condition_keys(
-                    symbol,
-                    args.run_id,
-                    strict=hypothesis_spec_strict,
+                if symbol not in condition_contract_cache:
+                    condition_contract_cache[symbol] = load_symbol_joined_condition_contract(
+                        data_root=DATA_ROOT,
+                        run_id=args.run_id,
+                        symbol=symbol,
+                        timeframe="5m",
+                    )
+                available_condition_keys = load_symbol_joined_condition_keys(
+                    data_root=DATA_ROOT,
+                    run_id=args.run_id,
+                    symbol=symbol,
+                    timeframe="5m",
+                    include_soft_defaults=not hypothesis_spec_strict,
                 )
+                if hypothesis_spec_strict and not available_condition_keys:
+                    available_sample = format_available_key_sample(
+                        condition_contract_cache[symbol].get("keys", set())
+                    )
+                    raise ValueError(
+                        f"No joined condition keys available for symbol {symbol}. "
+                        f"Strict hypothesis validation requires real joined keys. Available: {available_sample}"
+                    )
                 
                 for state_row in state_variants:
                     raw_state_id = state_row.get("state_id")
@@ -661,12 +661,19 @@ def main() -> int:
                 "audit_rows": int(len(hypothesis_audit_df)),
             }
         }
-        hypothesis_status_counts = {}
+        hypothesis_status_counts = {
+            "executed": 0,
+            "skipped_event_not_implemented": 0,
+            "skipped_missing_condition_key": 0,
+            "skipped_disabled": 0,
+        }
         if not hypothesis_audit_df.empty and "status" in hypothesis_audit_df.columns:
-            hypothesis_status_counts = {
+            observed = {
                 str(k): int(v)
                 for k, v in hypothesis_audit_df["status"].value_counts(dropna=False).to_dict().items()
             }
+            for key, value in observed.items():
+                hypothesis_status_counts[key] = int(value)
 
         finalize_manifest(manifest, "success", stats={
             "total_candidates": len(plan_rows),

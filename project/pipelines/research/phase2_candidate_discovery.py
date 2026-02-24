@@ -45,6 +45,11 @@ from events.registry import EVENT_REGISTRY_SPECS
 from events.registry import load_registry_events
 from pipelines.research.cost_calibration import ToBRegimeCostCalibrator
 from pipelines._lib.spec_utils import get_spec_hashes
+from pipelines.research.condition_key_contract import (
+    format_available_key_sample,
+    load_symbol_joined_condition_keys,
+    missing_condition_keys,
+)
 from pipelines.research.analyze_conditional_expectancy import (
     _bh_adjust,
     _distribution_stats,
@@ -54,8 +59,10 @@ from pipelines.research.analyze_conditional_expectancy import (
 PRIMARY_OUTPUT_COLUMNS = [
     "runtime_event_type", "canonical_event_type", "canonical_family", "state_id", "state_provenance",
     "state_activation", "state_activation_hash",
-    "hypothesis_id", "hypothesis_version", "hypothesis_spec_path", "hypothesis_metric", "hypothesis_output_schema",
+    "hypothesis_id", "hypothesis_version", "hypothesis_spec_path", "hypothesis_spec_hash",
+    "hypothesis_metric", "hypothesis_output_schema",
     "hypothesis_candidate_id",
+    "candidate_hash_inputs",
     "template_id", "template_verb", "operator_id", "operator_version",
     "candidate_id", "condition", "condition_desc", "action", "action_family", "candidate_type",
     "condition_signature", "horizon_bars", "entry_lag_bars", "direction_rule",
@@ -1474,6 +1481,12 @@ def _make_parser() -> argparse.ArgumentParser:
                         help="Path to Atlas candidate plan (jsonl). If provided, drives discovery.")
     parser.add_argument("--atlas_mode", type=int, default=0,
                         help="If 1, require --candidate_plan and fail if missing.")
+    parser.add_argument(
+        "--assert_condition_keys",
+        type=int,
+        default=1,
+        help="If 1, fail-closed when plan conditioning keys are not in joined key contract for the symbol.",
+    )
     parser.add_argument("--min_samples", type=int, default=30,
                         help="Minimum number of events required to compute expectancy.")
     parser.add_argument(
@@ -1623,6 +1636,42 @@ def _validate_candidate_plan_ontology(
                     f"nor runtime_event_type {runtime_event or '<missing>'}"
                 )
 
+    return errors
+
+
+def _validate_candidate_plan_condition_keys(
+    plan_rows: List[Dict[str, Any]],
+    *,
+    data_root: Path,
+    run_id: str,
+    timeframe: str = "5m",
+) -> List[str]:
+    errors: List[str] = []
+    available_cache: Dict[str, set[str]] = {}
+
+    for idx, row in enumerate(plan_rows):
+        conditioning = row.get("conditioning", {})
+        if not isinstance(conditioning, dict) or not conditioning:
+            continue
+        symbol = str(row.get("symbol", "")).strip().upper()
+        if not symbol:
+            errors.append(f"plan_row[{idx}]: missing symbol for condition-key validation")
+            continue
+        if symbol not in available_cache:
+            available_cache[symbol] = load_symbol_joined_condition_keys(
+                data_root=data_root,
+                run_id=run_id,
+                symbol=symbol,
+                timeframe=timeframe,
+                include_soft_defaults=False,
+            )
+        required = [str(key).strip() for key in conditioning.keys() if str(key).strip()]
+        missing = sorted(missing_condition_keys(required, available_cache[symbol]))
+        if missing:
+            errors.append(
+                f"plan_row[{idx}] ({symbol}) missing condition keys {missing}. "
+                f"Available: {format_available_key_sample(available_cache[symbol])}"
+            )
     return errors
 
 
@@ -1929,6 +1978,22 @@ def main():
             if len(ontology_errors) > 25:
                 log.error("Ontology contract violation: ... %d additional errors omitted", len(ontology_errors) - 25)
             sys.exit(1)
+        if bool(int(args.assert_condition_keys)):
+            condition_key_errors = _validate_candidate_plan_condition_keys(
+                plan_rows,
+                data_root=DATA_ROOT,
+                run_id=str(args.run_id),
+                timeframe="5m",
+            )
+            if condition_key_errors:
+                for msg in condition_key_errors[:25]:
+                    log.error("Condition-key contract violation: %s", msg)
+                if len(condition_key_errors) > 25:
+                    log.error(
+                        "Condition-key contract violation: ... %d additional errors omitted",
+                        len(condition_key_errors) - 25,
+                    )
+                sys.exit(1)
 
     if plan_rows:
         # Atlas-driven discovery
@@ -1947,9 +2012,11 @@ def main():
             hypothesis_id = str(plan_row.get("hypothesis_id", "")).strip()
             hypothesis_version = int(plan_row.get("hypothesis_version", 0) or 0)
             hypothesis_spec_path = str(plan_row.get("hypothesis_spec_path", "")).strip()
+            hypothesis_spec_hash = str(plan_row.get("hypothesis_spec_hash", "")).strip()
             hypothesis_metric = str(plan_row.get("hypothesis_metric", "")).strip()
             hypothesis_output_schema = plan_row.get("hypothesis_output_schema", [])
             hypothesis_candidate_id = str(plan_row.get("candidate_id", "")).strip()
+            candidate_hash_inputs = str(plan_row.get("candidate_hash_inputs", "")).strip()
             template_id = str(plan_row.get("template_id", rule)).strip() or str(rule)
             horizon_bars = int(plan_row.get("horizon_bars", _horizon_to_bars(horizon)) or _horizon_to_bars(horizon))
             entry_lag_bars = int(plan_row.get("entry_lag_bars", args.entry_lag_bars) or args.entry_lag_bars)
@@ -2072,9 +2139,11 @@ def main():
                 "hypothesis_id": hypothesis_id,
                 "hypothesis_version": hypothesis_version,
                 "hypothesis_spec_path": hypothesis_spec_path,
+                "hypothesis_spec_hash": hypothesis_spec_hash,
                 "hypothesis_metric": hypothesis_metric,
                 "hypothesis_output_schema": hypothesis_output_schema,
                 "hypothesis_candidate_id": hypothesis_candidate_id,
+                "candidate_hash_inputs": candidate_hash_inputs,
                 "event_type": event_type,
                 "rule_template": rule,
                 "template_id": template_id,
@@ -2268,9 +2337,11 @@ def main():
                             "hypothesis_id": "",
                             "hypothesis_version": 0,
                             "hypothesis_spec_path": "",
+                            "hypothesis_spec_hash": "",
                             "hypothesis_metric": "",
                             "hypothesis_output_schema": [],
                             "hypothesis_candidate_id": "",
+                            "candidate_hash_inputs": "",
                             "event_type": args.event_type,
                             "rule_template": rule,
                             "template_id": rule,

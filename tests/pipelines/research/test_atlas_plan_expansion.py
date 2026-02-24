@@ -139,3 +139,44 @@ def test_composite_regime_feasibility_check(mock_atlas_env):
         assert all(str(p.get("hypothesis_id", "")).strip() for p in plan_data)
         assert all(str(p.get("template_id", "")).strip() for p in plan_data)
         assert all("condition_signature" in p for p in plan_data)
+
+
+def test_planner_strict_hypothesis_validation_fails_on_missing_joined_key(mock_atlas_env):
+    run_id = "test_run_strict_keys"
+    out_dir = mock_atlas_env / "reports_strict"
+
+    spec_hyp_dir = mock_atlas_env / "spec" / "hypotheses"
+    spec_hyp_dir.mkdir(parents=True, exist_ok=True)
+    (spec_hyp_dir / "lift_state_conditioned_v1.yaml").write_text(
+        "hypothesis_id: H_STRICT\n"
+        "version: 1\n"
+        "status: active\n"
+        "scope:\n"
+        "  conditioning_features: [vol_regime]\n",
+        encoding="utf-8",
+    )
+    (spec_hyp_dir / "template_verb_lexicon.yaml").write_text(
+        "operators:\n"
+        "  mean_reversion:\n"
+        "    side_policy: contrarian\n",
+        encoding="utf-8",
+    )
+
+    test_args = [
+        "generate_candidate_plan.py",
+        "--run_id", run_id,
+        "--symbols", "BTCUSDT",
+        "--atlas_dir", str(mock_atlas_env / "atlas"),
+        "--out_dir", str(out_dir),
+        "--hypothesis_spec_strict", "1",
+    ]
+
+    with patch.dict(os.environ, {"BACKTEST_DATA_ROOT": str(mock_atlas_env / "data")}):
+        with patch.object(sys, "argv", test_args):
+            import pipelines.research.generate_candidate_plan as gcp
+            mock_project_root = mock_atlas_env / "project"
+            with patch.object(gcp, "PROJECT_ROOT", mock_project_root):
+                with patch.object(gcp, "DATA_ROOT", mock_atlas_env / "data"):
+                    with patch.object(gcp, "ontology_spec_hash", return_value="sha256:test"):
+                        res = planner_main()
+    assert res == 1

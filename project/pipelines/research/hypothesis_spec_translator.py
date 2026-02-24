@@ -8,6 +8,11 @@ from typing import Any, Dict, Iterable, List, Tuple
 import yaml
 
 from pipelines._lib.timeframe_constants import HORIZON_BARS_BY_TIMEFRAME
+from pipelines.research.condition_key_contract import (
+    format_available_key_sample,
+    missing_condition_keys,
+    normalize_condition_keys,
+)
 
 
 DEFAULT_OUTPUT_SCHEMA = [
@@ -20,9 +25,20 @@ DEFAULT_OUTPUT_SCHEMA = [
     "net_after_cost",
 ]
 
-_CONDITION_KEY_ALIASES = {
-    "funding_bps": "funding_rate_bps",
-}
+CANDIDATE_HASH_FIELDS = (
+    "event_type",
+    "template_id",
+    "horizon_bars",
+    "entry_lag_bars",
+    "direction_rule",
+    "condition_signature",
+    "hypothesis_id",
+    "hypothesis_version",
+    "hypothesis_spec_path",
+    "hypothesis_spec_hash",
+    "symbol",
+    "state_id",
+)
 
 
 def _norm(value: Any) -> str:
@@ -81,7 +97,9 @@ def load_active_hypothesis_specs(repo_root: Path) -> List[Dict[str, Any]]:
             {
                 "hypothesis_id": hypothesis_id,
                 "version": version,
+                "status": status,
                 "spec_path": str(path.relative_to(repo_root)),
+                "spec_hash": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
                 "conditioning_features": conditioning_features,
                 "metric": metric,
                 "output_schema": list(DEFAULT_OUTPUT_SCHEMA),
@@ -102,18 +120,6 @@ def load_template_side_policy(repo_root: Path) -> Dict[str, str]:
             continue
         side_policy = _norm(op.get("side_policy", "both")).lower()
         out[_norm(template_verb)] = side_policy or "both"
-    return out
-
-
-def _normalize_available_condition_keys(keys: Iterable[str]) -> set[str]:
-    out: set[str] = set()
-    for key in keys:
-        token = _norm(key)
-        if not token:
-            continue
-        out.add(token)
-        out.add(token.lower())
-        out.add(_CONDITION_KEY_ALIASES.get(token, token))
     return out
 
 
@@ -147,6 +153,38 @@ def _candidate_hash(payload: Dict[str, Any]) -> str:
     return "cand_" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:24]
 
 
+def _candidate_hash_inputs(
+    *,
+    event_type: str,
+    template_id: str,
+    horizon_bars: int,
+    entry_lag_bars: int,
+    direction_rule: str,
+    condition_signature: str,
+    hypothesis_id: str,
+    hypothesis_version: int,
+    hypothesis_spec_path: str,
+    hypothesis_spec_hash: str,
+    symbol: str,
+    state_id: str,
+) -> Dict[str, Any]:
+    payload = {
+        "event_type": _norm_upper(event_type),
+        "template_id": _norm(template_id),
+        "horizon_bars": int(horizon_bars),
+        "entry_lag_bars": int(entry_lag_bars),
+        "direction_rule": _norm(direction_rule).lower() or "both",
+        "condition_signature": _norm(condition_signature) or "all",
+        "hypothesis_id": _norm(hypothesis_id),
+        "hypothesis_version": int(hypothesis_version),
+        "hypothesis_spec_path": _norm(hypothesis_spec_path),
+        "hypothesis_spec_hash": _norm(hypothesis_spec_hash),
+        "symbol": _norm_upper(symbol),
+        "state_id": _norm_upper(state_id),
+    }
+    return {key: payload[key] for key in CANDIDATE_HASH_FIELDS}
+
+
 def translate_candidate_hypotheses(
     *,
     base_candidate: Dict[str, Any],
@@ -154,48 +192,77 @@ def translate_candidate_hypotheses(
     available_condition_keys: Iterable[str],
     template_side_policy: Dict[str, str],
     strict: bool,
+    implemented_event_types: Iterable[str] | None = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     rows: List[Dict[str, Any]] = []
     audit: List[Dict[str, Any]] = []
-    available = _normalize_available_condition_keys(available_condition_keys)
+    available_raw = {_norm(k) for k in available_condition_keys if _norm(k)}
+    available = normalize_condition_keys(available_raw)
     conditioning = dict(base_candidate.get("conditioning", {}) or {})
+    implemented = {_norm_upper(ev) for ev in (implemented_event_types or []) if _norm(ev)}
+
+    object_type = _norm(base_candidate.get("object_type", "event")).lower() or "event"
+    candidate_event_type = _norm_upper(
+        base_candidate.get("canonical_event_type")
+        or base_candidate.get("event_type")
+        or ""
+    )
+    if object_type == "event" and implemented and candidate_event_type not in implemented:
+        audit.append(
+            {
+                "hypothesis_id": "",
+                "status": "skipped_event_not_implemented",
+                "missing_keys": [],
+                "event_type": candidate_event_type,
+            }
+        )
+        if strict:
+            raise ValueError(
+                f"Event {candidate_event_type} is not implemented in active event registry specs."
+            )
+        return rows, audit
 
     for spec in hypothesis_specs:
         hypothesis_id = _norm(spec.get("hypothesis_id"))
+        status = _norm(spec.get("status", "active")).lower() or "active"
+        if status != "active":
+            audit.append(
+                {
+                    "hypothesis_id": hypothesis_id,
+                    "status": "skipped_disabled",
+                    "missing_keys": [],
+                }
+            )
+            continue
         required_features = [_norm(x) for x in spec.get("conditioning_features", []) if _norm(x)]
-
-        missing_required = [
-            key for key in required_features
-            if key not in available and key.lower() not in available and _CONDITION_KEY_ALIASES.get(key, key) not in available
-        ]
+        missing_required = sorted(missing_condition_keys(required_features, available))
         if missing_required:
             detail = {
                 "hypothesis_id": hypothesis_id,
-                "status": "skipped_missing_spec_condition_keys",
-                "missing_keys": sorted(set(missing_required)),
+                "status": "skipped_missing_condition_key",
+                "missing_keys": missing_required,
             }
             audit.append(detail)
             if strict:
                 raise ValueError(
-                    f"Hypothesis {hypothesis_id} missing required conditioning keys in joined frame: {sorted(set(missing_required))}"
+                    f"Hypothesis {hypothesis_id} missing required conditioning keys: {missing_required}. "
+                    f"Available keys: {format_available_key_sample(available_raw)}"
                 )
             continue
 
         condition_keys = [_norm(k) for k in conditioning.keys() if _norm(k)]
-        missing_condition_keys = [
-            key for key in condition_keys
-            if key not in available and key.lower() not in available and _CONDITION_KEY_ALIASES.get(key, key) not in available
-        ]
-        if missing_condition_keys:
+        missing_cond_keys = sorted(missing_condition_keys(condition_keys, available))
+        if missing_cond_keys:
             detail = {
                 "hypothesis_id": hypothesis_id,
-                "status": "skipped_missing_condition_keys",
-                "missing_keys": sorted(set(missing_condition_keys)),
+                "status": "skipped_missing_condition_key",
+                "missing_keys": missing_cond_keys,
             }
             audit.append(detail)
             if strict:
                 raise ValueError(
-                    f"Hypothesis {hypothesis_id} missing condition keys in joined frame: {sorted(set(missing_condition_keys))}"
+                    f"Hypothesis {hypothesis_id} missing condition keys: {missing_cond_keys}. "
+                    f"Available keys: {format_available_key_sample(available_raw)}"
                 )
             continue
 
@@ -210,6 +277,7 @@ def translate_candidate_hypotheses(
                 "hypothesis_id": hypothesis_id,
                 "hypothesis_version": int(spec.get("version", 1) or 1),
                 "hypothesis_spec_path": _norm(spec.get("spec_path")),
+                "hypothesis_spec_hash": _norm(spec.get("spec_hash")),
                 "template_id": template_verb,
                 "horizon_bars": _horizon_bars(horizon),
                 "entry_lag_bars": int(base_candidate.get("entry_lag_bars", 0) or 0),
@@ -220,19 +288,26 @@ def translate_candidate_hypotheses(
                 "hypothesis_output_schema": list(spec.get("output_schema", DEFAULT_OUTPUT_SCHEMA)),
             }
         )
-        row["candidate_id"] = _candidate_hash(
-            {
-                "hypothesis_id": row["hypothesis_id"],
-                "event_type": _norm(row.get("event_type")),
-                "symbol": _norm(row.get("symbol")),
-                "template_id": row["template_id"],
-                "horizon_bars": int(row["horizon_bars"]),
-                "entry_lag_bars": int(row["entry_lag_bars"]),
-                "direction_rule": row["direction_rule"],
-                "condition_signature": row["condition_signature"],
-                "state_id": _norm_upper(row.get("state_id")),
-            }
+        hash_inputs = _candidate_hash_inputs(
+            event_type=_norm(
+                row.get("canonical_event_type")
+                or row.get("event_type")
+                or ""
+            ),
+            template_id=_norm(row.get("template_id")),
+            horizon_bars=int(row["horizon_bars"]),
+            entry_lag_bars=int(row["entry_lag_bars"]),
+            direction_rule=_norm(row["direction_rule"]),
+            condition_signature=_norm(row["condition_signature"]),
+            hypothesis_id=_norm(row["hypothesis_id"]),
+            hypothesis_version=int(row["hypothesis_version"]),
+            hypothesis_spec_path=_norm(row["hypothesis_spec_path"]),
+            hypothesis_spec_hash=_norm(row.get("hypothesis_spec_hash")),
+            symbol=_norm(row.get("symbol")),
+            state_id=_norm(row.get("state_id")),
         )
+        row["candidate_hash_inputs"] = json.dumps(hash_inputs, sort_keys=True, separators=(",", ":"))
+        row["candidate_id"] = _candidate_hash(hash_inputs)
         rows.append(row)
         audit.append(
             {
