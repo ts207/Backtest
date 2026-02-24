@@ -132,7 +132,8 @@ def main() -> int:
                 reason = f"spec missing at {target_spec_path}"
             
             # 2. Registry Check
-            event_type = row.get('event_type')
+            event_type = str(row.get("canonical_event_type", row.get("event_type", ""))).strip()
+            event_type = event_type or None
             if status == "ready" and event_type and event_type not in EVENT_REGISTRY_SPECS:
                 status = "blocked_missing_registry"
                 reason = f"event_type {event_type} not in registry"

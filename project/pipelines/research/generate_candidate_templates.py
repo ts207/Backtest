@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -36,28 +37,363 @@ DEFAULT_CONDITIONING = GLOBAL_DEFAULTS.get("conditioning", {
     "regime_vol_liquidity": ["high_vol_low_liq", "low_vol_high_liq"]
 })
 
-def _load_taxonomy() -> Dict[str, Any]:
-    """Load event taxonomy from spec."""
-    path = PROJECT_ROOT.parent / "spec" / "multiplicity" / "taxonomy.yaml"
+TAXONOMY_PATH = PROJECT_ROOT.parent / "spec" / "multiplicity" / "taxonomy.yaml"
+CANONICAL_EVENT_REGISTRY_PATH = PROJECT_ROOT.parent / "spec" / "events" / "canonical_event_registry.yaml"
+STATE_REGISTRY_PATH = PROJECT_ROOT.parent / "spec" / "states" / "state_registry.yaml"
+VERB_LEXICON_PATH = PROJECT_ROOT.parent / "spec" / "hypotheses" / "template_verb_lexicon.yaml"
+
+
+def _to_str_list(value: Any) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    out: List[str] = []
+    for item in value:
+        token = str(item).strip()
+        if token:
+            out.append(token)
+    return out
+
+
+def _load_yaml(path: Path, *, strict: bool = False, required: bool = False, name: str = "spec") -> Dict[str, Any]:
     if not path.exists():
+        if strict and required:
+            raise FileNotFoundError(f"Missing required ontology {name}: {path}")
         return {}
-    with open(path, "r") as f:
-        return yaml.safe_load(f)
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if isinstance(data, dict):
+        return data
+    if strict and required:
+        raise ValueError(f"Invalid ontology {name}: expected mapping at {path}")
+    return {}
+
+
+def _load_taxonomy(*, strict: bool = False) -> Dict[str, Any]:
+    return _load_yaml(TAXONOMY_PATH, strict=strict, required=True, name="taxonomy")
+
+
+def _load_canonical_event_registry(*, strict: bool = False) -> Dict[str, Any]:
+    return _load_yaml(
+        CANONICAL_EVENT_REGISTRY_PATH,
+        strict=strict,
+        required=True,
+        name="canonical_event_registry",
+    )
+
+
+def _load_state_registry(*, strict: bool = False) -> Dict[str, Any]:
+    return _load_yaml(STATE_REGISTRY_PATH, strict=strict, required=True, name="state_registry")
+
+
+def _load_template_verb_lexicon(*, strict: bool = False) -> Dict[str, Any]:
+    return _load_yaml(VERB_LEXICON_PATH, strict=strict, required=True, name="template_verb_lexicon")
+
+
+def _ontology_spec_hash() -> str:
+    hasher = hashlib.sha256()
+    for path in [TAXONOMY_PATH, CANONICAL_EVENT_REGISTRY_PATH, STATE_REGISTRY_PATH, VERB_LEXICON_PATH]:
+        hasher.update(str(path).encode("utf-8"))
+        if path.exists():
+            hasher.update(path.read_bytes())
+        else:
+            hasher.update(b"")
+    return f"sha256:{hasher.hexdigest()}"
+
+def _norm_label(value: Any) -> str:
+    return str(value).strip().upper()
+
+
+def _family_templates(family_cfg: Dict[str, Any]) -> List[str]:
+    runtime = family_cfg.get("runtime_templates", [])
+    if isinstance(runtime, list) and runtime:
+        return [str(x) for x in runtime if str(x).strip()]
+    templates = family_cfg.get("templates", DEFAULT_RULE_TEMPLATES)
+    if isinstance(templates, list) and templates:
+        return [str(x) for x in templates if str(x).strip()]
+    return list(DEFAULT_RULE_TEMPLATES)
+
+
+def _resolve_canonical_event_type(event_type: str, alias_maps: List[Dict[str, Any]]) -> str:
+    event_type_norm = _norm_label(event_type)
+    for aliases in alias_maps:
+        if not isinstance(aliases, dict):
+            continue
+        mapped = aliases.get(str(event_type).strip())
+        if mapped is not None:
+            return _norm_label(mapped)
+        for alias_key, canonical in aliases.items():
+            if _norm_label(alias_key) == event_type_norm:
+                return _norm_label(canonical)
+    return event_type_norm
+
+
+def _source_states_by_event(state_registry: Dict[str, Any]) -> Dict[str, List[str]]:
+    by_event: Dict[str, List[str]] = {}
+    states = state_registry.get("states", [])
+    if not isinstance(states, list):
+        return by_event
+    for row in states:
+        if not isinstance(row, dict):
+            continue
+        event = _norm_label(row.get("source_event_type", ""))
+        state_id = _norm_label(row.get("state_id", ""))
+        if not event or not state_id:
+            continue
+        by_event.setdefault(event, [])
+        if state_id not in by_event[event]:
+            by_event[event].append(state_id)
+    return by_event
+
+
+def _build_event_ontology_index(taxonomy: Dict[str, Any], state_registry: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    families = taxonomy.get("families", {})
+    if not isinstance(families, dict):
+        return {}
+
+    source_states = _source_states_by_event(state_registry)
+    index: Dict[str, Dict[str, Any]] = {}
+    for family_name, family_cfg in families.items():
+        if not isinstance(family_cfg, dict):
+            continue
+        family = _norm_label(family_name)
+        family_states = [_norm_label(x) for x in family_cfg.get("states", []) if str(x).strip()]
+        events = [_norm_label(x) for x in family_cfg.get("events", []) if str(x).strip()]
+        for event in events:
+            index[event] = {
+                "canonical_family": family,
+                "family_states": family_states,
+                "source_states": list(source_states.get(event, [])),
+            }
+    return index
+
+
+def _build_canonical_event_info(canonical_registry: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    families = canonical_registry.get("families", {})
+    if not isinstance(families, dict):
+        return out
+    for family_name, family_cfg in families.items():
+        if not isinstance(family_cfg, dict):
+            continue
+        family = _norm_label(family_name)
+        family_tags = _to_str_list(family_cfg.get("tags", []))
+        family_mechanism = str(family_cfg.get("mechanism", "")).strip() or None
+        family_allowed_templates = _to_str_list(family_cfg.get("allowed_templates", []))
+        family_default_horizons = _to_str_list(family_cfg.get("default_horizons", []))
+        family_side_policy = str(family_cfg.get("side_policy", "")).strip() or None
+
+        events_raw = family_cfg.get("events", [])
+        if isinstance(events_raw, dict):
+            events_iter = [{"event_type": key, **(value if isinstance(value, dict) else {})} for key, value in events_raw.items()]
+        elif isinstance(events_raw, list):
+            events_iter = events_raw
+        else:
+            events_iter = []
+
+        for raw in events_iter:
+            event_meta: Dict[str, Any]
+            if isinstance(raw, str):
+                event_id = _norm_label(raw)
+                event_meta = {}
+            elif isinstance(raw, dict):
+                event_id = _norm_label(raw.get("event_type") or raw.get("event_id") or raw.get("id") or "")
+                event_meta = raw
+            else:
+                continue
+            if not event_id:
+                continue
+            event_tags = family_tags + _to_str_list(event_meta.get("tags", []))
+            # Preserve order while de-duplicating.
+            tags_unique = list(dict.fromkeys([t for t in event_tags if t]))
+            out[event_id] = {
+                "canonical_family": family,
+                "mechanism": str(event_meta.get("mechanism", family_mechanism or "")).strip() or None,
+                "tags": tags_unique,
+                "allowed_templates": _to_str_list(event_meta.get("allowed_templates", family_allowed_templates)),
+                "default_horizons": _to_str_list(event_meta.get("default_horizons", family_default_horizons)),
+                "side_policy": str(event_meta.get("side_policy", family_side_policy or "")).strip() or None,
+            }
+    return out
+
+
+def _verb_set_from_lexicon(verb_lexicon: Dict[str, Any]) -> set[str]:
+    verbs = verb_lexicon.get("verbs", {})
+    if not isinstance(verbs, dict):
+        return set()
+    out: set[str] = set()
+    for group in verbs.values():
+        if not isinstance(group, list):
+            continue
+        for v in group:
+            token = str(v).strip()
+            if token:
+                out.add(token)
+    return out
+
+
+def _validate_and_filter_templates(
+    templates: List[str],
+    *,
+    verb_set: set[str],
+    strict: bool,
+) -> tuple[List[str], List[str]]:
+    unknown = [t for t in templates if verb_set and t not in verb_set]
+    if unknown and strict:
+        raise ValueError(f"Unknown template verbs found: {sorted(set(unknown))}")
+    filtered = [t for t in templates if t not in unknown]
+    return filtered, unknown
+
+
+def _event_ontology_context(
+    event_type: str,
+    *,
+    taxonomy: Dict[str, Any],
+    canonical_registry: Dict[str, Any],
+    event_index: Dict[str, Dict[str, Any]],
+    canonical_event_info: Dict[str, Dict[str, Any]],
+    verb_lexicon: Dict[str, Any],
+    strict: bool,
+) -> Dict[str, Any]:
+    alias_maps: List[Dict[str, Any]] = []
+    taxonomy_aliases = taxonomy.get("runtime_event_aliases", {})
+    if isinstance(taxonomy_aliases, dict):
+        alias_maps.append(taxonomy_aliases)
+    canonical_aliases = canonical_registry.get("runtime_event_aliases", {})
+    if isinstance(canonical_aliases, dict):
+        alias_maps.append(canonical_aliases)
+
+    canonical_event = _resolve_canonical_event_type(event_type, alias_maps)
+    taxonomy_info = event_index.get(canonical_event, {})
+    canonical_info = canonical_event_info.get(canonical_event, {})
+
+    taxonomy_family = str(taxonomy_info.get("canonical_family", "")).strip()
+    canonical_family = str(canonical_info.get("canonical_family", "")).strip()
+    family_mismatch = bool(taxonomy_family and canonical_family and taxonomy_family != canonical_family)
+    if family_mismatch and strict:
+        raise ValueError(
+            f"Canonical/taxonomy family mismatch for {canonical_event}: "
+            f"canonical={canonical_family}, taxonomy={taxonomy_family}"
+        )
+    family = canonical_family or taxonomy_family
+
+    family_states = [str(x) for x in taxonomy_info.get("family_states", [])]
+    source_states = [str(x) for x in taxonomy_info.get("source_states", [])]
+    all_states = sorted({*family_states, *source_states})
+
+    templates = _get_templates_for_event(canonical_event, taxonomy)
+    canonical_allowed_templates = _to_str_list(canonical_info.get("allowed_templates", []))
+    if canonical_allowed_templates:
+        templates = [t for t in templates if t in canonical_allowed_templates]
+
+    verb_set = _verb_set_from_lexicon(verb_lexicon)
+    filtered_templates, unknown_templates = _validate_and_filter_templates(
+        templates,
+        verb_set=verb_set,
+        strict=strict,
+    )
+
+    horizons = _to_str_list(canonical_info.get("default_horizons", [])) or list(DEFAULT_HORIZONS)
+    in_taxonomy = bool(taxonomy_family)
+    in_canonical_registry = bool(canonical_family)
+    if strict and not in_canonical_registry:
+        raise ValueError(f"Event missing in canonical registry: {canonical_event}")
+    fully_known = in_taxonomy and in_canonical_registry
+    return {
+        "canonical_event_type": canonical_event,
+        "canonical_family": family,
+        "in_taxonomy": in_taxonomy,
+        "in_canonical_registry": in_canonical_registry,
+        "fully_known": fully_known,
+        "family_mismatch": family_mismatch,
+        "mechanism": canonical_info.get("mechanism"),
+        "tags": _to_str_list(canonical_info.get("tags", [])),
+        "side_policy": canonical_info.get("side_policy"),
+        "default_horizons": horizons,
+        "canonical_allowed_templates": canonical_allowed_templates,
+        "family_states": family_states,
+        "source_states": source_states,
+        "all_states": all_states,
+        "rule_templates": filtered_templates,
+        "unknown_templates": unknown_templates,
+    }
+
+
+def _flatten_list_column(values: Any) -> List[str]:
+    out: List[str] = []
+    if not isinstance(values, pd.Series):
+        return out
+    for item in values:
+        if not isinstance(item, list):
+            continue
+        for token in item:
+            s = str(token).strip()
+            if s:
+                out.append(s)
+    return out
+
+
+def _state_registry_rows(state_registry: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = state_registry.get("states", [])
+    if isinstance(rows, list):
+        return [r for r in rows if isinstance(r, dict)]
+    return []
+
 
 def _get_templates_for_event(event_type: str, taxonomy: Optional[Dict[str, Any]] = None) -> List[str]:
     """Determine rule templates for a given event type based on taxonomy."""
     if taxonomy is None:
         taxonomy = _load_taxonomy()
-    
-    event_type_norm = str(event_type).strip().lower()
+
+    event_type_norm = _norm_label(event_type)
     families = taxonomy.get("families", {})
-    
-    for family_id, family_cfg in families.items():
-        events = [str(e).strip().lower() for e in family_cfg.get("events", [])]
-        if event_type_norm in events:
-            return family_cfg.get("templates", DEFAULT_RULE_TEMPLATES)
-            
-    return DEFAULT_RULE_TEMPLATES
+    if not isinstance(families, dict):
+        return list(DEFAULT_RULE_TEMPLATES)
+
+    # New ontology path: runtime event aliases map runtime labels to canonical events.
+    runtime_aliases = taxonomy.get("runtime_event_aliases", {})
+    if isinstance(runtime_aliases, dict):
+        mapped = runtime_aliases.get(str(event_type).strip())
+        if mapped is not None:
+            event_type_norm = _norm_label(mapped)
+        else:
+            for alias_key, canonical in runtime_aliases.items():
+                if _norm_label(alias_key) == event_type_norm:
+                    event_type_norm = _norm_label(canonical)
+                    break
+
+    # Legacy state windows resolve to state-specific templates or source-event family templates.
+    legacy_states = taxonomy.get("legacy_state_aliases", {})
+    if isinstance(legacy_states, dict):
+        for alias_key, state_cfg in legacy_states.items():
+            if _norm_label(alias_key) != event_type_norm:
+                continue
+            if isinstance(state_cfg, dict):
+                allowed_templates = state_cfg.get("allowed_templates", [])
+                if isinstance(allowed_templates, list) and allowed_templates:
+                    return [str(x) for x in allowed_templates if str(x).strip()]
+                source_event = state_cfg.get("source_event_type")
+                if source_event:
+                    event_type_norm = _norm_label(source_event)
+            break
+
+    for family_cfg in families.values():
+        if not isinstance(family_cfg, dict):
+            continue
+        events = family_cfg.get("events", [])
+        event_labels = {_norm_label(e) for e in events} if isinstance(events, list) else set()
+        if event_type_norm in event_labels:
+            return _family_templates(family_cfg)
+
+    # Backward-compat for older taxonomy layouts that only listed lowercase event ids.
+    legacy_norm = str(event_type).strip().lower()
+    for family_cfg in families.values():
+        if not isinstance(family_cfg, dict):
+            continue
+        events = [str(e).strip().lower() for e in family_cfg.get("events", [])] if isinstance(family_cfg.get("events", []), list) else []
+        if legacy_norm in events:
+            return _family_templates(family_cfg)
+
+    return list(DEFAULT_RULE_TEMPLATES)
 
 def _extract_event_type(statement: str) -> Optional[str]:
     """Heuristically extract event type from statement."""
@@ -74,6 +410,12 @@ def main() -> int:
     parser.add_argument("--backlog", default="research_backlog.csv")
     parser.add_argument("--atlas_dir", default="atlas")
     parser.add_argument("--attribution_report", default=None, help="Path to regime performance attribution report (Parquet)")
+    parser.add_argument(
+        "--ontology_strict",
+        type=int,
+        default=(1 if str(os.getenv("CI", "")).strip() else 0),
+        help="Fail closed on ontology spec/template mismatches (default: 1 in CI, else 0).",
+    )
     args = parser.parse_args()
 
     atlas_dir = PROJECT_ROOT.parent / args.atlas_dir
@@ -88,7 +430,15 @@ def main() -> int:
             raise FileNotFoundError(f"Backlog not found: {backlog_path}")
         
         df = pd.read_csv(backlog_path)
-        taxonomy = _load_taxonomy()
+        strict_ontology = bool(int(args.ontology_strict))
+        taxonomy = _load_taxonomy(strict=strict_ontology)
+        canonical_registry = _load_canonical_event_registry(strict=strict_ontology)
+        state_registry = _load_state_registry(strict=strict_ontology)
+        verb_lexicon = _load_template_verb_lexicon(strict=strict_ontology)
+        ontology_hash = _ontology_spec_hash()
+        event_ontology_index = _build_event_ontology_index(taxonomy, state_registry)
+        canonical_event_info = _build_canonical_event_info(canonical_registry)
+        canonical_events = set(canonical_event_info.keys())
         
         # 1. Load Performance Attribution (if provided)
         attribution_map = {}
@@ -130,9 +480,19 @@ def main() -> int:
                 # print(f"Processing claim: {claim_id}, type: {c_type}")
                 
                 if c_type == 'event':
-                    event_type = _extract_event_type(statement)
-                    if not event_type:
+                    raw_event_type = _extract_event_type(statement)
+                    if not raw_event_type:
                         continue
+                    ontology_ctx = _event_ontology_context(
+                        raw_event_type,
+                        taxonomy=taxonomy,
+                        canonical_registry=canonical_registry,
+                        event_index=event_ontology_index,
+                        canonical_event_info=canonical_event_info,
+                        verb_lexicon=verb_lexicon,
+                        strict=strict_ontology,
+                    )
+                    event_type = str(ontology_ctx["canonical_event_type"])
                     
                     target_path = target_pattern.replace("{event_type}", event_type)
                     spec_exists = (PROJECT_ROOT.parent / target_path).exists()
@@ -155,9 +515,25 @@ def main() -> int:
                         "concept_id": row['concept_id'],
                         "object_type": "event",
                         "event_type": event_type,
+                        "canonical_event_type": event_type,
+                        "canonical_family": str(ontology_ctx["canonical_family"]),
+                        "ontology_in_taxonomy": bool(ontology_ctx["in_taxonomy"]),
+                        "ontology_in_canonical_registry": bool(ontology_ctx["in_canonical_registry"]),
+                        "ontology_fully_known": bool(ontology_ctx["fully_known"]),
+                        "ontology_event_known": bool(ontology_ctx["fully_known"]),
+                        "ontology_family_mismatch": bool(ontology_ctx["family_mismatch"]),
+                        "ontology_event_mechanism": ontology_ctx.get("mechanism"),
+                        "ontology_event_tags": list(ontology_ctx.get("tags", [])),
+                        "ontology_side_policy": ontology_ctx.get("side_policy"),
+                        "ontology_source_states": list(ontology_ctx["source_states"]),
+                        "ontology_family_states": list(ontology_ctx["family_states"]),
+                        "ontology_all_states": list(ontology_ctx["all_states"]),
+                        "ontology_unknown_templates": list(ontology_ctx["unknown_templates"]),
+                        "ontology_allowed_templates": list(ontology_ctx.get("canonical_allowed_templates", [])),
+                        "ontology_spec_hash": ontology_hash,
                         "target_spec_path": target_path,
-                        "rule_templates": _get_templates_for_event(event_type, taxonomy),
-                        "horizons": DEFAULT_HORIZONS,
+                        "rule_templates": list(ontology_ctx["rule_templates"]),
+                        "horizons": list(ontology_ctx["default_horizons"]),
                         "conditioning": DEFAULT_CONDITIONING,
                         "assets_filter": row['assets'],
                         "min_events": 50,
@@ -192,6 +568,22 @@ def main() -> int:
                             "concept_id": row['concept_id'],
                             "object_type": "feature",
                             "feature_name": feat,
+                            "canonical_event_type": None,
+                            "canonical_family": None,
+                            "ontology_in_taxonomy": False,
+                            "ontology_fully_known": False,
+                            "ontology_event_known": False,
+                            "ontology_in_canonical_registry": False,
+                            "ontology_family_mismatch": False,
+                            "ontology_event_mechanism": None,
+                            "ontology_event_tags": [],
+                            "ontology_side_policy": None,
+                            "ontology_source_states": [],
+                            "ontology_family_states": [],
+                            "ontology_all_states": [],
+                            "ontology_unknown_templates": [],
+                            "ontology_allowed_templates": [],
+                            "ontology_spec_hash": ontology_hash,
                             "target_spec_path": target_path,
                             "rule_templates": ["feature_conditioned_prediction"],
                             "horizons": DEFAULT_HORIZONS,
@@ -202,6 +594,8 @@ def main() -> int:
                             "regime_attribution_score": row['regime_attribution_score']
                         })
             except Exception as e:
+                if strict_ontology:
+                    raise
                 print(f"Error processing claim {row.get('claim_id')}: {e}")
                 continue
 
@@ -211,19 +605,129 @@ def main() -> int:
         
         tasks_df = pd.DataFrame(spec_tasks)
         tasks_df.to_parquet(atlas_dir / "spec_tasks.parquet", index=False)
+
+        event_rows = templates_df[templates_df.get("object_type") == "event"] if not templates_df.empty else pd.DataFrame()
+        event_types_generated = sorted(
+            {
+                str(x).strip()
+                for x in event_rows.get("canonical_event_type", pd.Series(dtype=object)).tolist()
+                if str(x).strip()
+            }
+        )
+        events_in_taxonomy = sorted(
+            {
+                str(ev).strip()
+                for _, ev in event_rows.loc[
+                    event_rows.get("ontology_in_taxonomy", False) == True, "canonical_event_type"
+                ].items()
+                if str(ev).strip()
+            }
+        ) if not event_rows.empty and "ontology_in_taxonomy" in event_rows.columns else []
+        events_in_canonical_registry = sorted(
+            {
+                str(ev).strip()
+                for _, ev in event_rows.loc[
+                    event_rows.get("ontology_in_canonical_registry", False) == True, "canonical_event_type"
+                ].items()
+                if str(ev).strip()
+            }
+        ) if not event_rows.empty and "ontology_in_canonical_registry" in event_rows.columns else []
+        events_missing_in_canonical_registry = sorted(
+            {
+                str(ev).strip()
+                for _, ev in event_rows.loc[
+                    event_rows.get("ontology_in_canonical_registry", False) == False, "canonical_event_type"
+                ].items()
+                if str(ev).strip()
+            }
+        ) if not event_rows.empty and "ontology_in_canonical_registry" in event_rows.columns else []
+
+        unknown_templates_list = sorted(
+            set(_flatten_list_column(event_rows.get("ontology_unknown_templates", pd.Series(dtype=object))))
+        )
+
+        state_rows = _state_registry_rows(state_registry)
+        states_total = len(state_rows)
+        states_linked_total = 0
+        states_with_missing_source_event: List[str] = []
+        for state in state_rows:
+            state_id = _norm_label(state.get("state_id", ""))
+            source_event = _norm_label(state.get("source_event_type", ""))
+            if source_event and source_event in canonical_events:
+                states_linked_total += 1
+            elif state_id and source_event:
+                states_with_missing_source_event.append(state_id)
+        states_with_missing_source_event = sorted(set(states_with_missing_source_event))
+
+        taxonomy_version = taxonomy.get("schema_version") or taxonomy.get("version")
+        canonical_version = canonical_registry.get("version")
+        state_registry_version = state_registry.get("version")
+        verb_lexicon_version = verb_lexicon.get("version")
+
+        ontology_linkage = {
+            "ontology_spec_hash": ontology_hash,
+            "spec_paths": {
+                "taxonomy": str(TAXONOMY_PATH.relative_to(PROJECT_ROOT.parent)),
+                "canonical_event_registry": str(CANONICAL_EVENT_REGISTRY_PATH.relative_to(PROJECT_ROOT.parent)),
+                "state_registry": str(STATE_REGISTRY_PATH.relative_to(PROJECT_ROOT.parent)),
+                "template_verb_lexicon": str(VERB_LEXICON_PATH.relative_to(PROJECT_ROOT.parent)),
+            },
+            "spec_versions": {
+                "taxonomy": taxonomy_version,
+                "canonical_event_registry": canonical_version,
+                "state_registry": state_registry_version,
+                "template_verb_lexicon": verb_lexicon_version,
+            },
+            "counts": {
+                "events_total": int(len(event_types_generated)),
+                "events_in_taxonomy": int(len(events_in_taxonomy)),
+                "events_in_canonical_registry": int(len(events_in_canonical_registry)),
+                "templates_total": int(len(templates_df)),
+                "event_templates_total": int((templates_df.get("object_type") == "event").sum()) if not templates_df.empty else 0,
+                "feature_templates_total": int((templates_df.get("object_type") == "feature").sum()) if not templates_df.empty else 0,
+                "unknown_templates_total": int(len(_flatten_list_column(event_rows.get("ontology_unknown_templates", pd.Series(dtype=object))))),
+                "states_total": int(states_total),
+                "states_linked_total": int(states_linked_total),
+                "event_templates_unknown_ontology": int(
+                    templates_df[
+                        (templates_df.get("object_type") == "event")
+                        & (~templates_df.get("ontology_fully_known", False))
+                    ].shape[0]
+                ) if not templates_df.empty and "ontology_fully_known" in templates_df.columns else 0,
+            },
+            "unresolved": {
+                "events_missing_in_canonical_registry": events_missing_in_canonical_registry,
+                "templates_missing_in_verb_lexicon": unknown_templates_list,
+                "states_with_missing_source_event": states_with_missing_source_event,
+            },
+        }
+        with (atlas_dir / "ontology_linkage.json").open("w", encoding="utf-8") as f:
+            json.dump(ontology_linkage, f, indent=2, sort_keys=True)
         
         # Human-readable index
         with (atlas_dir / "template_index.md").open("w", encoding="utf-8") as f:
             f.write("# Knowledge Atlas: Candidate Templates\n\n")
             f.write(f"Generated from `{args.backlog}`\n\n")
             if not templates_df.empty:
-                f.write(templates_df[["template_id", "object_type", "event_type", "regime_attribution_score", "assets_filter"]].to_markdown(index=False))
+                table_cols = [
+                    "template_id",
+                    "object_type",
+                    "event_type",
+                    "canonical_family",
+                    "regime_attribution_score",
+                    "assets_filter",
+                ]
+                f.write(templates_df.reindex(columns=table_cols).to_markdown(index=False))
             else:
                 f.write("No active templates found.\n")
 
         finalize_manifest(manifest, "success", stats={
             "templates_count": len(candidate_templates),
-            "spec_tasks_count": len(spec_tasks)
+            "spec_tasks_count": len(spec_tasks),
+            "ontology_strict": int(strict_ontology),
+            "ontology_spec_hash": ontology_hash,
+            "ontology_event_count": int(len(event_ontology_index)),
+            "ontology_canonical_registry_event_count": int(len(canonical_events)),
         })
         return 0
 
