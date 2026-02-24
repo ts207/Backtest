@@ -8,7 +8,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -22,6 +22,7 @@ from pipelines._lib.execution_costs import resolve_execution_costs
 from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.selection_log import append_selection_log
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from events.registry import EVENT_REGISTRY_SPECS, filter_phase1_rows_for_event_type
 from strategy_dsl.policies import event_policy, overlay_defaults
 from strategy_dsl.schema import (
     Blueprint,
@@ -62,21 +63,6 @@ VOL_REGIME_CONDITION_MAP: Dict[str, int] = {
 
 
 from strategy_dsl.contract_v1 import NonExecutableConditionError, normalize_entry_condition as normalize_entry_condition_v1
-
-PHASE1_EVENT_FILES: Dict[str, Tuple[str, str]] = {
-    "vol_shock_relaxation": ("vol_shock_relaxation", "vol_shock_relaxation_events.csv"),
-    "liquidity_refill_lag_window": ("liquidity_refill_lag_window", "liquidity_refill_lag_window_events.csv"),
-    "liquidity_absence_window": ("liquidity_absence_window", "liquidity_absence_window_events.csv"),
-    "vol_aftershock_window": ("vol_aftershock_window", "vol_aftershock_window_events.csv"),
-    "directional_exhaustion_after_forced_flow": (
-        "directional_exhaustion_after_forced_flow",
-        "directional_exhaustion_after_forced_flow_events.csv",
-    ),
-    "cross_venue_desync": ("cross_venue_desync", "cross_venue_desync_events.csv"),
-    "liquidity_vacuum": ("liquidity_vacuum", "liquidity_vacuum_events.csv"),
-    "funding_extreme_reversal_window": ("funding_extreme_reversal_window", "funding_extreme_reversal_window_events.csv"),
-    "range_compression_breakout_window": ("range_compression_breakout_window", "range_compression_breakout_window_events.csv"),
-}
 
 
 def _load_gates_spec() -> Dict[str, Any]:
@@ -175,7 +161,9 @@ def _load_phase2_table(run_id: str, event_type: str) -> pd.DataFrame:
 
 
 def _event_stats(run_id: str, event_type: str) -> Dict[str, np.ndarray]:
-    report_dir, file_name = PHASE1_EVENT_FILES.get(event_type, (event_type, f"{event_type}_events.csv"))
+    spec = EVENT_REGISTRY_SPECS.get(str(event_type))
+    report_dir = spec.reports_dir if spec is not None else str(event_type)
+    file_name = spec.events_file if spec is not None else f"{event_type}_events.csv"
     path = DATA_ROOT / "reports" / report_dir / run_id / file_name
     if not path.exists():
         return {"half_life": np.array([]), "adverse": np.array([]), "favorable": np.array([])}
@@ -184,6 +172,8 @@ def _event_stats(run_id: str, event_type: str) -> Dict[str, np.ndarray]:
         df = pd.read_csv(path)
     except Exception:
         return {"half_life": np.array([]), "adverse": np.array([]), "favorable": np.array([])}
+    if spec is not None:
+        df = filter_phase1_rows_for_event_type(df, spec.event_type)
     if df.empty:
         return {"half_life": np.array([]), "adverse": np.array([]), "favorable": np.array([])}
 
@@ -988,6 +978,11 @@ def _build_blueprint(
             source_path=str(merged.get("source_path", "")),
             compiler_version=COMPILER_VERSION,
             generated_at_utc=DETERMINISTIC_TS,
+            bridge_embargo_days_used=(
+                None
+                if merged.get("bridge_embargo_days_used") in (None, "")
+                else _safe_int(merged.get("bridge_embargo_days_used"), -1)
+            ),
             events_count_used_for_gate=_safe_int(merged.get("n_events", merged.get("sample_size", 0)), 0),
             min_events_threshold=int(min_events),
             cost_config_digest=cost_config_digest,

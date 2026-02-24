@@ -28,6 +28,15 @@ PHASE2_EVENT_CHAIN = [
     ("liquidity_vacuum", "analyze_liquidity_vacuum.py", ["--timeframe", "5m"]),
     ("funding_extreme_reversal_window", "analyze_funding_extreme_reversal_window.py", []),
     ("range_compression_breakout_window", "analyze_range_compression_breakout_window.py", []),
+    ("funding_episodes", "analyze_funding_episode_events.py", []),
+    ("funding_extreme_onset", "analyze_funding_episode_events.py", []),
+    ("funding_persistence_window", "analyze_funding_episode_events.py", []),
+    ("funding_normalization", "analyze_funding_episode_events.py", []),
+    ("oi_shocks", "analyze_oi_shock_events.py", []),
+    ("oi_spike_positive", "analyze_oi_shock_events.py", []),
+    ("oi_spike_negative", "analyze_oi_shock_events.py", []),
+    ("oi_flush", "analyze_oi_shock_events.py", []),
+    ("LIQUIDATION_CASCADE", "analyze_liquidation_cascade.py", []),
 ]
 
 

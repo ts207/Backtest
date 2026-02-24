@@ -6,7 +6,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import yaml
@@ -17,14 +17,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.io_utils import ensure_dir
+from pipelines._lib.spec_loader import load_global_defaults
 
 def _load_global_defaults() -> Dict[str, Any]:
-    """Load global defaults from spec."""
-    path = PROJECT_ROOT.parent / "spec" / "global_defaults.yaml"
-    if not path.exists():
-        return {}
-    with open(path, "r") as f:
-        return yaml.safe_load(f).get("defaults", {})
+    return load_global_defaults(project_root=PROJECT_ROOT)
 
 GLOBAL_DEFAULTS = _load_global_defaults()
 

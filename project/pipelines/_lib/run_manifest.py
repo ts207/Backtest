@@ -3,9 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from pipelines._lib.spec_utils import get_spec_hashes
 
 
 def _utc_now_iso() -> str:
@@ -18,6 +21,70 @@ def _manifest_path(run_id: str, stage: str) -> Path:
     out_dir = data_root / "runs" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir / f"{stage}.json"
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _git_commit(project_root: Path) -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(project_root), "rev-parse", "HEAD"],
+            text=True,
+        ).strip()
+    except Exception:
+        return "unknown"
+
+
+def _sha256_file(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def _input_parquet_hashes(inputs: List[Dict[str, Any]], *, max_files: int = 32) -> Dict[str, Any]:
+    files: List[Path] = []
+    seen: set[str] = set()
+    for item in inputs:
+        raw_path = item.get("path")
+        if not raw_path:
+            continue
+        path = Path(str(raw_path))
+        if path.is_file() and path.suffix.lower() == ".parquet":
+            key = str(path.resolve())
+            if key not in seen:
+                files.append(path)
+                seen.add(key)
+            continue
+        if path.is_dir():
+            for child in sorted(path.rglob("*.parquet")):
+                key = str(child.resolve())
+                if key in seen:
+                    continue
+                files.append(child)
+                seen.add(key)
+                if len(files) >= max_files:
+                    break
+        if len(files) >= max_files:
+            break
+
+    hashes: Dict[str, str] = {}
+    for path in files:
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            hashes[str(path)] = _sha256_file(path)
+        except OSError:
+            continue
+
+    return {
+        "files": hashes,
+        "truncated": len(files) >= max_files,
+        "max_files": int(max_files),
+    }
 
 
 REQUIRED_INPUT_PROVENANCE_KEYS = (
@@ -97,15 +164,19 @@ def start_manifest(
     inputs: List[Dict[str, Any]],
     outputs: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
+    project_root = _project_root()
     return {
         "run_id": run_id,
         "stage": stage_name,
         "started_at": _utc_now_iso(),
         "finished_at": None,
         "status": "running",
+        "git_commit": _git_commit(project_root),
+        "spec_hashes": get_spec_hashes(project_root.parent),
         "parameters": params,
         "inputs": inputs,
         "outputs": outputs,
+        "input_parquet_hashes": {"files": {}, "truncated": False, "max_files": 32},
         "error": None,
         "stats": None,
     }
@@ -121,6 +192,7 @@ def finalize_manifest(
     manifest["status"] = status
     manifest["error"] = error
     manifest["stats"] = stats
+    manifest["input_parquet_hashes"] = _input_parquet_hashes(manifest.get("inputs", []))
 
     out_path = _manifest_path(manifest["run_id"], manifest["stage"])
     temp_path = out_path.with_suffix(out_path.suffix + ".tmp")

@@ -35,19 +35,26 @@ def _load_event_specs() -> Dict[str, EventRegistrySpec]:
     if not spec_dir.exists():
         return {}
 
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    required = {"event_type", "reports_dir", "events_file", "signal_column"}
     specs = {}
     for yaml_file in sorted(spec_dir.glob("*.yaml")):
         with open(yaml_file, "r") as f:
             data = yaml.safe_load(f)
-            if not data:
-                continue
-            spec = EventRegistrySpec(
-                event_type=data["event_type"],
-                reports_dir=data["reports_dir"],
-                events_file=data["events_file"],
-                signal_column=data["signal_column"],
-            )
-            specs[spec.event_type] = spec
+        if not data:
+            continue
+        missing = required - set(data.keys())
+        if missing:
+            _log.debug("Skipping %s — missing registry fields: %s", yaml_file.name, missing)
+            continue
+        spec = EventRegistrySpec(
+            event_type=data["event_type"],
+            reports_dir=data["reports_dir"],
+            events_file=data["events_file"],
+            signal_column=data["signal_column"],
+        )
+        specs[spec.event_type] = spec
     return specs
 
 
@@ -63,14 +70,56 @@ REGISTRY_EVENT_COLUMNS = [
     "event_type",
     "signal_column",
     "timestamp",
+    "enter_ts",
+    "exit_ts",
     "symbol",
     "event_id",
     "features_at_event",
 ]
 
+# Some phase-1 analyzers emit multiple event families into one shared CSV.
+# For subtype specs we strictly keep exact matches; for aggregate specs we map
+# to an explicit union of child family labels.
+AGGREGATE_EVENT_TYPE_UNIONS: Dict[str, Sequence[str]] = {
+    "funding_episodes": (
+        "funding_extreme_onset",
+        "funding_acceleration",
+        "funding_persistence_window",
+        "funding_normalization",
+    ),
+    "oi_shocks": (
+        "oi_spike_positive",
+        "oi_spike_negative",
+        "oi_flush",
+    ),
+}
+
+
+def expected_event_types_for_spec(event_type: str) -> Sequence[str]:
+    normalized = str(event_type).strip()
+    if not normalized:
+        return ()
+    return AGGREGATE_EVENT_TYPE_UNIONS.get(normalized, (normalized,))
+
+
+def filter_phase1_rows_for_event_type(events: pd.DataFrame, event_type: str) -> pd.DataFrame:
+    if events.empty or "event_type" not in events.columns:
+        return events
+    allowed = set(expected_event_types_for_spec(event_type))
+    if not allowed:
+        return events.iloc[0:0].copy()
+    return events[events["event_type"].astype(str).isin(allowed)].copy()
+
 
 def _empty_registry_events() -> pd.DataFrame:
     return pd.DataFrame(columns=REGISTRY_EVENT_COLUMNS)
+
+
+def _active_signal_column(signal_column: str) -> str:
+    signal = str(signal_column).strip()
+    if signal.endswith("_event"):
+        return f"{signal[:-6]}_active"
+    return f"{signal}_active"
 
 
 def _registry_root(data_root: Path, run_id: str) -> Path:
@@ -116,15 +165,26 @@ def normalize_phase1_events(events: pd.DataFrame, spec: EventRegistrySpec, run_i
     if events.empty:
         return _empty_registry_events()
 
-    out = events.copy()
-    timestamp_col = _first_existing_column(out, ["enter_ts", "anchor_ts", "timestamp", "event_ts"])
+    out = filter_phase1_rows_for_event_type(events.copy(), spec.event_type)
+    if out.empty:
+        return _empty_registry_events()
+    timestamp_col = _first_existing_column(out, ["enter_ts", "anchor_ts", "timestamp", "event_ts", "start_ts"])
     if timestamp_col is None:
         return _empty_registry_events()
 
-    out["timestamp"] = pd.to_datetime(out[timestamp_col], utc=True, errors="coerce")
-    out = out.dropna(subset=["timestamp"]).copy()
+    out["enter_ts"] = pd.to_datetime(out[timestamp_col], utc=True, errors="coerce")
+    exit_col = _first_existing_column(out, ["exit_ts", "end_ts", "event_end_ts", "relax_ts", "norm_ts", "end_time", "exit_time"])
+    if exit_col is not None:
+        out["exit_ts"] = pd.to_datetime(out[exit_col], utc=True, errors="coerce")
+    else:
+        out["exit_ts"] = out["enter_ts"]
+
+    out["timestamp"] = out["enter_ts"]
+    out = out.dropna(subset=["timestamp", "enter_ts"]).copy()
     if out.empty:
         return _empty_registry_events()
+    out["exit_ts"] = out["exit_ts"].where(out["exit_ts"].notna(), out["enter_ts"])
+    out["exit_ts"] = out["exit_ts"].where(out["exit_ts"] >= out["enter_ts"], out["enter_ts"])
 
     if "symbol" not in out.columns:
         out["symbol"] = "ALL"
@@ -149,6 +209,8 @@ def normalize_phase1_events(events: pd.DataFrame, spec: EventRegistrySpec, run_i
             "event_type": spec.event_type,
             "signal_column": spec.signal_column,
             "timestamp": out["timestamp"],
+            "enter_ts": out["enter_ts"],
+            "exit_ts": out["exit_ts"],
             "symbol": out["symbol"],
             "event_id": out["event_id"],
             "features_at_event": out["features_at_event"],
@@ -200,6 +262,11 @@ def _normalize_registry_events_frame(events: pd.DataFrame) -> pd.DataFrame:
     out["event_type"] = out["event_type"].fillna("").astype(str)
     out["signal_column"] = out["signal_column"].fillna("").astype(str)
     out["timestamp"] = pd.to_datetime(out["timestamp"], utc=True, errors="coerce")
+    out["enter_ts"] = pd.to_datetime(out["enter_ts"], utc=True, errors="coerce")
+    out["exit_ts"] = pd.to_datetime(out["exit_ts"], utc=True, errors="coerce")
+    out["enter_ts"] = out["enter_ts"].where(out["enter_ts"].notna(), out["timestamp"])
+    out["exit_ts"] = out["exit_ts"].where(out["exit_ts"].notna(), out["enter_ts"])
+    out["exit_ts"] = out["exit_ts"].where(out["exit_ts"] >= out["enter_ts"], out["enter_ts"])
     out = out.dropna(subset=["timestamp"]).copy()
     out["symbol"] = out["symbol"].fillna("ALL").astype(str).str.upper().replace("", "ALL")
     out["event_id"] = out["event_id"].fillna("").astype(str)
@@ -273,6 +340,7 @@ def build_event_flags(
         frame = pd.DataFrame({"timestamp": pd.to_datetime(ts, utc=True), "symbol": symbol})
         for signal in sorted(REGISTRY_BACKED_SIGNALS):
             frame[signal] = False
+            frame[_active_signal_column(signal)] = False
         frames.append(frame)
 
     if not frames:
@@ -289,19 +357,40 @@ def build_event_flags(
             signal = str(getattr(row, "signal_column", "")).strip()
             if signal not in REGISTRY_BACKED_SIGNALS:
                 continue
+            active_signal = _active_signal_column(signal)
             symbol = str(getattr(row, "symbol", "ALL")).strip().upper() or "ALL"
             ts = getattr(row, "timestamp", pd.NaT)
             if pd.isna(ts):
                 continue
+            enter_ts = getattr(row, "enter_ts", pd.NaT)
+            exit_ts = getattr(row, "exit_ts", pd.NaT)
+            if pd.isna(enter_ts):
+                enter_ts = ts
+            if pd.isna(exit_ts):
+                exit_ts = enter_ts
+            if exit_ts < enter_ts:
+                exit_ts = enter_ts
             if symbol == "ALL":
                 mask = flags["timestamp"] == ts
+                active_mask = (flags["timestamp"] >= enter_ts) & (flags["timestamp"] <= exit_ts)
             else:
                 mask = (flags["symbol"] == symbol) & (flags["timestamp"] == ts)
+                active_mask = (
+                    (flags["symbol"] == symbol)
+                    & (flags["timestamp"] >= enter_ts)
+                    & (flags["timestamp"] <= exit_ts)
+                )
             if mask.any():
                 flags.loc[mask, signal] = True
+            if active_mask.any():
+                flags.loc[active_mask, active_signal] = True
 
     for signal in sorted(REGISTRY_BACKED_SIGNALS):
         flags[signal] = flags[signal].fillna(False).astype(bool)
+        active_signal = _active_signal_column(signal)
+        if active_signal not in flags.columns:
+            flags[active_signal] = False
+        flags[active_signal] = flags[active_signal].fillna(False).astype(bool)
     flags = flags.sort_values(["timestamp", "symbol"]).reset_index(drop=True)
     return flags
 
@@ -354,7 +443,10 @@ def load_registry_events(
 def load_registry_flags(data_root: Path, run_id: str, symbol: str | None = None) -> pd.DataFrame:
     flags = _read_registry_stem(data_root=data_root, run_id=run_id, stem="event_flags")
     if flags.empty:
-        cols = ["timestamp", "symbol", *sorted(REGISTRY_BACKED_SIGNALS)]
+        cols = ["timestamp", "symbol"]
+        for signal in sorted(REGISTRY_BACKED_SIGNALS):
+            cols.append(signal)
+            cols.append(_active_signal_column(signal))
         return pd.DataFrame(columns=cols)
 
     flags["timestamp"] = pd.to_datetime(flags.get("timestamp"), utc=True, errors="coerce")
@@ -366,5 +458,12 @@ def load_registry_flags(data_root: Path, run_id: str, symbol: str | None = None)
         if signal not in flags.columns:
             flags[signal] = False
         flags[signal] = flags[signal].fillna(False).astype(bool)
-    cols = ["timestamp", "symbol", *sorted(REGISTRY_BACKED_SIGNALS)]
+        active_signal = _active_signal_column(signal)
+        if active_signal not in flags.columns:
+            flags[active_signal] = False
+        flags[active_signal] = flags[active_signal].fillna(False).astype(bool)
+    cols = ["timestamp", "symbol"]
+    for signal in sorted(REGISTRY_BACKED_SIGNALS):
+        cols.append(signal)
+        cols.append(_active_signal_column(signal))
     return flags[cols].sort_values(["timestamp", "symbol"]).reset_index(drop=True)

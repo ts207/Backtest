@@ -10,6 +10,11 @@ from pipelines._lib.validation import ensure_utc_timestamp, validate_columns
 FUNDING_MAX_ABS = 0.01
 FUNDING_SCALE_CANDIDATES = (1.0, 0.01, 0.0001)
 _KNOWN_DECIMAL_FUNDING_SOURCES = {"archive_monthly", "archive_daily", "api"}
+FUNDING_SCALE_NAME_TO_MULTIPLIER = {
+    "decimal": 1.0,
+    "percent": 0.01,
+    "bps": 0.0001,
+}
 
 
 def assert_ohlcv_schema(df: pd.DataFrame) -> None:
@@ -42,9 +47,11 @@ def infer_and_apply_funding_scale(
     df: pd.DataFrame,
     col: str = "funding_rate",
     source_col: str = "source",
-) -> Tuple[pd.DataFrame, float]:
+    explicit_scale: float | None = None,
+) -> Tuple[pd.DataFrame, float, float]:
     """
     Infer funding rate scale and add funding_rate_scaled column.
+    Returns (scaled_frame, scale_multiplier, confidence).
     """
     validate_columns(df, [col])
     series = pd.to_numeric(df[col], errors="coerce")
@@ -54,6 +61,7 @@ def infer_and_apply_funding_scale(
 
     max_abs = float(non_null.abs().max())
     scale_used = None
+    confidence = 0.0
 
     # Source-aware strict path: known Binance ingest sources are already decimal.
     if source_col in df.columns:
@@ -65,19 +73,33 @@ def infer_and_apply_funding_scale(
                     f"Observed max_abs={max_abs} exceeds {FUNDING_MAX_ABS:.4f}."
                 )
             scale_used = 1.0
+            confidence = 1.0
+
+    if explicit_scale is not None:
+        scale_used = float(explicit_scale)
+        confidence = 1.0
 
     if scale_used is None:
+        valid_scales: list[float] = []
         for scale in FUNDING_SCALE_CANDIDATES:
             if max_abs * scale <= FUNDING_MAX_ABS:
-                scale_used = scale
-                break
+                valid_scales.append(float(scale))
 
-    if scale_used is None:
-        raise ValueError(f"Unable to infer funding scale; max_abs={max_abs}")
+        if not valid_scales:
+            raise ValueError(f"Unable to infer funding scale; max_abs={max_abs}")
+
+        scale_used = valid_scales[0]
+        if len(valid_scales) == 1:
+            confidence = 1.0
+        else:
+            # Ambiguous when multiple candidates satisfy the sanity bound.
+            # Confidence increases only when inferred scale is very close to the bound.
+            cap_utilization = min(1.0, (max_abs * scale_used) / FUNDING_MAX_ABS)
+            confidence = float(0.5 + (0.49 * cap_utilization))
 
     out = df.copy()
     out["funding_rate_scaled"] = series * scale_used
-    return out, scale_used
+    return out, float(scale_used), float(confidence)
 
 
 def assert_funding_sane(df: pd.DataFrame, col: str = "funding_rate_scaled") -> None:

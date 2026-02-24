@@ -75,6 +75,7 @@ def _to_float(value: object, default: float = 0.0) -> float:
 
 
 def _build_blueprint(raw: Dict[str, object]) -> Blueprint:
+    validate_feature_references(raw)
     scope = raw.get("symbol_scope", {})
     entry = raw.get("entry", {})
     exit_spec = raw.get("exit", {})
@@ -160,6 +161,11 @@ def _build_blueprint(raw: Dict[str, object]) -> Blueprint:
             source_path=str(lineage.get("source_path", "")),
             compiler_version=str(lineage.get("compiler_version", "")),
             generated_at_utc=str(lineage.get("generated_at_utc", "")),
+            bridge_embargo_days_used=(
+                None
+                if lineage.get("bridge_embargo_days_used") in (None, "")
+                else int(lineage.get("bridge_embargo_days_used"))
+            ),
         ),
     )
     bp.validate()
@@ -469,7 +475,11 @@ def _signal_list_mask(frame: pd.DataFrame, signal_names: List[str], blueprint: B
     if not signal_names:
         return pd.Series(True, index=frame.index, dtype=bool)
 
-    unknown = sorted(set(signal_names) - KNOWN_ENTRY_SIGNALS)
+    unknown = sorted(
+        signal
+        for signal in set(signal_names)
+        if signal not in KNOWN_ENTRY_SIGNALS and signal not in REGISTRY_SIGNAL_COLUMNS
+    )
     if unknown:
         joined = ", ".join(unknown)
         raise ValueError(f"Blueprint `{blueprint.id}` has unknown {signal_kind} signals: {joined}")
@@ -487,6 +497,39 @@ def _entry_eligibility_mask(frame: pd.DataFrame, entry: EntrySpec, blueprint: Bl
     trigger_mask = _signal_list_mask(frame, entry.triggers, blueprint, signal_kind="trigger")
     confirmation_mask = _signal_list_mask(frame, entry.confirmations, blueprint, signal_kind="confirmation")
     return (condition_mask & trigger_mask & confirmation_mask).fillna(False)
+
+
+def _validate_overlay_columns(frame: pd.DataFrame, overlays: List[OverlaySpec], blueprint_id: str) -> None:
+    cols = set(frame.columns)
+
+    def _has_numeric_values(column: str) -> bool:
+        if column not in cols:
+            return False
+        series = pd.to_numeric(frame[column], errors="coerce")
+        return bool(series.notna().any())
+
+    missing: Dict[str, List[str]] = {}
+    for overlay in overlays:
+        required: List[str] = []
+        if overlay.name == "liquidity_guard":
+            required = ["quote_volume"]
+        elif overlay.name == "spread_guard":
+            required = ["spread_bps"]
+        elif overlay.name == "funding_guard":
+            required = ["funding_rate_scaled"]
+        elif overlay.name == "cross_venue_guard":
+            required = ["spread_bps"]
+        elif overlay.name in {"risk_throttle", "session_guard"}:
+            required = []
+        else:
+            required = []
+        missing_cols = [col for col in required if not _has_numeric_values(col)]
+        if missing_cols:
+            missing[overlay.name] = sorted(set(missing_cols))
+
+    if missing:
+        detail = "; ".join(f"{name}: {', '.join(cols_)}" for name, cols_ in sorted(missing.items()))
+        raise ValueError(f"Blueprint `{blueprint_id}` missing required columns for overlays -> {detail}")
 
 
 def _event_direction_bias(event_type: str) -> int:
@@ -608,6 +651,7 @@ class DslInterpreterV1:
         )
         merged = merged.sort_values("timestamp").reset_index(drop=True)
         frame = _build_signal_frame(merged)
+        _validate_overlay_columns(frame, blueprint.overlays, blueprint.id)
 
         symbol = str(params.get("strategy_symbol", "")).strip().upper()
         allowed_symbols = {str(s).strip().upper() for s in blueprint.symbol_scope.symbols}
@@ -720,7 +764,8 @@ class DslInterpreterV1:
                 if state == "flat":
                     if is_eligible:
                         state = "armed"
-                        arm_remaining = max(int(blueprint.entry.delay_bars), int(blueprint.entry.arm_bars))
+                        # Enforce at least one-bar decision lag: signals computed on bar t are tradable no earlier than t+1.
+                        arm_remaining = max(1, int(blueprint.entry.delay_bars), int(blueprint.entry.arm_bars))
                     else:
                         positions.append(0)
                         continue

@@ -20,9 +20,10 @@ from eval.splits import build_time_splits
 from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.execution_costs import resolve_execution_costs
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from pipelines._lib.timeframe_constants import BARS_PER_YEAR_BY_TIMEFRAME
 
 INITIAL_EQUITY = 1_000_000.0
-BARS_PER_YEAR_5M = 365 * 24 * 12
+BARS_PER_YEAR_5M = BARS_PER_YEAR_BY_TIMEFRAME["5m"]
 REQUIRED_SPLIT_METRIC_KEYS = ["total_trades", "ending_equity", "sharpe_annualized", "max_drawdown"]
 REQUIRED_STRATEGY_RETURN_COLUMNS = [
     "timestamp",
@@ -126,6 +127,7 @@ def _expected_blueprint_strategy_ids(
     event_type: str,
     top_k: int,
     cli_symbols: List[str],
+    embargo_days: int | None = None,
 ) -> List[str]:
     raw_rows = _load_blueprints_raw(blueprints_path)
     # B1: Hard fail if ANY blueprint has promotion_track != 'standard'.
@@ -146,6 +148,7 @@ def _expected_blueprint_strategy_ids(
         )
     cli_set = {str(symbol).strip().upper() for symbol in cli_symbols if str(symbol).strip()}
     out: List[str] = []
+    selected_rows: List[Dict[str, object]] = []
     seen = set()
     for row in raw_rows:
         row_event = str(row.get("event_type", "")).strip()
@@ -168,6 +171,7 @@ def _expected_blueprint_strategy_ids(
         if strategy_id in seen:
             continue
         out.append(strategy_id)
+        selected_rows.append(row)
         seen.add(strategy_id)
         if len(out) >= max(1, int(top_k)):
             break
@@ -176,6 +180,32 @@ def _expected_blueprint_strategy_ids(
             "No blueprint strategies selected for walkforward. "
             f"path={blueprints_path}, event_type={event_type}, top_k={int(top_k)}"
         )
+    if embargo_days is not None:
+        required_embargo = int(embargo_days)
+        for row in selected_rows:
+            bp_id = str(row.get("id", "<unknown>")).strip() or "<unknown>"
+            lineage = row.get("lineage", {})
+            raw_embargo = lineage.get("bridge_embargo_days_used") if isinstance(lineage, dict) else None
+            if raw_embargo in (None, ""):
+                raise ValueError(
+                    "EVALUATION GUARD [INV_BRIDGE_WF_EMBARGO_MATCH]: "
+                    f"blueprint {bp_id} is missing lineage.bridge_embargo_days_used. "
+                    f"Walk-forward requires explicit bridge embargo lineage matching --embargo_days={required_embargo}."
+                )
+            try:
+                lineage_embargo = int(raw_embargo)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    "EVALUATION GUARD [INV_BRIDGE_WF_EMBARGO_MATCH]: "
+                    f"blueprint {bp_id} has non-integer lineage.bridge_embargo_days_used={raw_embargo!r}. "
+                    f"Expected {required_embargo}."
+                ) from None
+            if lineage_embargo != required_embargo:
+                raise ValueError(
+                    "EVALUATION GUARD [INV_BRIDGE_WF_EMBARGO_MATCH]: "
+                    f"blueprint {bp_id} has lineage.bridge_embargo_days_used={lineage_embargo} "
+                    f"but walk-forward --embargo_days={required_embargo}. Values must match."
+                )
     return out
 
 
@@ -844,6 +874,7 @@ def main() -> int:
                 event_type=str(args.blueprints_filter_event_type),
                 top_k=int(args.blueprints_top_k),
                 cli_symbols=[s.strip().upper() for s in str(args.symbols).split(",") if s.strip()],
+                embargo_days=int(args.embargo_days),
             )
 
         split_rows: List[Dict[str, object]] = []

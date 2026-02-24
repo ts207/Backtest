@@ -294,7 +294,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--end", default="")
     parser.add_argument("--train_frac", type=float, default=0.6)
     parser.add_argument("--validation_frac", type=float, default=0.2)
-    parser.add_argument("--embargo_days", type=int, default=0)
+    parser.add_argument("--embargo_days", type=int, default=1)
     parser.add_argument("--edge_cost_k", type=float, default=2.0)
     parser.add_argument("--stressed_cost_multiplier", type=float, default=1.5)
     parser.add_argument("--min_validation_trades", type=int, default=20)
@@ -357,7 +357,7 @@ def main() -> int:
             )]
 
         if survivors.empty:
-            empty_metrics = pd.DataFrame(columns=["candidate_id", *BRIDGE_FIELDS, "bridge_fail_reasons"])
+            empty_metrics = pd.DataFrame(columns=["candidate_id", *BRIDGE_FIELDS, "bridge_fail_reasons", "bridge_embargo_days_used"])
             empty_metrics.to_csv(out_candidate_metrics, index=False)
             pd.DataFrame(columns=["candidate_id", "overlay_base_candidate_id", "delta_validation_after_cost_bps", "delta_validation_stressed_after_cost_bps"]).to_csv(out_overlay_metrics, index=False)
             summary_payload = {
@@ -422,6 +422,7 @@ def main() -> int:
                 overlay_rows.append(overlay_delta)
 
         metrics_df = pd.DataFrame(metrics_rows)
+        metrics_df["bridge_embargo_days_used"] = int(args.embargo_days)
         overlay_df = pd.DataFrame(overlay_rows)
         metrics_df.to_csv(out_candidate_metrics, index=False)
         overlay_df.to_csv(out_overlay_metrics, index=False)

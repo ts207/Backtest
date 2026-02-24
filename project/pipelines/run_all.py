@@ -30,13 +30,13 @@ PHASE2_EVENT_CHAIN: List[Tuple[str, str, List[str]]] = [
     ("funding_extreme_reversal_window", "analyze_funding_extreme_reversal_window.py", []),
     ("range_compression_breakout_window", "analyze_range_compression_breakout_window.py", []),
     ("funding_episodes", "analyze_funding_episode_events.py", []),
-    ("funding_extreme_onset", "no_op.py", []),
-    ("funding_persistence_window", "no_op.py", []),
-    ("funding_normalization", "no_op.py", []),
+    ("funding_extreme_onset", "analyze_funding_episode_events.py", []),
+    ("funding_persistence_window", "analyze_funding_episode_events.py", []),
+    ("funding_normalization", "analyze_funding_episode_events.py", []),
     ("oi_shocks", "analyze_oi_shock_events.py", []),
-    ("oi_spike_positive", "no_op.py", []),
-    ("oi_spike_negative", "no_op.py", []),
-    ("oi_flush", "no_op.py", []),
+    ("oi_spike_positive", "analyze_oi_shock_events.py", []),
+    ("oi_spike_negative", "analyze_oi_shock_events.py", []),
+    ("oi_flush", "analyze_oi_shock_events.py", []),
     ("LIQUIDATION_CASCADE", "analyze_liquidation_cascade.py", []),
 ]
 _STRICT_RECOMMENDATIONS_CHECKLIST = False
@@ -317,7 +317,7 @@ def main() -> int:
     parser.add_argument("--bridge_min_validation_trades", type=int, default=20)
     parser.add_argument("--bridge_train_frac", type=float, default=0.6)
     parser.add_argument("--bridge_validation_frac", type=float, default=0.2)
-    parser.add_argument("--bridge_embargo_days", type=int, default=0)
+    parser.add_argument("--bridge_embargo_days", type=int, default=1)
     parser.add_argument("--run_discovery_quality_summary", type=int, default=1)
 
     parser.add_argument("--run_edge_candidate_universe", type=int, default=0)
@@ -459,7 +459,7 @@ def main() -> int:
                     "--end",
                     end,
                     "--force",
-                    "1", # Forced to 1 for debugging
+                    force_flag,
                 ],
             )
         )
@@ -1194,6 +1194,8 @@ def main() -> int:
                 pass
         return False
 
+    pipeline_started = time.perf_counter()
+    total_stages = len(stages)
     for idx, (stage, script, base_args) in enumerate(stages, start=1):
         # Event-specific gating: skip if queue has no entries for this event type.
         skip_stage = False
@@ -1210,12 +1212,23 @@ def main() -> int:
         if skip_stage:
             continue
 
-        print(f"[{idx}/{len(stages)}] Starting stage: {stage}")
+        elapsed_pipeline_before = time.perf_counter() - pipeline_started
+        print(
+            f"[{idx}/{total_stages}] Starting stage: {stage} "
+            f"(pipeline_elapsed={elapsed_pipeline_before:.1f}s)"
+        )
         started = time.perf_counter()
         ok = _run_stage(stage, script, base_args, run_id)
         elapsed_sec = time.perf_counter() - started
         stage_timings.append((stage, elapsed_sec))
-        print(f"[{idx}/{len(stages)}] Finished stage: {stage} ({elapsed_sec:.1f}s)")
+        elapsed_pipeline = time.perf_counter() - pipeline_started
+        avg_stage = elapsed_pipeline / float(idx)
+        remaining = max(0, total_stages - idx)
+        eta = remaining * avg_stage
+        print(
+            f"[{idx}/{total_stages}] Finished stage: {stage} ({elapsed_sec:.1f}s) "
+            f"| pipeline_elapsed={elapsed_pipeline:.1f}s | eta~{eta:.1f}s"
+        )
         if not ok:
             run_manifest["finished_at"] = _utc_now_iso()
             run_manifest["ended_at"] = run_manifest["finished_at"]

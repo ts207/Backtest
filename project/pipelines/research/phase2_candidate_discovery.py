@@ -26,6 +26,8 @@ from pipelines._lib.io_utils import (
 )
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.execution_costs import resolve_execution_costs
+from pipelines._lib.spec_loader import load_global_defaults
+from pipelines._lib.timeframe_constants import HORIZON_BARS_BY_TIMEFRAME
 from events.registry import EVENT_REGISTRY_SPECS
 from pipelines._lib.spec_utils import get_spec_hashes
 from pipelines.research.analyze_conditional_expectancy import (
@@ -63,19 +65,6 @@ PRIMARY_OUTPUT_COLUMNS = [
     "fail_reasons",
 ]
 
-# ---------------------------------------------------------------------------
-# Horizon string → bars (5-minute bar resolution)
-# ---------------------------------------------------------------------------
-_HORIZON_BARS: Dict[str, int] = {
-    "5m": 1,
-    "15m": 3,
-    "30m": 6,
-    "60m": 12,
-    "1h": 12,
-    "4h": 48,
-    "24h": 288,
-}
-
 # Rule template → directional multiplier applied to forward returns.
 # mean_reversion: we expect price to revert, so fade the move (direction = -1).
 # continuation:  we expect the move to continue (direction = +1).
@@ -109,12 +98,7 @@ def _load_family_spec() -> Dict[str, Any]:
 
 
 def _load_global_defaults() -> Dict[str, Any]:
-    """Load global defaults from spec."""
-    path = PROJECT_ROOT.parent / "spec" / "global_defaults.yaml"
-    if not path.exists():
-        return {}
-    with open(path, "r") as f:
-        return yaml.safe_load(f).get("defaults", {})
+    return load_global_defaults(project_root=PROJECT_ROOT)
 
 
 def _load_features(run_id: str, symbol: str) -> pd.DataFrame:
@@ -137,7 +121,7 @@ def _load_features(run_id: str, symbol: str) -> pd.DataFrame:
 
 
 def _horizon_to_bars(horizon: str) -> int:
-    return _HORIZON_BARS.get(horizon.lower().strip(), 12)
+    return HORIZON_BARS_BY_TIMEFRAME.get(horizon.lower().strip(), 12)
 
 
 def _compute_forward_returns(features_df: pd.DataFrame, horizon_bars: int) -> pd.Series:

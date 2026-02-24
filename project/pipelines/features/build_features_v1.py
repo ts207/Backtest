@@ -95,6 +95,7 @@ def _merge_optional_oi_liquidation(
     run_id: str,
 ) -> pd.DataFrame:
     out = bars.copy()
+    expected_rows = int(len(out))
 
     oi_candidates = [
         DATA_ROOT / "lake" / "raw" / "binance" / market / symbol / "open_interest" / "5m",
@@ -115,12 +116,19 @@ def _merge_optional_oi_liquidation(
         if oi_col is not None:
             oi_series = oi_frame[["timestamp", oi_col]].rename(columns={oi_col: "oi_notional"}).copy()
             oi_series["oi_notional"] = pd.to_numeric(oi_series["oi_notional"], errors="coerce")
+            if oi_series["timestamp"].duplicated(keep=False).any():
+                raise ValueError(f"Open interest timestamps must be unique for {symbol}")
             out = pd.merge_asof(
                 out.sort_values("timestamp"),
                 oi_series.sort_values("timestamp"),
                 on="timestamp",
                 direction="backward",
             )
+            if len(out) != expected_rows:
+                raise ValueError(
+                    f"Cardinality mismatch after OI merge for {symbol}: "
+                    f"expected {expected_rows}, got {len(out)}"
+                )
         else:
             out["oi_notional"] = np.nan
     else:
@@ -151,12 +159,19 @@ def _merge_optional_oi_liquidation(
         liq_payload = pd.DataFrame({"timestamp": liq_frame["timestamp"]})
         liq_payload["liquidation_notional"] = pd.to_numeric(liq_frame[value_col], errors="coerce") if value_col else 0.0
         liq_payload["liquidation_count"] = pd.to_numeric(liq_frame[count_col], errors="coerce") if count_col else 1.0
+        if liq_payload["timestamp"].duplicated(keep=False).any():
+            raise ValueError(f"Liquidation timestamps must be unique for {symbol}")
         out = pd.merge_asof(
             out.sort_values("timestamp"),
             liq_payload.sort_values("timestamp"),
             on="timestamp",
             direction="backward",
         )
+        if len(out) != expected_rows:
+            raise ValueError(
+                f"Cardinality mismatch after liquidation merge for {symbol}: "
+                f"expected {expected_rows}, got {len(out)}"
+            )
     else:
         out["liquidation_notional"] = 0.0
         out["liquidation_count"] = 0.0
@@ -220,8 +235,9 @@ def _add_basis_features(frame: pd.DataFrame, symbol: str, run_id: str, market: s
     perp_close = pd.to_numeric(out["close"], errors="coerce")
     spot_close = pd.to_numeric(out["spot_close"], errors="coerce")
     ratio = perp_close / spot_close.replace(0.0, np.nan)
-    out["basis_bps"] = ((ratio - 1.0) * 10_000.0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    out["basis_zscore"] = _rolling_zscore(pd.to_numeric(out["basis_bps"], errors="coerce").fillna(0.0), window=96)
+    out["basis_bps"] = ((ratio - 1.0) * 10_000.0).replace([np.inf, -np.inf], np.nan)
+    basis_z = _rolling_zscore(pd.to_numeric(out["basis_bps"], errors="coerce"), window=96)
+    out["basis_zscore"] = basis_z.where(out["basis_bps"].notna(), np.nan)
     out["cross_exchange_spread_z"] = out["basis_zscore"]
     out["spread_zscore"] = out["basis_zscore"]
     out = out.drop(columns=["spot_close"], errors="ignore")
