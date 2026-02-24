@@ -13,7 +13,7 @@ def test_edge_candidate_market_entry_action_is_executable_and_backtest_ready(mon
     monkeypatch.setattr(build_strategy_candidates, "BACKTEST_READY_BASE_STRATEGIES", {"liquidity_vacuum_v1"})
 
     row = {
-        "event": "liquidity_vacuum",
+        "event": "LIQUIDITY_VACUUM",
         "candidate_id": "cand_001",
         "status": "PROMOTED",
         "edge_score": 0.25,

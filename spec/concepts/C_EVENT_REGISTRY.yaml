@@ -1,6 +1,6 @@
 concept_id: C_EVENT_REGISTRY
 name: Event Registry
-definition: deterministic, versioned taxonomy of all tradable market situations with formal triggers and labeling rules.
+definition: deterministic, versioned taxonomy of tradable market situations, with strict separation between EVENT triggers and derived STATE windows.
 data_requirements:
   - dataset: events.parquet
     columns: [timestamp, symbol, event_type]
@@ -25,3 +25,7 @@ artifacts:
     path: project/events/registry.py
   - type: table
     path: data/lake/events/events.parquet
+  - type: spec
+    path: spec/events/canonical_event_registry.yaml
+  - type: spec
+    path: spec/states/state_registry.yaml

@@ -1,0 +1,42 @@
+version: 1
+kind: template_verb_lexicon
+
+# Canonical hypothesis operators used by Event x State x Template discovery.
+verbs:
+  directional_return_shape:
+    - mean_reversion
+    - continuation
+    - trend_continuation
+    - breakout_followthrough
+    - false_breakout_reversal
+    - overshoot_repair
+    - pullback_entry
+    - range_reversion
+    - momentum_fade
+    - acceleration_follow
+    - exhaustion_reversal
+    - reversal_or_squeeze
+
+  path_risk_tail:
+    - volatility_expansion_follow
+    - volatility_contraction_fade
+    - tail_risk_avoid
+    - drawdown_filter
+    - convexity_capture
+    - stop_run_repair
+    - slippage_aware_filter
+
+  cross_signal_relative_value:
+    - convergence
+    - divergence_continuation
+    - basis_repair
+    - lead_lag_follow
+    - desync_repair
+
+  conditional_gating:
+    - only_if_regime
+    - only_if_liquidity
+    - only_if_trend
+    - only_if_funding
+    - only_if_oi
+    - only_if_no_news_window

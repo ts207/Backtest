@@ -21,24 +21,16 @@ from events.registry import EVENT_REGISTRY_SPECS
 
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 PHASE2_EVENT_CHAIN: List[Tuple[str, str, List[str]]] = [
-    ("vol_shock_relaxation", "analyze_vol_shock_relaxation.py", ["--timeframe", "5m"]),
-    ("liquidity_refill_lag_window", "analyze_liquidity_refill_lag_window.py", []),
-    ("liquidity_absence_window", "analyze_liquidity_absence_window.py", []),
-    ("vol_aftershock_window", "analyze_vol_aftershock_window.py", []),
-    ("directional_exhaustion_after_forced_flow", "analyze_directional_exhaustion_after_forced_flow.py", []),
-    ("cross_venue_desync", "analyze_cross_venue_desync.py", []),
-    ("liquidity_vacuum", "analyze_liquidity_vacuum.py", ["--timeframe", "5m"]),
-    ("funding_extreme_reversal_window", "analyze_funding_extreme_reversal_window.py", []),
-    ("range_compression_breakout_window", "analyze_range_compression_breakout_window.py", []),
-    ("funding_episodes", "analyze_funding_episode_events.py", []),
-    ("funding_extreme_onset", "analyze_funding_episode_events.py", []),
-    ("funding_acceleration", "analyze_funding_episode_events.py", []),
-    ("funding_persistence_window", "analyze_funding_episode_events.py", []),
-    ("funding_normalization", "analyze_funding_episode_events.py", []),
-    ("oi_shocks", "analyze_oi_shock_events.py", []),
-    ("oi_spike_positive", "analyze_oi_shock_events.py", []),
-    ("oi_spike_negative", "analyze_oi_shock_events.py", []),
-    ("oi_flush", "analyze_oi_shock_events.py", []),
+    ("VOL_SHOCK", "analyze_vol_shock_relaxation.py", ["--timeframe", "5m"]),
+    ("LIQUIDITY_VACUUM", "analyze_liquidity_vacuum.py", ["--timeframe", "5m"]),
+    ("FORCED_FLOW_EXHAUSTION", "analyze_directional_exhaustion_after_forced_flow.py", []),
+    ("CROSS_VENUE_DESYNC", "analyze_cross_venue_desync.py", []),
+    ("FUNDING_EXTREME_ONSET", "analyze_funding_episode_events.py", []),
+    ("FUNDING_PERSISTENCE_TRIGGER", "analyze_funding_episode_events.py", []),
+    ("FUNDING_NORMALIZATION_TRIGGER", "analyze_funding_episode_events.py", []),
+    ("OI_SPIKE_POSITIVE", "analyze_oi_shock_events.py", []),
+    ("OI_SPIKE_NEGATIVE", "analyze_oi_shock_events.py", []),
+    ("OI_FLUSH", "analyze_oi_shock_events.py", []),
     ("LIQUIDATION_CASCADE", "analyze_liquidation_cascade.py", []),
 ]
 _STRICT_RECOMMENDATIONS_CHECKLIST = False
@@ -328,7 +320,7 @@ def main() -> int:
     parser.add_argument("--run_phase2_conditional", type=int, default=0)
     parser.add_argument(
         "--phase2_event_type",
-        default="vol_shock_relaxation",
+        default="VOL_SHOCK",
         choices=["all", *[event for event, _, _ in PHASE2_EVENT_CHAIN], "LIQUIDATION_CASCADE"],
     )
     parser.add_argument("--phase2_max_conditions", type=int, default=20)
@@ -343,6 +335,30 @@ def main() -> int:
     parser.add_argument("--phase2_min_delay_positive_ratio", type=float, default=0.60)
     parser.add_argument("--phase2_min_delay_robustness_score", type=float, default=0.60)
     parser.add_argument("--phase2_shift_labels_k", type=int, default=0)
+    parser.add_argument(
+        "--phase2_cost_calibration_mode",
+        choices=["static", "tob_regime"],
+        default="static",
+        help="Phase2 candidate cost calibration mode. static uses fees.yaml only; tob_regime calibrates slippage from ToB regimes.",
+    )
+    parser.add_argument(
+        "--phase2_cost_min_tob_coverage",
+        type=float,
+        default=0.60,
+        help="Minimum event-to-ToB alignment coverage for tob_regime calibration before fallback to static costs.",
+    )
+    parser.add_argument(
+        "--phase2_cost_tob_tolerance_minutes",
+        type=int,
+        default=10,
+        help="Backward asof tolerance (minutes) for event-to-ToB alignment in cost calibration.",
+    )
+    parser.add_argument(
+        "--phase2_gate_profile",
+        choices=["auto", "discovery", "promotion"],
+        default="auto",
+        help="Phase2 gate profile. auto => discovery for research mode, promotion otherwise.",
+    )
     parser.add_argument("--run_bridge_eval_phase2", type=int, default=1)
     parser.add_argument("--bridge_edge_cost_k", type=float, default=2.0)
     parser.add_argument("--bridge_stressed_cost_multiplier", type=float, default=1.5)
@@ -439,6 +455,13 @@ def main() -> int:
         if args.strategy_blueprint_ignore_checklist or args.strategy_builder_ignore_checklist:
              print(f"Error: Checklist overrides are strictly forbidden in {args.mode} mode.", file=sys.stderr)
              return 1
+        if args.phase2_gate_profile == "discovery":
+            print(
+                f"Error: --phase2_gate_profile=discovery is forbidden in {args.mode} mode. "
+                "Use promotion or auto.",
+                file=sys.stderr,
+            )
+            return 1
 
     global _STRICT_RECOMMENDATIONS_CHECKLIST
     _STRICT_RECOMMENDATIONS_CHECKLIST = bool(int(args.strict_recommendations_checklist))
@@ -478,7 +501,7 @@ def main() -> int:
 
     cross_venue_requested = bool(
         int(args.run_phase2_conditional)
-        and args.phase2_event_type in {"all", "cross_venue_desync"}
+        and args.phase2_event_type in {"all", "CROSS_VENUE_DESYNC"}
     )
     run_spot_pipeline = bool(int(args.enable_cross_venue_spot_pipeline) and cross_venue_requested)
     research_gate_profile = "promotion" if args.mode in {"production", "certification"} else "discovery"
@@ -818,6 +841,14 @@ def main() -> int:
                 str(int(args.phase2_shift_labels_k)),
                 "--mode",
                 str(args.mode),
+                "--gate_profile",
+                str(args.phase2_gate_profile),
+                "--cost_calibration_mode",
+                str(args.phase2_cost_calibration_mode),
+                "--cost_min_tob_coverage",
+                str(float(args.phase2_cost_min_tob_coverage)),
+                "--cost_tob_tolerance_minutes",
+                str(int(args.phase2_cost_tob_tolerance_minutes)),
             ]
             if candidate_plan_path.exists():
                 phase2_args.extend(["--candidate_plan", str(candidate_plan_path)])

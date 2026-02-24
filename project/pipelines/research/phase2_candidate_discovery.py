@@ -14,7 +14,8 @@ import pandas as pd
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
+REPO_ROOT = PROJECT_ROOT.parent
+DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", REPO_ROOT / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.io_utils import (
@@ -30,6 +31,7 @@ from pipelines._lib.spec_loader import load_global_defaults
 from pipelines._lib.timeframe_constants import HORIZON_BARS_BY_TIMEFRAME
 from events.registry import EVENT_REGISTRY_SPECS
 from events.registry import load_registry_events
+from pipelines.research.cost_calibration import ToBRegimeCostCalibrator
 from pipelines._lib.spec_utils import get_spec_hashes
 from pipelines.research.analyze_conditional_expectancy import (
     _bh_adjust,
@@ -147,15 +149,65 @@ def _apply_multiplicity_controls(
 
 
 def _load_gates_spec() -> Dict[str, Any]:
-    path = PROJECT_ROOT / "spec" / "gates.yaml"
+    path = REPO_ROOT / "spec" / "gates.yaml"
     if not path.exists():
         return {}
     with open(path, "r") as f:
         return yaml.safe_load(f)
 
 
+def _select_phase2_gate_spec(
+    gates_spec: Dict[str, Any],
+    *,
+    mode: str,
+    gate_profile: str,
+) -> Dict[str, Any]:
+    """Resolve phase2 gate settings by profile with backward compatibility.
+
+    Selection:
+    - gate_profile=auto => discovery when mode=research, else promotion
+    - explicit gate_profile in {discovery,promotion} wins.
+    """
+    base_cfg = gates_spec.get("gate_v1_phase2", {}) if isinstance(gates_spec, dict) else {}
+    if not isinstance(base_cfg, dict):
+        base_cfg = {}
+
+    profile_choice = str(gate_profile or "auto").strip().lower()
+    mode_choice = str(mode or "production").strip().lower()
+    if profile_choice == "auto":
+        resolved_profile = "discovery" if mode_choice == "research" else "promotion"
+    else:
+        resolved_profile = profile_choice
+
+    profiles = gates_spec.get("gate_v1_phase2_profiles", {}) if isinstance(gates_spec, dict) else {}
+    profile_cfg = profiles.get(resolved_profile, {}) if isinstance(profiles, dict) else {}
+    if not isinstance(profile_cfg, dict):
+        profile_cfg = {}
+
+    merged = dict(base_cfg)
+    for key, value in profile_cfg.items():
+        if key == "event_overrides" and isinstance(value, dict):
+            merged_overrides = merged.get("event_overrides", {})
+            if not isinstance(merged_overrides, dict):
+                merged_overrides = {}
+            merged_overrides = dict(merged_overrides)
+            for event_type, override_cfg in value.items():
+                if isinstance(override_cfg, dict):
+                    prior = merged_overrides.get(event_type, {})
+                    if not isinstance(prior, dict):
+                        prior = {}
+                    merged_overrides[event_type] = {**prior, **override_cfg}
+                else:
+                    merged_overrides[event_type] = override_cfg
+            merged["event_overrides"] = merged_overrides
+        else:
+            merged[key] = value
+    merged["_resolved_profile"] = resolved_profile
+    return merged
+
+
 def _load_family_spec() -> Dict[str, Any]:
-    path = PROJECT_ROOT / "spec" / "multiplicity" / "families.yaml"
+    path = REPO_ROOT / "spec" / "multiplicity" / "families.yaml"
     if not path.exists():
         return {}
     with open(path, "r") as f:
@@ -164,6 +216,32 @@ def _load_family_spec() -> Dict[str, Any]:
 
 def _load_global_defaults() -> Dict[str, Any]:
     return load_global_defaults(project_root=PROJECT_ROOT)
+
+
+def _resolve_phase2_gate_params(gate_v1_phase2: Dict[str, Any], event_type: str) -> Dict[str, Any]:
+    event_overrides = gate_v1_phase2.get("event_overrides", {}) if isinstance(gate_v1_phase2, dict) else {}
+    per_event = event_overrides.get(event_type, {}) if isinstance(event_overrides, dict) else {}
+    if not isinstance(per_event, dict):
+        per_event = {}
+
+    def _pick(key: str, default: Any) -> Any:
+        if key in per_event:
+            return per_event[key]
+        if isinstance(gate_v1_phase2, dict) and key in gate_v1_phase2:
+            return gate_v1_phase2[key]
+        return default
+
+    conservative_mult = float(_pick("conservative_cost_multiplier", 1.5))
+    conservative_mult = max(1.0, conservative_mult)
+    return {
+        "max_q_value": float(_pick("max_q_value", 0.05)),
+        "min_after_cost_expectancy_bps": float(_pick("min_after_cost_expectancy_bps", 0.1)),
+        "min_sample_size": int(_pick("min_sample_size", 0) or 0),
+        "require_sign_stability": bool(_pick("require_sign_stability", True)),
+        "quality_floor_fallback": float(_pick("quality_floor_fallback", 0.66)),
+        "min_events_fallback": int(_pick("min_events_fallback", 100)),
+        "conservative_cost_multiplier": conservative_mult,
+    }
 
 
 def _load_features(run_id: str, symbol: str) -> pd.DataFrame:
@@ -436,6 +514,24 @@ def _make_parser() -> argparse.ArgumentParser:
                         help="Override slippage_bps_per_fill from fees.yaml.")
     parser.add_argument("--cost_bps", type=float, default=None,
                         help="Override total cost_bps directly (skips fee+slippage sum).")
+    parser.add_argument(
+        "--cost_calibration_mode",
+        choices=["static", "tob_regime"],
+        default="static",
+        help="Candidate cost calibration mode. static uses fees.yaml only; tob_regime calibrates slippage from ToB regimes.",
+    )
+    parser.add_argument(
+        "--cost_min_tob_coverage",
+        type=float,
+        default=0.60,
+        help="Minimum event-to-ToB alignment coverage required for tob_regime calibration before falling back to static costs.",
+    )
+    parser.add_argument(
+        "--cost_tob_tolerance_minutes",
+        type=int,
+        default=10,
+        help="Max backward asof tolerance (minutes) when aligning events to tob_5m_agg rows for cost calibration.",
+    )
     parser.add_argument("--config", action="append", default=[],
                         help="Path to execution cost config (fees.yaml).")
     parser.add_argument("--shift_labels_k", type=int, default=0,
@@ -447,6 +543,12 @@ def _make_parser() -> argparse.ArgumentParser:
         choices=["research", "production", "certification"],
         default="production",
         help="Run mode. Research mode enables diagnostics-first candidate handling.",
+    )
+    parser.add_argument(
+        "--gate_profile",
+        choices=["auto", "discovery", "promotion"],
+        default="auto",
+        help="Phase2 gate profile. auto => discovery for research mode, promotion otherwise.",
     )
     parser.add_argument("--candidate_plan", default=None,
                         help="Path to Atlas candidate plan (jsonl). If provided, drives discovery.")
@@ -470,18 +572,39 @@ def main():
         raise ValueError("entry_lag_bars must be >= 1 to prevent same-bar entry leakage")
 
     # 1. Lock in Invariants (Spec-Binding)
-    spec_hashes = get_spec_hashes(PROJECT_ROOT)
-    gates = _load_gates_spec().get("gate_v1_phase2", {})
+    spec_hashes = get_spec_hashes(REPO_ROOT)
+    gates_spec = _load_gates_spec()
+    gates = _select_phase2_gate_spec(
+        gates_spec,
+        mode=str(args.mode),
+        gate_profile=str(args.gate_profile),
+    )
+    gate_cfg = _resolve_phase2_gate_params(gates, args.event_type)
     families_spec = _load_family_spec()
 
     # Resolve execution costs from spec configs — not a CLI float.
     cost_bps, cost_coordinate = _resolve_phase2_costs(args, PROJECT_ROOT)
+    cost_calibrator = ToBRegimeCostCalibrator(
+        run_id=args.run_id,
+        data_root=DATA_ROOT,
+        base_fee_bps=float(cost_coordinate["fee_bps_per_side"]),
+        base_slippage_bps=float(cost_coordinate["slippage_bps_per_fill"]),
+        static_cost_bps=float(cost_coordinate["cost_bps"]),
+        mode=str(args.cost_calibration_mode),
+        min_tob_coverage=float(args.cost_min_tob_coverage),
+        tob_tolerance_minutes=int(args.cost_tob_tolerance_minutes),
+    )
+    cost_coordinate["calibration_mode"] = str(args.cost_calibration_mode)
+    cost_coordinate["cost_min_tob_coverage"] = float(args.cost_min_tob_coverage)
+    cost_coordinate["cost_tob_tolerance_minutes"] = int(args.cost_tob_tolerance_minutes)
 
-    max_q = gates.get("max_q_value", 0.05)
-    min_after_cost = gates.get("min_after_cost_expectancy_bps", 0.1) / 10000.0  # bps → decimal
-    min_sample_size_gate = int(gates.get("min_sample_size", 0) or 0)
-    quality_floor_fallback = float(gates.get("quality_floor_fallback", 0.66))
-    min_events_fallback = int(gates.get("min_events_fallback", 100))
+    max_q = float(gate_cfg["max_q_value"])
+    min_after_cost = float(gate_cfg["min_after_cost_expectancy_bps"]) / 10000.0  # bps → decimal
+    min_sample_size_gate = int(gate_cfg["min_sample_size"])
+    require_sign_stability = bool(gate_cfg["require_sign_stability"])
+    quality_floor_fallback = float(gate_cfg["quality_floor_fallback"])
+    min_events_fallback = int(gate_cfg["min_events_fallback"])
+    conservative_cost_multiplier = float(gate_cfg["conservative_cost_multiplier"])
 
     # 2. Minimal Template Set & Horizons
     global_defaults = _load_global_defaults()
@@ -641,8 +764,10 @@ def main():
             )
             
             # Helper to add results with Atlas lineage
-            cost = cost_bps / 10000.0
-            conservative_cost = cost * 1.5
+            cost_estimate = cost_calibrator.estimate(symbol=symbol, events_df=bucket_events)
+            candidate_cost_bps = float(cost_estimate.cost_bps)
+            cost = candidate_cost_bps / 10000.0
+            conservative_cost = cost * conservative_cost_multiplier
             after_cost = effect - cost
             after_cost_conservative = effect - conservative_cost
             econ_pass = after_cost >= min_after_cost
@@ -650,12 +775,15 @@ def main():
             fail_reasons = []
             if not econ_pass: fail_reasons.append("ECONOMIC_GATE")
             if not econ_pass_conservative: fail_reasons.append("ECONOMIC_CONSERVATIVE")
-            if not stability_pass: fail_reasons.append("STABILITY_GATE")
+            if require_sign_stability and not stability_pass:
+                fail_reasons.append("STABILITY_GATE")
             sample_size = _resolved_sample_size(n_joined, len(sym_events))
             sample_gate_pass = int(sample_size) >= int(min_sample_size_gate) if int(min_sample_size_gate) > 0 else True
             if not sample_gate_pass:
                 fail_reasons.append("MIN_SAMPLE_SIZE_GATE")
-            gate_phase2_research = econ_pass_conservative and stability_pass and sample_gate_pass
+            gate_phase2_research = econ_pass_conservative and sample_gate_pass and (
+                stability_pass if require_sign_stability else True
+            )
             gate_phase2_final = gate_phase2_research
 
             # Compute condition routing before building result
@@ -680,13 +808,23 @@ def main():
                 "after_cost_expectancy": after_cost,
                 "after_cost_expectancy_per_trade": after_cost,
                 "stressed_after_cost_expectancy_per_trade": after_cost_conservative,
-                "cost_ratio": cost / effect if effect != 0 else 1.0,
+                "turnover_proxy_mean": float(cost_estimate.turnover_proxy_mean),
+                "avg_dynamic_cost_bps": float(cost_estimate.avg_dynamic_cost_bps),
+                "cost_input_coverage": float(cost_estimate.cost_input_coverage),
+                "cost_model_valid": bool(cost_estimate.cost_model_valid),
+                "cost_model_source": str(cost_estimate.cost_model_source),
+                "cost_regime_multiplier": float(cost_estimate.regime_multiplier),
+                "cost_ratio": cost / max(abs(effect), 1e-9),
                 "p_value": pval,
                 "sample_size": _resolved_sample_size(n_joined, len(sym_events)),
                 "n_events": int(n_joined),
                 "sign": 1 if effect > 0 else -1,
                 "gate_economic": econ_pass,
                 "gate_economic_conservative": econ_pass_conservative,
+                "gate_after_cost_positive": bool(econ_pass),
+                "gate_after_cost_stressed_positive": bool(econ_pass_conservative),
+                "gate_cost_model_valid": bool(cost_estimate.cost_model_valid),
+                "gate_cost_ratio": bool((cost / max(abs(effect), 1e-9)) <= 1.0),
                 "gate_stability": stability_pass,
                 "gate_phase2_research": gate_phase2_research,
                 "gate_phase2_final": gate_phase2_final,
@@ -704,7 +842,9 @@ def main():
                 "compile_eligible": _compile_eligible,
                 "action": "enter_long_market" if _TEMPLATE_DIRECTION.get(rule, 1) > 0 else "enter_short_market",
                 "cost_config_digest": cost_coordinate["config_digest"],
-                "cost_bps_resolved": cost_coordinate["cost_bps"],
+                "cost_bps_resolved": candidate_cost_bps,
+                "fee_bps_resolved": float(cost_estimate.fee_bps_per_side),
+                "slippage_bps_resolved": float(cost_estimate.slippage_bps_per_fill),
                 # Atlas Lineage
                 "plan_row_id": plan_row.get("plan_row_id", ""),
                 "source_claim_ids": ",".join(plan_row.get("source_claim_ids", [])),
@@ -713,8 +853,12 @@ def main():
             })
     else:
         # Default fallback discovery (original loop)
-        # Pre-define allowed conditioning columns to avoid explosion
-        CONDITIONING_COLS = global_defaults.get("conditioning_cols", ["severity_bucket", "vol_regime"])
+        # Pre-define allowed conditioning columns to avoid explosion.
+        # Family-level override allows narrower discovery pools when needed.
+        CONDITIONING_COLS = fam_config.get(
+            "conditioning_cols",
+            global_defaults.get("conditioning_cols", ["severity_bucket", "vol_regime"]),
+        )
 
         for symbol in symbols:
             sym_all_events = events_df[events_df["symbol"] == symbol] if "symbol" in events_df.columns else events_df
@@ -737,10 +881,12 @@ def main():
                         min_samples=args.min_samples,
                     )
                     
-                    def _add_res(eff, pv, n, stab, cond_name="all"):
-                        # Economic Gate (from spec — cost resolved from fees.yaml)
-                        cost = cost_bps / 10000.0
-                        conservative_cost = cost * 1.5
+                    def _add_res(eff, pv, n, stab, bucket_events_for_cost, cond_name="all"):
+                        # Economic Gate with candidate-level cost calibration.
+                        cost_estimate = cost_calibrator.estimate(symbol=symbol, events_df=bucket_events_for_cost)
+                        candidate_cost_bps = float(cost_estimate.cost_bps)
+                        cost = candidate_cost_bps / 10000.0
+                        conservative_cost = cost * conservative_cost_multiplier
 
                         aft_cost = eff - cost
                         aft_cost_conservative = eff - conservative_cost
@@ -753,7 +899,7 @@ def main():
                             f_reasons.append(f"ECONOMIC_GATE ({aft_cost:.6f} < {min_after_cost:.6f})")
                         if not ec_pass_conservative:
                             f_reasons.append("ECONOMIC_CONSERVATIVE")
-                        if not stab:
+                        if require_sign_stability and not stab:
                             f_reasons.append("STABILITY_GATE")
                         resolved_sample_size = _resolved_sample_size(n, len(sym_all_events))
                         sample_gate_pass = int(resolved_sample_size) >= int(min_sample_size_gate) if int(min_sample_size_gate) > 0 else True
@@ -761,7 +907,9 @@ def main():
                             f_reasons.append("MIN_SAMPLE_SIZE_GATE")
 
                         # Composite Phase 2 gate (economic + stability).
-                        g_phase2_research = ec_pass_conservative and stab and sample_gate_pass
+                        g_phase2_research = ec_pass_conservative and sample_gate_pass and (
+                            stab if require_sign_stability else True
+                        )
                         g_phase2_final = g_phase2_research
 
                         # Condition routing
@@ -786,13 +934,23 @@ def main():
                             "after_cost_expectancy": aft_cost,
                             "after_cost_expectancy_per_trade": aft_cost,
                             "stressed_after_cost_expectancy_per_trade": aft_cost_conservative,
-                            "cost_ratio": cost / eff if eff != 0 else 1.0,
+                            "turnover_proxy_mean": float(cost_estimate.turnover_proxy_mean),
+                            "avg_dynamic_cost_bps": float(cost_estimate.avg_dynamic_cost_bps),
+                            "cost_input_coverage": float(cost_estimate.cost_input_coverage),
+                            "cost_model_valid": bool(cost_estimate.cost_model_valid),
+                            "cost_model_source": str(cost_estimate.cost_model_source),
+                            "cost_regime_multiplier": float(cost_estimate.regime_multiplier),
+                            "cost_ratio": cost / max(abs(eff), 1e-9),
                             "p_value": pv,
                             "sample_size": _resolved_sample_size(n, len(sym_all_events)),
                             "n_events": int(n),
                             "sign": 1 if eff > 0 else -1,
                             "gate_economic": ec_pass,
                             "gate_economic_conservative": ec_pass_conservative,
+                            "gate_after_cost_positive": bool(ec_pass),
+                            "gate_after_cost_stressed_positive": bool(ec_pass_conservative),
+                            "gate_cost_model_valid": bool(cost_estimate.cost_model_valid),
+                            "gate_cost_ratio": bool((cost / max(abs(eff), 1e-9)) <= 1.0),
                             "gate_stability": stab,
                             "gate_phase2_research": g_phase2_research,
                             "gate_phase2_final": g_phase2_final,
@@ -810,11 +968,13 @@ def main():
                             "compile_eligible": _compile_eligible,
                             "action": "enter_long_market" if _TEMPLATE_DIRECTION.get(rule, 1) > 0 else "enter_short_market",
                             "cost_config_digest": cost_coordinate["config_digest"],
-                            "cost_bps_resolved": cost_coordinate["cost_bps"],
+                            "cost_bps_resolved": candidate_cost_bps,
+                            "fee_bps_resolved": float(cost_estimate.fee_bps_per_side),
+                            "slippage_bps_resolved": float(cost_estimate.slippage_bps_per_fill),
                             "candidate_plan_hash": "",
                         })
 
-                    _add_res(effect, pval, n_joined, stability_pass, "all")
+                    _add_res(effect, pval, n_joined, stability_pass, sym_all_events, "all")
 
                     # 3b. Conditioned candidates (refined buckets)
                     for col in CONDITIONING_COLS:
@@ -843,7 +1003,7 @@ def main():
                                 entry_lag_bars=args.entry_lag_bars,
                                 min_samples=effective_min_samples,
                             )
-                            _add_res(eff_b, pv_b, n_b, stab_b, f"{col}_{val}")
+                            _add_res(eff_b, pv_b, n_b, stab_b, bucket_events, f"{col}_{val}")
 
     if not results:
         log.warning("No results produced — check features/events availability for %s. Continuing.", args.event_type)
@@ -914,8 +1074,11 @@ def main():
         "family_definition": "Option B (symbol, event_type, rule_template, horizon) — F-3 fix",
         "cost_coordinate": cost_coordinate,
         "thresholds": {
+            "gate_profile": str(gates.get("_resolved_profile", str(args.gate_profile))),
             "max_q_value": max_q,
-            "min_after_cost_expectancy_bps": gates.get("min_after_cost_expectancy_bps", 0.1),
+            "min_after_cost_expectancy_bps": float(gate_cfg["min_after_cost_expectancy_bps"]),
+            "conservative_cost_multiplier": conservative_cost_multiplier,
+            "require_sign_stability": require_sign_stability,
             "entry_lag_bars": int(args.entry_lag_bars),
         },
         "summary": {

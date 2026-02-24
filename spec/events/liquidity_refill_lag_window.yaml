@@ -1,4 +1,0 @@
-event_type: "liquidity_refill_lag_window"
-reports_dir: "liquidity_refill_lag_window"
-events_file: "liquidity_refill_lag_window_events.csv"
-signal_column: "liquidity_refill_lag_event"

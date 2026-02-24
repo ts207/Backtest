@@ -1,0 +1,427 @@
+version: 1
+kind: state_registry
+
+states:
+  - state_id: LOW_LIQUIDITY_STATE
+    family: LIQUIDITY_DISLOCATION
+    source_event_type: LIQUIDITY_VACUUM
+    activation_rule: depth_pct <= p10 OR spread_pct >= p90
+    decay_rule: exit when depth_pct >= p30 AND spread_pct <= p70
+    features_required: [market_depth, spread_bps]
+    allowed_templates: [mean_reversion, stop_run_repair, overshoot_repair, continuation, only_if_liquidity, slippage_aware_filter]
+
+  - state_id: REFILL_LAG_STATE
+    family: LIQUIDITY_DISLOCATION
+    source_event_type: LIQUIDITY_VACUUM
+    activation_rule: elapsed_bars <= refill_horizon AND depth_recovery_ratio < refill_threshold
+    decay_rule: exit when depth_recovery_ratio >= refill_threshold OR elapsed_bars > refill_horizon
+    features_required: [market_depth, quote_volume, spread_bps]
+    allowed_templates: [mean_reversion, stop_run_repair, overshoot_repair, continuation, only_if_liquidity, slippage_aware_filter]
+
+  - state_id: LIQUIDITY_ABSENCE_STATE
+    family: LIQUIDITY_DISLOCATION
+    source_event_type: LIQUIDITY_VACUUM
+    activation_rule: activity_rank_by_session <= absence_quantile
+    decay_rule: exit when activity_rank_by_session > absence_quantile
+    features_required: [quote_volume, spread_bps, rv_96]
+    allowed_templates: [mean_reversion, stop_run_repair, overshoot_repair, continuation, only_if_liquidity, slippage_aware_filter]
+
+  - state_id: POST_SWEEP_STATE
+    family: LIQUIDITY_DISLOCATION
+    source_event_type: SWEEP_STOPRUN
+    activation_rule: elapsed_bars <= post_sweep_horizon
+    decay_rule: exit on stabilization (spread_pct <= p70)
+    features_required: [spread_bps, quote_volume]
+    allowed_templates: [stop_run_repair, overshoot_repair, mean_reversion]
+
+  - state_id: POST_ABSORPTION_STATE
+    family: LIQUIDITY_DISLOCATION
+    source_event_type: ABSORPTION_EVENT
+    activation_rule: absorption_imbalance >= threshold
+    decay_rule: exit when imbalance mean-reverts to baseline
+    features_required: [order_book, market_depth]
+    allowed_templates: [mean_reversion, continuation, only_if_liquidity]
+
+  - state_id: SPREAD_ELEVATED_STATE
+    family: LIQUIDITY_DISLOCATION
+    source_event_type: SPREAD_BLOWOUT
+    activation_rule: spread_pct >= p90
+    decay_rule: exit when spread_pct <= p70
+    features_required: [spread_bps]
+    allowed_templates: [slippage_aware_filter, tail_risk_avoid, only_if_liquidity]
+
+  - state_id: DEPTH_RECOVERY_STATE
+    family: LIQUIDITY_DISLOCATION
+    source_event_type: DEPTH_COLLAPSE
+    activation_rule: depth_recovery_ratio in (recovery_min, recovery_max)
+    decay_rule: exit when depth_recovery_ratio >= recovery_max OR elapsed_bars > max_horizon
+    features_required: [market_depth]
+    allowed_templates: [pullback_entry, continuation, mean_reversion]
+
+  - state_id: AFTERSHOCK_STATE
+    family: VOLATILITY_TRANSITION
+    source_event_type: VOL_SHOCK
+    activation_rule: elapsed_bars <= aftershock_horizon
+    decay_rule: exit when shock_ratio < shock_threshold
+    features_required: [rv_96, rv_base]
+    allowed_templates: [continuation, trend_continuation, volatility_expansion_follow, pullback_entry, mean_reversion, only_if_regime]
+
+  - state_id: POST_EXPANSION_STATE
+    family: VOLATILITY_TRANSITION
+    source_event_type: VOL_SPIKE
+    activation_rule: rv_pct >= p90 AND elapsed_bars <= expansion_horizon
+    decay_rule: exit when rv_pct <= p70
+    features_required: [rv_96, rv_pct_17280]
+    allowed_templates: [continuation, trend_continuation, volatility_expansion_follow]
+
+  - state_id: RELAXATION_STATE
+    family: VOLATILITY_TRANSITION
+    source_event_type: VOL_RELAXATION_START
+    activation_rule: shock_ratio decreasing for n bars
+    decay_rule: exit when shock_ratio returns below baseline band
+    features_required: [rv_96, rv_base]
+    allowed_templates: [mean_reversion, pullback_entry, only_if_regime]
+
+  - state_id: COMPRESSION_STATE
+    family: VOLATILITY_TRANSITION
+    source_event_type: VOL_CLUSTER_SHIFT
+    activation_rule: compression_ratio <= compression_threshold
+    decay_rule: exit when compression_ratio > compression_threshold
+    features_required: [range_96, range_med_2880]
+    allowed_templates: [continuation, trend_continuation, volatility_expansion_follow, pullback_entry, mean_reversion, only_if_regime]
+
+  - state_id: PRE_BREAKOUT_TENSION_STATE
+    family: VOLATILITY_TRANSITION
+    source_event_type: RANGE_COMPRESSION_END
+    activation_rule: compression release detected and pre-breakout tension active
+    decay_rule: exit after breakout confirmation window
+    features_required: [compression_ratio, rv_96, spread_bps]
+    allowed_templates: [continuation, trend_continuation, volatility_expansion_follow, pullback_entry, mean_reversion, only_if_regime]
+
+  - state_id: HIGH_VOL_REGIME
+    family: VOLATILITY_TRANSITION
+    source_event_type: VOL_CLUSTER_SHIFT
+    activation_rule: rv_percentile >= 0.66
+    decay_rule: exit when rv_percentile < 0.66
+    features_required: [rv_percentile_24h]
+    allowed_templates: [continuation, trend_continuation, volatility_expansion_follow, pullback_entry, mean_reversion, only_if_regime]
+
+  - state_id: LOW_VOL_REGIME
+    family: VOLATILITY_TRANSITION
+    source_event_type: VOL_CLUSTER_SHIFT
+    activation_rule: rv_percentile <= 0.33
+    decay_rule: exit when rv_percentile > 0.33
+    features_required: [rv_percentile_24h]
+    allowed_templates: [continuation, trend_continuation, volatility_expansion_follow, pullback_entry, mean_reversion, only_if_regime]
+
+  - state_id: CROWDING_STATE
+    family: POSITIONING_EXTREMES
+    source_event_type: FUNDING_EXTREME_ONSET
+    activation_rule: funding_pct >= p95 AND oi_pct >= p90
+    decay_rule: exit when funding_pct < p80 OR oi_pct < p70
+    features_required: [funding_rate_scaled, oi_notional, trend_regime]
+    allowed_templates: [reversal_or_squeeze, mean_reversion, continuation, only_if_funding, only_if_oi]
+
+  - state_id: FUNDING_PERSISTENCE_STATE
+    family: POSITIONING_EXTREMES
+    source_event_type: FUNDING_PERSISTENCE_TRIGGER
+    activation_rule: funding_abs_pct >= persistence_pct for persistence_bars
+    decay_rule: exit when funding_abs_pct < normalization_pct
+    features_required: [funding_rate_scaled, funding_abs_pct]
+    allowed_templates: [reversal_or_squeeze, mean_reversion, continuation, exhaustion_reversal, convexity_capture, only_if_funding, only_if_oi, tail_risk_avoid]
+
+  - state_id: FUNDING_NORMALIZATION_STATE
+    family: POSITIONING_EXTREMES
+    source_event_type: FUNDING_NORMALIZATION_TRIGGER
+    activation_rule: funding_abs_pct crosses below normalization band
+    decay_rule: exit after normalization hold bars
+    features_required: [funding_rate_scaled, funding_abs_pct]
+    allowed_templates: [reversal_or_squeeze, mean_reversion, continuation, exhaustion_reversal, convexity_capture, only_if_funding, only_if_oi, tail_risk_avoid]
+
+  - state_id: POST_EXTREME_CARRY_STATE
+    family: POSITIONING_EXTREMES
+    source_event_type: FUNDING_EXTREME_ONSET
+    activation_rule: funding extreme detected and still elevated
+    decay_rule: exit when funding returns to neutral band
+    features_required: [funding_rate_scaled, funding_abs_pct, rv_96]
+    allowed_templates: [reversal_or_squeeze, mean_reversion, continuation, exhaustion_reversal, convexity_capture, only_if_funding, only_if_oi, tail_risk_avoid]
+
+  - state_id: DELEVERAGING_STATE
+    family: POSITIONING_EXTREMES
+    source_event_type: DELEVERAGING_WAVE
+    activation_rule: oi_delta_1h <= deleveraging_threshold AND rv_pct >= p75
+    decay_rule: exit when oi_delta_1h recovers above threshold
+    features_required: [oi_delta_1h, rv_96]
+    allowed_templates: [continuation, tail_risk_avoid, convexity_capture]
+
+  - state_id: POST_LIQUIDATION_STATE
+    family: POSITIONING_EXTREMES
+    source_event_type: LIQUIDATION_CASCADE
+    activation_rule: elapsed_bars <= post_cascade_horizon
+    decay_rule: exit when vol and spread normalize
+    features_required: [liquidation_notional, spread_bps, rv_96]
+    allowed_templates: [convexity_capture, mean_reversion, continuation, tail_risk_avoid]
+
+  - state_id: SQUEEZE_RISK_STATE
+    family: POSITIONING_EXTREMES
+    source_event_type: OI_SPIKE_POSITIVE
+    activation_rule: crowding_state=1 AND vol_pct >= p75
+    decay_rule: exit when crowding_state=0
+    features_required: [oi_notional, funding_rate_scaled, rv_96]
+    allowed_templates: [reversal_or_squeeze, continuation, only_if_oi, only_if_funding]
+
+  - state_id: POST_FORCED_FLOW_STATE
+    family: FORCED_FLOW_AND_EXHAUSTION
+    source_event_type: FORCED_FLOW_EXHAUSTION
+    activation_rule: elapsed_bars <= post_flow_horizon
+    decay_rule: exit when momentum decays below threshold
+    features_required: [logret_1, rv_96]
+    allowed_templates: [mean_reversion, exhaustion_reversal, momentum_fade]
+
+  - state_id: EXHAUSTION_STATE
+    family: FORCED_FLOW_AND_EXHAUSTION
+    source_event_type: TREND_EXHAUSTION_TRIGGER
+    activation_rule: divergence trigger active and trend slope decelerating
+    decay_rule: exit when trend slope re-accelerates
+    features_required: [trend_return_96, momentum_divergence]
+    allowed_templates: [exhaustion_reversal, momentum_fade, drawdown_filter]
+
+  - state_id: DISTRIBUTION_ACCUMULATION_STATE
+    family: FORCED_FLOW_AND_EXHAUSTION
+    source_event_type: CLIMAX_VOLUME_BAR
+    activation_rule: climax volume followed by absorption signatures
+    decay_rule: exit on breakout failure or trend resumption
+    features_required: [volume, order_book]
+    allowed_templates: [range_reversion, mean_reversion, only_if_trend]
+
+  - state_id: POST_CLIMAX_STATE
+    family: FORCED_FLOW_AND_EXHAUSTION
+    source_event_type: CLIMAX_VOLUME_BAR
+    activation_rule: elapsed_bars <= post_climax_horizon
+    decay_rule: exit after post_climax_horizon
+    features_required: [volume, rv_96]
+    allowed_templates: [momentum_fade, exhaustion_reversal]
+
+  - state_id: MEAN_REVERSION_WINDOW_STATE
+    family: FORCED_FLOW_AND_EXHAUSTION
+    source_event_type: FORCED_FLOW_EXHAUSTION
+    activation_rule: re-entry into prior range detected
+    decay_rule: exit after repair completion or timeout
+    features_required: [range_96, close]
+    allowed_templates: [mean_reversion, range_reversion, drawdown_filter]
+
+  - state_id: BREAKOUT_HOLD_STATE
+    family: TREND_STRUCTURE
+    source_event_type: RANGE_BREAKOUT
+    activation_rule: breakout confirmed with hold above breakout level
+    decay_rule: exit on failed hold
+    features_required: [close, breakout_level]
+    allowed_templates: [breakout_followthrough, trend_continuation, continuation, only_if_trend]
+
+  - state_id: POST_BREAKOUT_RETEST_STATE
+    family: TREND_STRUCTURE
+    source_event_type: RANGE_BREAKOUT
+    activation_rule: first retest after breakout
+    decay_rule: exit on retest completion
+    features_required: [close, breakout_level]
+    allowed_templates: [pullback_entry, trend_continuation, continuation, only_if_trend]
+
+  - state_id: TRENDING_STATE
+    family: TREND_STRUCTURE
+    source_event_type: TREND_ACCELERATION
+    activation_rule: trend slope and ADX above threshold
+    decay_rule: exit when slope falls below threshold
+    features_required: [trend_return_96, adx]
+    allowed_templates: [pullback_entry, trend_continuation, continuation, only_if_trend]
+
+  - state_id: CHOP_STATE
+    family: TREND_STRUCTURE
+    source_event_type: TREND_DECELERATION
+    activation_rule: low trend strength and high reversals
+    decay_rule: exit on breakout confirmation
+    features_required: [trend_return_96, reversal_count]
+    allowed_templates: [false_breakout_reversal, continuation, only_if_trend]
+
+  - state_id: PULLBACK_STATE
+    family: TREND_STRUCTURE
+    source_event_type: PULLBACK_PIVOT
+    activation_rule: retrace within active trend band
+    decay_rule: exit on trend resumption or failure
+    features_required: [close, trend_band]
+    allowed_templates: [pullback_entry, trend_continuation, continuation, only_if_trend]
+
+  - state_id: FAILURE_STATE
+    family: TREND_STRUCTURE
+    source_event_type: FALSE_BREAKOUT
+    activation_rule: breakout fails within fail_window bars
+    decay_rule: exit on mean re-entry completion
+    features_required: [close, breakout_level]
+    allowed_templates: [false_breakout_reversal, continuation, only_if_trend]
+
+  - state_id: STRETCHED_STATE
+    family: STATISTICAL_DISLOCATION
+    source_event_type: ZSCORE_STRETCH
+    activation_rule: abs(zscore) >= stretch_threshold
+    decay_rule: exit when abs(zscore) < normalization_threshold
+    features_required: [zscore]
+    allowed_templates: [mean_reversion, overshoot_repair, tail_risk_avoid]
+
+  - state_id: OVERSHOOT_STATE
+    family: STATISTICAL_DISLOCATION
+    source_event_type: OVERSHOOT_AFTER_SHOCK
+    activation_rule: overshoot flag active
+    decay_rule: exit on first repair milestone
+    features_required: [zscore, rv_96]
+    allowed_templates: [mean_reversion, overshoot_repair, tail_risk_avoid]
+
+  - state_id: REPAIR_WINDOW_STATE
+    family: STATISTICAL_DISLOCATION
+    source_event_type: GAP_OVERSHOOT
+    activation_rule: overshoot has begun reverting
+    decay_rule: exit when repair completes
+    features_required: [close, zscore]
+    allowed_templates: [mean_reversion, overshoot_repair, tail_risk_avoid]
+
+  - state_id: REVERSION_IN_PROGRESS_STATE
+    family: STATISTICAL_DISLOCATION
+    source_event_type: BAND_BREAK
+    activation_rule: return path toward central tendency detected
+    decay_rule: exit when baseline is reached
+    features_required: [band_distance]
+    allowed_templates: [mean_reversion, overshoot_repair, tail_risk_avoid]
+
+  - state_id: RISK_ON_STATE
+    family: REGIME_TRANSITION
+    source_event_type: CHOP_TO_TREND_SHIFT
+    activation_rule: trend and beta/risk metrics indicate risk-on
+    decay_rule: exit when risk-off condition triggers
+    features_required: [beta, trend_regime]
+    allowed_templates: [only_if_regime, continuation, mean_reversion, drawdown_filter, tail_risk_avoid]
+
+  - state_id: RISK_OFF_STATE
+    family: REGIME_TRANSITION
+    source_event_type: TREND_TO_CHOP_SHIFT
+    activation_rule: volatility and downside skew indicate risk-off
+    decay_rule: exit on risk normalization
+    features_required: [rv_96, skew]
+    allowed_templates: [only_if_regime, continuation, mean_reversion, drawdown_filter, tail_risk_avoid]
+
+  - state_id: CORRELATION_BROKEN_STATE
+    family: REGIME_TRANSITION
+    source_event_type: CORRELATION_BREAKDOWN_EVENT
+    activation_rule: correlation to benchmark below breakdown threshold
+    decay_rule: exit when correlation recovers above threshold
+    features_required: [benchmark_corr]
+    allowed_templates: [only_if_regime, continuation, mean_reversion, drawdown_filter, tail_risk_avoid]
+
+  - state_id: NEW_REGIME_STABILIZATION_STATE
+    family: REGIME_TRANSITION
+    source_event_type: VOL_REGIME_SHIFT_EVENT
+    activation_rule: regime label changed and persistence >= min_bars
+    decay_rule: exit when regime changes again
+    features_required: [vol_regime, regime_persistence]
+    allowed_templates: [only_if_regime, continuation, mean_reversion, drawdown_filter, tail_risk_avoid]
+
+  - state_id: TRANSITION_TURBULENCE_STATE
+    family: REGIME_TRANSITION
+    source_event_type: VOL_REGIME_SHIFT_EVENT
+    activation_rule: regime changed within turbulence window
+    decay_rule: exit after turbulence timeout
+    features_required: [vol_regime, rv_96]
+    allowed_templates: [only_if_regime, continuation, mean_reversion, drawdown_filter, tail_risk_avoid]
+
+  - state_id: DESYNC_PERSISTENCE_STATE
+    family: INFORMATION_DESYNC
+    source_event_type: CROSS_VENUE_DESYNC
+    activation_rule: desync magnitude above threshold for persistence_bars
+    decay_rule: exit when desync falls below threshold
+    features_required: [cross_exchange_spread_z]
+    allowed_templates: [desync_repair, convergence, basis_repair, lead_lag_follow, divergence_continuation]
+
+  - state_id: BASIS_ELEVATED_STATE
+    family: INFORMATION_DESYNC
+    source_event_type: SPOT_PERP_BASIS_SHOCK
+    activation_rule: basis_zscore >= basis_threshold
+    decay_rule: exit when basis_zscore <= recovery_threshold
+    features_required: [basis_zscore, funding_rate_scaled]
+    allowed_templates: [desync_repair, convergence, basis_repair, lead_lag_follow, divergence_continuation]
+
+  - state_id: CONVERGENCE_WINDOW_STATE
+    family: INFORMATION_DESYNC
+    source_event_type: LEAD_LAG_BREAK
+    activation_rule: lead-lag gap remains open within convergence horizon
+    decay_rule: exit on convergence completion or timeout
+    features_required: [lead_lag_gap]
+    allowed_templates: [desync_repair, convergence, basis_repair, lead_lag_follow, divergence_continuation]
+
+  - state_id: ARBITRAGE_CROWDING_STATE
+    family: INFORMATION_DESYNC
+    source_event_type: INDEX_COMPONENT_DIVERGENCE
+    activation_rule: basis persistence plus funding crowding
+    decay_rule: exit when basis or funding normalizes
+    features_required: [basis_zscore, funding_rate_scaled]
+    allowed_templates: [desync_repair, convergence, basis_repair, lead_lag_follow, divergence_continuation]
+
+  - state_id: OPEN_WINDOW_STATE
+    family: TEMPORAL_STRUCTURE
+    source_event_type: SESSION_OPEN_EVENT
+    activation_rule: elapsed_minutes_from_open <= open_window
+    decay_rule: exit when elapsed_minutes_from_open > open_window
+    features_required: [timestamp]
+    allowed_templates: [mean_reversion, volatility_expansion_follow]
+
+  - state_id: CLOSE_WINDOW_STATE
+    family: TEMPORAL_STRUCTURE
+    source_event_type: SESSION_CLOSE_EVENT
+    activation_rule: elapsed_minutes_to_close <= close_window
+    decay_rule: exit after session close
+    features_required: [timestamp]
+    allowed_templates: [mean_reversion, tail_risk_avoid]
+
+  - state_id: POST_FUNDING_WINDOW_STATE
+    family: TEMPORAL_STRUCTURE
+    source_event_type: FUNDING_TIMESTAMP_EVENT
+    activation_rule: elapsed_bars <= post_funding_horizon
+    decay_rule: exit when elapsed_bars > post_funding_horizon
+    features_required: [timestamp, funding_rate_scaled]
+    allowed_templates: [mean_reversion, continuation, only_if_no_news_window]
+
+  - state_id: PRE_NEWS_STATE
+    family: TEMPORAL_STRUCTURE
+    source_event_type: SCHEDULED_NEWS_WINDOW_EVENT
+    activation_rule: time_to_news <= pre_news_window
+    decay_rule: exit at news timestamp
+    features_required: [calendar_event]
+    allowed_templates: [tail_risk_avoid, only_if_no_news_window]
+
+  - state_id: POST_NEWS_AFTERSHOCK_STATE
+    family: TEMPORAL_STRUCTURE
+    source_event_type: SCHEDULED_NEWS_WINDOW_EVENT
+    activation_rule: elapsed_bars <= post_news_aftershock_horizon
+    decay_rule: exit when rv normalizes
+    features_required: [rv_96, calendar_event]
+    allowed_templates: [volatility_expansion_follow, drawdown_filter]
+
+  - state_id: HIGH_FRICTION_STATE
+    family: EXECUTION_FRICTION
+    source_event_type: SPREAD_REGIME_WIDENING_EVENT
+    activation_rule: spread_pct >= p90 OR slippage_pct >= p90
+    decay_rule: exit when spread_pct <= p70 AND slippage_pct <= p70
+    features_required: [spread_bps, slippage_bps]
+    allowed_templates: [slippage_aware_filter, tail_risk_avoid, only_if_liquidity]
+
+  - state_id: LOW_FRICTION_STATE
+    family: EXECUTION_FRICTION
+    source_event_type: SPREAD_REGIME_WIDENING_EVENT
+    activation_rule: spread_pct <= p30 AND slippage_pct <= p30
+    decay_rule: exit when friction rises above baseline
+    features_required: [spread_bps, slippage_bps]
+    allowed_templates: [continuation, pullback_entry]
+
+  - state_id: ILLIQUID_EXECUTION_STATE
+    family: EXECUTION_FRICTION
+    source_event_type: SLIPPAGE_SPIKE_EVENT
+    activation_rule: slippage spike above threshold
+    decay_rule: exit when slippage returns below threshold
+    features_required: [slippage_bps, market_depth]
+    allowed_templates: [slippage_aware_filter, tail_risk_avoid, only_if_liquidity]

@@ -61,7 +61,7 @@ class TestConditionSemantics:
         from strategy_dsl.contract_v1 import normalize_entry_condition
         canonical, nodes, sym = normalize_entry_condition(
             "all__vol_regime_high",
-            event_type="vol_shock_relaxation",
+            event_type="VOL_SHOCK",
             candidate_id="test_cand",
         )
         assert canonical == "all"
@@ -74,7 +74,7 @@ class TestConditionSemantics:
         from strategy_dsl.contract_v1 import normalize_entry_condition
         canonical, nodes, sym = normalize_entry_condition(
             "vol_regime_high",
-            event_type="vol_shock_relaxation",
+            event_type="VOL_SHOCK",
             candidate_id="test_cand",
         )
         assert canonical == "vol_regime_high"
@@ -89,7 +89,7 @@ class TestConditionSemantics:
         from strategy_dsl.contract_v1 import normalize_entry_condition
         canonical, nodes, sym = normalize_entry_condition(
             "all",
-            event_type="vol_shock_relaxation",
+            event_type="VOL_SHOCK",
             candidate_id="test_cand",
         )
         assert canonical == "all"

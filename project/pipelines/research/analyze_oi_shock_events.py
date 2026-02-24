@@ -24,10 +24,11 @@ from pipelines._lib.io_utils import (
 )
 
 EVENT_TYPES = [
-    "oi_spike_positive",
-    "oi_spike_negative",
-    "oi_flush",
+    "OI_SPIKE_POSITIVE",
+    "OI_SPIKE_NEGATIVE",
+    "OI_FLUSH",
 ]
+DEFAULT_FLUSH_PCT_TH = -0.005
 
 def _rolling_zscore(series: pd.Series, window: int) -> pd.Series:
     mean = series.rolling(window=window).mean()
@@ -49,6 +50,49 @@ def _load_features(symbol: str, run_id: str) -> pd.DataFrame:
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
     return df.sort_values("timestamp").reset_index(drop=True)
 
+
+def _detect_oi_events_for_symbol(
+    symbol: str,
+    df: pd.DataFrame,
+    *,
+    oi_window: int,
+    spike_z_th: float,
+    flush_pct_th: float,
+) -> List[Dict[str, object]]:
+    if "oi_notional" not in df.columns:
+        return []
+    oi = df["oi_notional"].astype(float)
+    oi_log_delta = np.log(oi).diff().fillna(0.0)
+    oi_z = _rolling_zscore(oi_log_delta, oi_window)
+    close_ret = pd.to_numeric(df["close"], errors="coerce").pct_change(1)
+    spike_pos = (oi_z >= spike_z_th) & (close_ret > 0)
+    spike_neg = (oi_z >= spike_z_th) & (close_ret < 0)
+    oi_pct_change = oi.pct_change(1, fill_method=None)
+    flush = oi_pct_change <= flush_pct_th
+
+    masks = {
+        "OI_SPIKE_POSITIVE": spike_pos,
+        "OI_SPIKE_NEGATIVE": spike_neg,
+        "OI_FLUSH": flush,
+    }
+    events: List[Dict[str, object]] = []
+    for event_type, mask in masks.items():
+        indices = np.flatnonzero(mask.fillna(False).values)
+        for idx in indices:
+            events.append(
+                {
+                    "symbol": symbol,
+                    "event_type": event_type,
+                    "event_idx": int(idx),
+                    "timestamp": pd.to_datetime(df.at[idx, "timestamp"], utc=True).isoformat(),
+                    "oi_z": float(oi_z.iloc[idx]) if np.isfinite(oi_z.iloc[idx]) else 0.0,
+                    "oi_pct_change": (
+                        float(oi_pct_change.iloc[idx]) if np.isfinite(oi_pct_change.iloc[idx]) else 0.0
+                    ),
+                }
+            )
+    return events
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Analyze Open Interest (OI) shock events")
     parser.add_argument("--run_id", required=True)
@@ -56,7 +100,7 @@ def main() -> int:
     parser.add_argument("--out_dir", default=None)
     parser.add_argument("--oi_window", type=int, default=96)
     parser.add_argument("--spike_z_th", type=float, default=2.5)
-    parser.add_argument("--flush_pct_th", type=float, default=-0.05)
+    parser.add_argument("--flush_pct_th", type=float, default=DEFAULT_FLUSH_PCT_TH)
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
 
@@ -72,39 +116,15 @@ def main() -> int:
             if "oi_notional" not in df.columns:
                 print(f"Warning: oi_notional missing for {symbol}")
                 continue
-            
-            oi = df["oi_notional"].astype(float)
-            # Use log difference for relative changes
-            oi_log_delta = np.log(oi).diff().fillna(0.0)
-            oi_z = _rolling_zscore(oi_log_delta, args.oi_window)
-            
-            # 1. OI Spike Positive (Aggressive positioning)
-            spike_pos = (oi_z >= args.spike_z_th) & (df["close"].pct_change(1) > 0)
-            
-            # 2. OI Spike Negative (Aggressive shorting)
-            spike_neg = (oi_z >= args.spike_z_th) & (df["close"].pct_change(1) < 0)
-            
-            # 3. OI Flush (Liquidation/Unwinding)
-            oi_pct_change = oi.pct_change(1)
-            flush = (oi_pct_change <= args.flush_pct_th)
-            
-            masks = {
-                "oi_spike_positive": spike_pos,
-                "oi_spike_negative": spike_neg,
-                "oi_flush": flush
-            }
-            
-            for et, mask in masks.items():
-                indices = np.flatnonzero(mask.fillna(False).values)
-                for idx in indices:
-                    all_events.append({
-                        "symbol": symbol,
-                        "event_type": et,
-                        "event_idx": int(idx),
-                        "timestamp": df.at[idx, "timestamp"].isoformat(),
-                        "oi_z": float(oi_z.iloc[idx]) if np.isfinite(oi_z.iloc[idx]) else 0.0,
-                        "oi_pct_change": float(oi_pct_change.iloc[idx]) if np.isfinite(oi_pct_change.iloc[idx]) else 0.0
-                    })
+            all_events.extend(
+                _detect_oi_events_for_symbol(
+                    symbol=symbol,
+                    df=df,
+                    oi_window=int(args.oi_window),
+                    spike_z_th=float(args.spike_z_th),
+                    flush_pct_th=float(args.flush_pct_th),
+                )
+            )
         except Exception as e:
             print(f"Error processing {symbol}: {e}")
 

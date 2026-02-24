@@ -132,13 +132,12 @@ def test_run_all_progress_logs_elapsed_and_eta(monkeypatch, tmp_path, capsys):
 
 def test_run_all_declared_subtype_families_are_not_noop():
     expected_scripts = {
-        "funding_extreme_onset": "analyze_funding_episode_events.py",
-        "funding_acceleration": "analyze_funding_episode_events.py",
-        "funding_persistence_window": "analyze_funding_episode_events.py",
-        "funding_normalization": "analyze_funding_episode_events.py",
-        "oi_spike_positive": "analyze_oi_shock_events.py",
-        "oi_spike_negative": "analyze_oi_shock_events.py",
-        "oi_flush": "analyze_oi_shock_events.py",
+        "FUNDING_EXTREME_ONSET": "analyze_funding_episode_events.py",
+        "FUNDING_PERSISTENCE_TRIGGER": "analyze_funding_episode_events.py",
+        "FUNDING_NORMALIZATION_TRIGGER": "analyze_funding_episode_events.py",
+        "OI_SPIKE_POSITIVE": "analyze_oi_shock_events.py",
+        "OI_SPIKE_NEGATIVE": "analyze_oi_shock_events.py",
+        "OI_FLUSH": "analyze_oi_shock_events.py",
     }
     chain_map = {event: script for event, script, _ in run_all.PHASE2_EVENT_CHAIN}
     for event_type, expected_script in expected_scripts.items():
@@ -231,7 +230,7 @@ def test_run_all_passes_mode_to_phase2_and_bridge(monkeypatch, tmp_path):
             "--run_phase2_conditional",
             "1",
             "--phase2_event_type",
-            "liquidity_vacuum",
+            "LIQUIDITY_VACUUM",
             "--run_bridge_eval_phase2",
             "1",
             "--run_strategy_blueprint_compiler",
@@ -260,6 +259,68 @@ def test_run_all_passes_mode_to_phase2_and_bridge(monkeypatch, tmp_path):
     bridge_args = stage_map["bridge_evaluate_phase2"]
     assert _arg_value(phase2_args, "--mode") == "research"
     assert _arg_value(bridge_args, "--mode") == "research"
+    assert _arg_value(phase2_args, "--cost_calibration_mode") == "static"
+    assert _arg_value(phase2_args, "--cost_min_tob_coverage") == "0.6"
+    assert _arg_value(phase2_args, "--cost_tob_tolerance_minutes") == "10"
+
+
+def test_run_all_passes_phase2_cost_calibration_overrides(monkeypatch, tmp_path):
+    captured: list[tuple[str, list[str]]] = []
+
+    def fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        return True
+
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path / "data")
+    monkeypatch.setattr(run_all, "_git_commit", lambda _project_root: "test-sha")
+    monkeypatch.setattr(run_all, "_run_stage", fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-02",
+            "--run_phase2_conditional",
+            "1",
+            "--phase2_event_type",
+            "LIQUIDITY_VACUUM",
+            "--run_bridge_eval_phase2",
+            "0",
+            "--run_strategy_blueprint_compiler",
+            "0",
+            "--run_strategy_builder",
+            "0",
+            "--run_recommendations_checklist",
+            "0",
+            "--run_hypothesis_generator",
+            "0",
+            "--skip_ingest_ohlcv",
+            "1",
+            "--skip_ingest_funding",
+            "1",
+            "--skip_ingest_spot_ohlcv",
+            "1",
+            "--phase2_cost_calibration_mode",
+            "tob_regime",
+            "--phase2_cost_min_tob_coverage",
+            "0.75",
+            "--phase2_cost_tob_tolerance_minutes",
+            "15",
+        ],
+    )
+
+    rc = run_all.main()
+    assert rc == 0
+    stage_map = {stage: args for stage, args in captured}
+    phase2_args = stage_map["phase2_conditional_hypotheses"]
+    assert _arg_value(phase2_args, "--cost_calibration_mode") == "tob_regime"
+    assert _arg_value(phase2_args, "--cost_min_tob_coverage") == "0.75"
+    assert _arg_value(phase2_args, "--cost_tob_tolerance_minutes") == "15"
 
 
 def test_run_all_production_gate_profile_wiring(monkeypatch, tmp_path):

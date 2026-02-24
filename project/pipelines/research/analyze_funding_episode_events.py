@@ -24,15 +24,14 @@ from pipelines._lib.io_utils import (
 )
 
 EVENT_TYPES = [
-    "funding_extreme_onset",
-    "funding_acceleration",
-    "funding_persistence_window",
-    "funding_normalization",
+    "FUNDING_EXTREME_ONSET",
+    "FUNDING_PERSISTENCE_TRIGGER",
+    "FUNDING_NORMALIZATION_TRIGGER",
 ]
 PRIMARY_EVENT_TYPES = [
-    "funding_extreme_onset",
-    "funding_persistence_window",
-    "funding_normalization",
+    "FUNDING_EXTREME_ONSET",
+    "FUNDING_PERSISTENCE_TRIGGER",
+    "FUNDING_NORMALIZATION_TRIGGER",
 ]
 
 
@@ -125,11 +124,12 @@ def _extract_event_indices(
         & recent_extreme
     ).fillna(False)
 
+    persistence_trigger_raw = (accel_raw | persistence_raw).fillna(False)
+
     raw_map = {
-        EVENT_TYPES[0]: np.flatnonzero(extreme_raw.values).tolist(),
-        EVENT_TYPES[1]: np.flatnonzero(accel_raw.values).tolist(),
-        EVENT_TYPES[2]: np.flatnonzero(persistence_raw.values).tolist(),
-        EVENT_TYPES[3]: np.flatnonzero(normalization_raw.values).tolist(),
+        "FUNDING_EXTREME_ONSET": np.flatnonzero(extreme_raw.values).tolist(),
+        "FUNDING_PERSISTENCE_TRIGGER": np.flatnonzero(persistence_trigger_raw.values).tolist(),
+        "FUNDING_NORMALIZATION_TRIGGER": np.flatnonzero(normalization_raw.values).tolist(),
     }
     return {k: _enforce_spacing(v, min_event_spacing) for k, v in raw_map.items()}
 
@@ -1105,10 +1105,14 @@ def main() -> int:
     events_df = pd.DataFrame(all_event_rows)
     if events_df.empty:
         events_df = pd.DataFrame(columns=["symbol", "event_type", "event_idx", "liquidation_prob", "vol_burst_prob", "time_to_normalization_bars", "post_event_vol_decay", "vol_hit_bar", "liq_30_80_hit", "drawdown_30_80_hit", "mae_96", "realized_vol_mean_96"])
+    else:
+        events_df["source_event_type"] = events_df["event_type"].astype(str)
     
     baseline_df = pd.DataFrame(all_baseline_rows)
     if baseline_df.empty:
         baseline_df = pd.DataFrame(columns=["symbol", "event_type", "event_idx", "liquidation_prob", "vol_burst_prob", "time_to_normalization_bars", "post_event_vol_decay", "vol_hit_bar", "liq_30_80_hit", "drawdown_30_80_hit", "mae_96", "realized_vol_mean_96"])
+    else:
+        baseline_df["source_event_type"] = baseline_df["event_type"].astype(str)
     by_symbol_base = _summarize_events(events_df, ["symbol", "event_type"])
     by_symbol, pooled = _inject_missing_event_types(by_symbol_base, symbols)
 
@@ -1173,7 +1177,7 @@ def main() -> int:
     persistence_transition_df = _transition_probability_table(
         events_df=events_df,
         baseline_df=baseline_df,
-        event_type="funding_persistence_window",
+        event_type="FUNDING_PERSISTENCE_TRIGGER",
         normalization_horizon=args.persistence_norm_horizon,
         bootstrap_iters=args.auc_bootstrap_iters,
         bootstrap_seed=args.baseline_seed + 101,
@@ -1184,7 +1188,7 @@ def main() -> int:
     interaction_coef_df, interaction_stability_df = _interaction_stability(
         events_df=events_df,
         baseline_df=baseline_df,
-        event_type="funding_persistence_window",
+        event_type="FUNDING_PERSISTENCE_TRIGGER",
         outcome_cols=["liq_30_80_hit", "drawdown_30_80_hit", "p_vol_burst_1_8"],
         min_rows_per_year=args.interaction_min_rows_per_year,
     )

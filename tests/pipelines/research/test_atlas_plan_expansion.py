@@ -14,12 +14,12 @@ def mock_atlas_env(tmp_path):
     
     # Mock template with new conditioning
     template = {
-        "template_id": "CL_001@vol_shock_relaxation",
+        "template_id": "CL_001@VOL_SHOCK",
         "source_claim_id": "CL_001",
         "concept_id": "C_1",
         "object_type": "event",
-        "event_type": "vol_shock_relaxation",
-        "target_spec_path": "spec/events/vol_shock_relaxation.yaml",
+        "event_type": "VOL_SHOCK",
+        "target_spec_path": "spec/events/VOL_SHOCK.yaml",
         "rule_templates": ["mean_reversion"],
         "horizons": ["5m"],
         "conditioning": {
@@ -34,8 +34,8 @@ def mock_atlas_env(tmp_path):
     # Create required spec file — must be valid YAML so FeasibilityGuard passes it
     spec_dir = tmp_path / "spec" / "events"
     spec_dir.mkdir(parents=True)
-    (spec_dir / "vol_shock_relaxation.yaml").write_text(
-        "event_type: vol_shock_relaxation\n"
+    (spec_dir / "VOL_SHOCK.yaml").write_text(
+        "event_type: VOL_SHOCK\n"
         "reports_dir: vol_shock_relaxation\n"
         "events_file: vol_shock_relaxation_events.csv\n"
         "signal_column: vol_shock_relaxation_event\n"

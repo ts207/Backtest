@@ -36,7 +36,7 @@ def test_build_event_flags_emits_impulse_and_active_columns(monkeypatch):
             "enter_ts": pd.to_datetime(["2026-01-01T00:05:00Z"], utc=True),
             "exit_ts": pd.to_datetime(["2026-01-01T00:15:00Z"], utc=True),
             "event_id": ["e1"],
-            "event_type": ["vol_shock_relaxation"],
+            "event_type": ["VOL_SHOCK"],
         }
     )
 
@@ -76,7 +76,7 @@ def test_build_event_flags_all_symbol_event_sets_active_for_all_symbols(monkeypa
             "enter_ts": pd.to_datetime(["2026-01-01T00:00:00Z"], utc=True),
             "exit_ts": pd.to_datetime(["2026-01-01T00:10:00Z"], utc=True),
             "event_id": ["e2"],
-            "event_type": ["liquidity_vacuum"],
+            "event_type": ["LIQUIDITY_VACUUM"],
         }
     )
 

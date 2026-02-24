@@ -16,7 +16,7 @@ def _base_blueprint() -> dict:
     return {
         "id": "bp_test",
         "run_id": "r1",
-        "event_type": "vol_shock_relaxation",
+        "event_type": "VOL_SHOCK",
         "candidate_id": "cand_1",
         "symbol_scope": {"mode": "single_symbol", "symbols": ["BTCUSDT"], "candidate_symbol": "BTCUSDT"},
         "direction": "long",
@@ -138,11 +138,11 @@ def test_dsl_accepts_registry_backed_signal_without_hardcoded_allowlist_entry():
         }
     )
     features = bars[["timestamp", "close", "quote_volume"]].copy()
-    # "oi_shocks" comes from registry-backed spec signal names.
-    features["oi_shocks"] = [True, True, False]
+    # "oi_flush_event" comes from registry-backed canonical spec signal names.
+    features["oi_flush_event"] = [True, True, False]
 
     blueprint = _base_blueprint()
-    blueprint["entry"]["triggers"] = ["oi_shocks"]
+    blueprint["entry"]["triggers"] = ["oi_flush_event"]
     blueprint["entry"]["confirmations"] = []
 
     strategy = DslInterpreterV1()
@@ -190,3 +190,83 @@ def test_dsl_rejects_unknown_non_registry_signal():
                 "dsl_blueprint": blueprint,
             },
         )
+
+
+def test_dsl_enforces_fail_on_zero_trigger_coverage():
+    bars = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(
+                [
+                    "2026-01-01T00:00:00Z",
+                    "2026-01-01T00:05:00Z",
+                    "2026-01-01T00:10:00Z",
+                ],
+                utc=True,
+            ),
+            "open": [100.0, 101.0, 102.0],
+            "high": [101.0, 102.0, 103.0],
+            "low": [99.0, 100.0, 101.0],
+            "close": [100.0, 101.0, 102.0],
+            "quote_volume": [1_000_000.0, 1_000_000.0, 1_000_000.0],
+        }
+    )
+    features = bars[["timestamp", "close", "quote_volume"]].copy()
+    features["liquidity_vacuum_event"] = [False, False, False]
+
+    blueprint = _base_blueprint()
+    blueprint["entry"]["triggers"] = ["liquidity_vacuum_event"]
+    blueprint["entry"]["confirmations"] = []
+
+    strategy = DslInterpreterV1()
+    with pytest.raises(ValueError, match="all-zero trigger coverage"):
+        strategy.generate_positions(
+            bars=bars,
+            features=features,
+            params={
+                "strategy_symbol": "BTCUSDT",
+                "dsl_blueprint": blueprint,
+                "fail_on_zero_trigger_coverage": 1,
+            },
+        )
+
+
+def test_dsl_emits_trigger_coverage_in_metadata():
+    bars = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(
+                [
+                    "2026-01-01T00:00:00Z",
+                    "2026-01-01T00:05:00Z",
+                    "2026-01-01T00:10:00Z",
+                ],
+                utc=True,
+            ),
+            "open": [100.0, 101.0, 102.0],
+            "high": [101.0, 102.0, 103.0],
+            "low": [99.0, 100.0, 101.0],
+            "close": [100.0, 101.0, 102.0],
+            "quote_volume": [1_000_000.0, 1_000_000.0, 1_000_000.0],
+        }
+    )
+    features = bars[["timestamp", "close", "quote_volume"]].copy()
+    features["liquidity_vacuum_event"] = [True, False, False]
+
+    blueprint = _base_blueprint()
+    blueprint["entry"]["triggers"] = ["liquidity_vacuum_event"]
+    blueprint["entry"]["confirmations"] = []
+
+    strategy = DslInterpreterV1()
+    positions = strategy.generate_positions(
+        bars=bars,
+        features=features,
+        params={
+            "strategy_symbol": "BTCUSDT",
+            "dsl_blueprint": blueprint,
+        },
+    )
+    metadata = positions.attrs["strategy_metadata"]
+    coverage = metadata["trigger_coverage"]
+
+    assert coverage["all_zero"] is False
+    assert coverage["missing"] == []
+    assert coverage["triggers"]["liquidity_vacuum_event"]["true_count"] == 1

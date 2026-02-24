@@ -189,68 +189,75 @@ class Phase1EventSource:
 
 
 PHASE1_EVENT_SOURCES: Dict[str, Phase1EventSource] = {
-    "vol_shock_relaxation": Phase1EventSource(
-        event_type="vol_shock_relaxation",
+    "VOL_SHOCK": Phase1EventSource(
+        event_type="VOL_SHOCK",
         reports_dir="vol_shock_relaxation",
         events_file="vol_shock_relaxation_events.csv",
         controls_file="vol_shock_relaxation_controls.csv",
         summary_file="vol_shock_relaxation_summary.json",
     ),
-    "liquidity_refill_lag_window": Phase1EventSource(
-        event_type="liquidity_refill_lag_window",
-        reports_dir="liquidity_refill_lag_window",
-        events_file="liquidity_refill_lag_window_events.csv",
-        controls_file="liquidity_refill_lag_window_controls.csv",
-        summary_file="liquidity_refill_lag_window_summary.json",
-    ),
-    "liquidity_absence_window": Phase1EventSource(
-        event_type="liquidity_absence_window",
-        reports_dir="liquidity_absence_window",
-        events_file="liquidity_absence_window_events.csv",
-        controls_file="liquidity_absence_window_controls.csv",
-        summary_file="liquidity_absence_window_summary.json",
-    ),
-    "vol_aftershock_window": Phase1EventSource(
-        event_type="vol_aftershock_window",
-        reports_dir="vol_aftershock_window",
-        events_file="vol_aftershock_window_events.csv",
-        controls_file="vol_aftershock_window_controls.csv",
-        summary_file="vol_aftershock_window_summary.json",
-    ),
-    "directional_exhaustion_after_forced_flow": Phase1EventSource(
-        event_type="directional_exhaustion_after_forced_flow",
+    "FORCED_FLOW_EXHAUSTION": Phase1EventSource(
+        event_type="FORCED_FLOW_EXHAUSTION",
         reports_dir="directional_exhaustion_after_forced_flow",
         events_file="directional_exhaustion_after_forced_flow_events.csv",
         controls_file="directional_exhaustion_after_forced_flow_controls.csv",
         summary_file="directional_exhaustion_after_forced_flow_summary.json",
     ),
-    "cross_venue_desync": Phase1EventSource(
-        event_type="cross_venue_desync",
+    "CROSS_VENUE_DESYNC": Phase1EventSource(
+        event_type="CROSS_VENUE_DESYNC",
         reports_dir="cross_venue_desync",
         events_file="cross_venue_desync_events.csv",
         controls_file="cross_venue_desync_controls.csv",
         summary_file="cross_venue_desync_summary.json",
     ),
-    "liquidity_vacuum": Phase1EventSource(
-        event_type="liquidity_vacuum",
+    "LIQUIDITY_VACUUM": Phase1EventSource(
+        event_type="LIQUIDITY_VACUUM",
         reports_dir="liquidity_vacuum",
         events_file="liquidity_vacuum_events.csv",
         controls_file="liquidity_vacuum_controls.csv",
         summary_file="liquidity_vacuum_summary.json",
     ),
-    "funding_extreme_reversal_window": Phase1EventSource(
-        event_type="funding_extreme_reversal_window",
-        reports_dir="funding_extreme_reversal_window",
-        events_file="funding_extreme_reversal_window_events.csv",
-        controls_file="funding_extreme_reversal_window_controls.csv",
-        summary_file="funding_extreme_reversal_window_summary.json",
+    "FUNDING_EXTREME_ONSET": Phase1EventSource(
+        event_type="FUNDING_EXTREME_ONSET",
+        reports_dir="funding_events",
+        events_file="funding_episode_events.csv",
+        controls_file="funding_episode_baselines.csv",
+        summary_file="funding_episode_summary.json",
     ),
-    "range_compression_breakout_window": Phase1EventSource(
-        event_type="range_compression_breakout_window",
-        reports_dir="range_compression_breakout_window",
-        events_file="range_compression_breakout_window_events.csv",
-        controls_file="range_compression_breakout_window_controls.csv",
-        summary_file="range_compression_breakout_window_summary.json",
+    "FUNDING_PERSISTENCE_TRIGGER": Phase1EventSource(
+        event_type="FUNDING_PERSISTENCE_TRIGGER",
+        reports_dir="funding_events",
+        events_file="funding_episode_events.csv",
+        controls_file="funding_episode_baselines.csv",
+        summary_file="funding_episode_summary.json",
+    ),
+    "FUNDING_NORMALIZATION_TRIGGER": Phase1EventSource(
+        event_type="FUNDING_NORMALIZATION_TRIGGER",
+        reports_dir="funding_events",
+        events_file="funding_episode_events.csv",
+        controls_file="funding_episode_baselines.csv",
+        summary_file="funding_episode_summary.json",
+    ),
+    "OI_SPIKE_POSITIVE": Phase1EventSource(
+        event_type="OI_SPIKE_POSITIVE",
+        reports_dir="oi_shocks",
+        events_file="oi_shock_events.csv",
+        controls_file="oi_shock_controls.csv",
+        summary_file="oi_shock_summary.json",
+    ),
+    "OI_SPIKE_NEGATIVE": Phase1EventSource(
+        event_type="OI_SPIKE_NEGATIVE",
+        reports_dir="oi_shocks",
+        events_file="oi_shock_events.csv",
+        controls_file="oi_shock_controls.csv",
+        summary_file="oi_shock_summary.json",
+    ),
+    "OI_FLUSH": Phase1EventSource(
+        event_type="OI_FLUSH",
+        reports_dir="oi_shocks",
+        events_file="oi_shock_events.csv",
+        controls_file="oi_shock_controls.csv",
+        summary_file="oi_shock_summary.json",
     ),
     "LIQUIDATION_CASCADE": Phase1EventSource(
         event_type="LIQUIDATION_CASCADE",

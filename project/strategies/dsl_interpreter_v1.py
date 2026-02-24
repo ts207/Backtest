@@ -50,17 +50,19 @@ KNOWN_ENTRY_SIGNALS = {
 REGISTRY_SIGNAL_COLUMNS = set(REGISTRY_BACKED_SIGNALS)
 
 MOMENTUM_BIAS_EVENTS = {
-    "range_compression_breakout_window",
-    "vol_aftershock_window",
+    "vol_shock",
     "cross_venue_desync",
+    "oi_spike_positive",
 }
 CONTRARIAN_BIAS_EVENTS = {
-    "vol_shock_relaxation",
-    "liquidity_refill_lag_window",
-    "liquidity_absence_window",
-    "directional_exhaustion_after_forced_flow",
     "liquidity_vacuum",
-    "funding_extreme_reversal_window",
+    "forced_flow_exhaustion",
+    "funding_extreme_onset",
+    "funding_persistence_trigger",
+    "funding_normalization_trigger",
+    "oi_spike_negative",
+    "oi_flush",
+    "liquidation_cascade",
 }
 
 
@@ -652,6 +654,13 @@ class DslInterpreterV1:
         merged = merged.sort_values("timestamp").reset_index(drop=True)
         frame = _build_signal_frame(merged)
         _validate_overlay_columns(frame, blueprint.overlays, blueprint.id)
+        trigger_coverage = _compute_trigger_coverage(frame, blueprint.entry.triggers)
+        if int(params.get("fail_on_zero_trigger_coverage", 0)):
+            if bool(trigger_coverage.get("all_zero", False)):
+                raise ValueError(
+                    f"Blueprint `{blueprint.id}` has all-zero trigger coverage "
+                    f"for triggers={blueprint.entry.triggers}."
+                )
 
         symbol = str(params.get("strategy_symbol", "")).strip().upper()
         allowed_symbols = {str(s).strip().upper() for s in blueprint.symbol_scope.symbols}
@@ -663,6 +672,7 @@ class DslInterpreterV1:
                 "strategy_id": blueprint.id,
                 "blueprint_id": blueprint.id,
                 "event_type": blueprint.event_type,
+                "trigger_coverage": trigger_coverage,
             }
             return out
 
@@ -818,6 +828,7 @@ class DslInterpreterV1:
             "blueprint_id": blueprint.id,
             "event_type": blueprint.event_type,
             "candidate_id": blueprint.candidate_id,
+            "trigger_coverage": trigger_coverage,
         }
         return out
 

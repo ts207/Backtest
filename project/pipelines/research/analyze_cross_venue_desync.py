@@ -199,7 +199,7 @@ def _build_event_and_control_rows(
 
         rows_event.append(
             {
-                "event_type": "cross_venue_desync",
+                "event_type": "CROSS_VENUE_DESYNC",
                 "event_id": event_id,
                 "symbol": symbol,
                 "anchor_ts": core["timestamp"].iat[idx],
@@ -347,7 +347,7 @@ def main() -> int:
     sign.to_csv(sign_path, index=False)
 
     summary = {
-        "event_type": "cross_venue_desync",
+        "event_type": "CROSS_VENUE_DESYNC",
         "phase": 1,
         "window": {"x": 0, "y": WINDOW_END},
         "anchor_mode": ANCHOR_MODE,

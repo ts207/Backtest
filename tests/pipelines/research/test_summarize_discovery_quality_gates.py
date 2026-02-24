@@ -27,7 +27,7 @@ def test_gate_pass_series_prefers_gate_phase2_final_when_present():
 def test_build_summary_uses_phase2_final_for_family_and_global_pass_counts(tmp_path, monkeypatch):
     run_id = "test_run"
     phase2_root = tmp_path / "reports" / "phase2" / run_id
-    event_dir = phase2_root / "liquidity_vacuum"
+    event_dir = phase2_root / "LIQUIDITY_VACUUM"
     event_dir.mkdir(parents=True, exist_ok=True)
 
     frame = pd.DataFrame(
@@ -46,7 +46,7 @@ def test_build_summary_uses_phase2_final_for_family_and_global_pass_counts(tmp_p
         top_fail_reasons=5,
     )
 
-    family = payload["by_event_family"]["liquidity_vacuum"]
+    family = payload["by_event_family"]["LIQUIDITY_VACUUM"]
     assert family["phase2_candidates"] == 3
     assert family["gate_pass_count"] == 1
     assert family["phase2_gate_all_pass"] == 1

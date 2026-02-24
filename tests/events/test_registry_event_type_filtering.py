@@ -15,11 +15,10 @@ def _base_events() -> pd.DataFrame:
     return pd.DataFrame(
         {
             "event_type": [
-                "funding_extreme_onset",
-                "funding_acceleration",
-                "funding_persistence_window",
-                "funding_normalization",
-                "oi_spike_positive",
+                "FUNDING_EXTREME_ONSET",
+                "FUNDING_PERSISTENCE_TRIGGER",
+                "FUNDING_NORMALIZATION_TRIGGER",
+                "OI_SPIKE_POSITIVE",
             ],
             "timestamp": pd.to_datetime(
                 [
@@ -27,39 +26,30 @@ def _base_events() -> pd.DataFrame:
                     "2026-01-01T00:05:00Z",
                     "2026-01-01T00:10:00Z",
                     "2026-01-01T00:15:00Z",
-                    "2026-01-01T00:20:00Z",
                 ],
                 utc=True,
             ),
-            "symbol": ["BTCUSDT"] * 5,
-            "event_id": ["e0", "e1", "e2", "e3", "e4"],
+            "symbol": ["BTCUSDT"] * 4,
+            "event_id": ["e0", "e1", "e2", "e3"],
         }
     )
 
 
 def test_normalize_phase1_events_subtype_filters_to_exact_event_type():
     events = _base_events()
-    spec = EVENT_REGISTRY_SPECS["funding_extreme_onset"]
+    spec = EVENT_REGISTRY_SPECS["FUNDING_EXTREME_ONSET"]
     normalized = normalize_phase1_events(events=events, spec=spec, run_id="r1")
     assert len(normalized) == 1
-    assert normalized["event_type"].iloc[0] == "funding_extreme_onset"
+    assert normalized["event_type"].iloc[0] == "FUNDING_EXTREME_ONSET"
     assert normalized["event_id"].iloc[0] == "e0"
-
-
-def test_normalize_phase1_events_aggregate_funding_union_filters_children():
-    events = _base_events()
-    spec = EVENT_REGISTRY_SPECS["funding_episodes"]
-    normalized = normalize_phase1_events(events=events, spec=spec, run_id="r1")
-    assert len(normalized) == 4
-    assert set(normalized["event_id"].tolist()) == {"e0", "e1", "e2", "e3"}
 
 
 def test_normalize_phase1_events_without_event_type_column_keeps_rows():
     events = _base_events().drop(columns=["event_type"])
-    spec = EVENT_REGISTRY_SPECS["funding_extreme_onset"]
+    spec = EVENT_REGISTRY_SPECS["FUNDING_EXTREME_ONSET"]
     normalized = normalize_phase1_events(events=events, spec=spec, run_id="r1")
     assert len(normalized) == len(events)
 
 
-def test_registry_includes_funding_acceleration_spec():
-    assert "funding_acceleration" in EVENT_REGISTRY_SPECS
+def test_registry_uses_canonical_funding_specs():
+    assert "FUNDING_PERSISTENCE_TRIGGER" in EVENT_REGISTRY_SPECS

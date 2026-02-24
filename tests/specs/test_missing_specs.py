@@ -3,26 +3,15 @@ from pathlib import Path
 
 def test_event_specs_exist():
     root = Path("spec/events")
-    # Volatility
-    assert (root / "vol_shock_relaxation.yaml").exists()
-    assert (root / "vol_aftershock_window.yaml").exists()
-    assert (root / "range_compression_breakout_window.yaml").exists()
-
-    # Liquidity
-    assert (root / "liquidity_refill_lag_window.yaml").exists()
-    assert (root / "liquidity_absence_window.yaml").exists()
-    assert (root / "liquidity_vacuum.yaml").exists()
-
-    # Funding & OI
-    assert (root / "funding_extreme_reversal_window.yaml").exists()
-    assert (root / "funding_extreme_onset.yaml").exists()
-    assert (root / "funding_persistence_window.yaml").exists()
-    assert (root / "funding_normalization.yaml").exists()
-    assert (root / "oi_spike_positive.yaml").exists()
-    assert (root / "oi_spike_negative.yaml").exists()
-    assert (root / "oi_flush.yaml").exists()
-
-    # Remaining
-    assert (root / "directional_exhaustion_after_forced_flow.yaml").exists()
-    assert (root / "cross_venue_desync.yaml").exists()
+    # Canonical event specs
+    assert (root / "VOL_SHOCK.yaml").exists()
+    assert (root / "LIQUIDITY_VACUUM.yaml").exists()
+    assert (root / "FORCED_FLOW_EXHAUSTION.yaml").exists()
+    assert (root / "CROSS_VENUE_DESYNC.yaml").exists()
+    assert (root / "FUNDING_EXTREME_ONSET.yaml").exists()
+    assert (root / "FUNDING_PERSISTENCE_TRIGGER.yaml").exists()
+    assert (root / "FUNDING_NORMALIZATION_TRIGGER.yaml").exists()
+    assert (root / "OI_SPIKE_POSITIVE.yaml").exists()
+    assert (root / "OI_SPIKE_NEGATIVE.yaml").exists()
+    assert (root / "OI_FLUSH.yaml").exists()
     assert (root / "LIQUIDATION_CASCADE.yaml").exists()

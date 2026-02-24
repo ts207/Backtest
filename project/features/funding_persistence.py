@@ -21,6 +21,7 @@ class FundingPersistenceConfig:
 
 
 DEFAULT_FP_CONFIG = FundingPersistenceConfig()
+SOURCE_EVENT_TYPE = "FUNDING_PERSISTENCE_TRIGGER"
 
 
 def _rolling_percentile(series: pd.Series, window: int = 96) -> pd.Series:
@@ -91,6 +92,7 @@ def build_funding_persistence_state(
         {
             "timestamp": df["timestamp"],
             "fp_def_version": config.def_version,
+            "fp_source_event_type": SOURCE_EVENT_TYPE,
             "fp_active": active,
             "fp_age_bars": age,
             "fp_event_id": event_id,

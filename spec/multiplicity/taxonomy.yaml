@@ -1,48 +1,296 @@
+schema_version: 2
+ontology_model: event_state_template
+
+# Canonical template verb lexicon lives in spec/hypotheses/template_verb_lexicon.yaml.
+# `templates` is the broad family allow-list. `runtime_templates` keeps an optional
+# conservative subset for current execution paths.
 families:
-  liquidity_dislocation:
-    description: "Temporary liquidity imbalance causing price overshoot and repair."
-    expected_behavior: "mean_reversion"
-    templates: ["mean_reversion", "liquidity_reversion_v2"]
+  LIQUIDITY_DISLOCATION:
+    description: "Microstructure imbalance and liquidity withdrawal/recovery dynamics."
     events:
-      - "liquidity_vacuum"
-      - "liquidity_refill_lag_window"
-      - "liquidity_absence_window"
+      - "LIQUIDITY_VACUUM"
+      - "DEPTH_COLLAPSE"
+      - "SPREAD_BLOWOUT"
+      - "ORDERFLOW_IMBALANCE_SHOCK"
+      - "SWEEP_STOPRUN"
+      - "ABSORPTION_EVENT"
+      - "LIQUIDITY_GAP_PRINT"
+    states:
+      - "LOW_LIQUIDITY_STATE"
+      - "REFILL_LAG_STATE"
+      - "LIQUIDITY_ABSENCE_STATE"
+      - "POST_SWEEP_STATE"
+      - "POST_ABSORPTION_STATE"
+      - "SPREAD_ELEVATED_STATE"
+      - "DEPTH_RECOVERY_STATE"
+    templates:
+      - "mean_reversion"
+      - "stop_run_repair"
+      - "overshoot_repair"
+      - "continuation"
+      - "only_if_liquidity"
+      - "slippage_aware_filter"
+    runtime_templates:
+      - "mean_reversion"
+      - "continuation"
+      - "liquidity_reversion_v2"
 
-  volatility_transition:
-    description: "Variance regime change resulting in a repricing phase."
-    expected_behavior: "continuation"
-    templates: ["continuation", "trend_continuation"]
+  VOLATILITY_TRANSITION:
+    description: "Variance regime change and post-shock relaxation/aftershock behavior."
     events:
-      - "vol_shock_relaxation"
-      - "vol_aftershock_window"
-      - "range_compression_breakout_window"
+      - "VOL_SHOCK"
+      - "VOL_SPIKE"
+      - "VOL_RELAXATION_START"
+      - "VOL_CLUSTER_SHIFT"
+      - "RANGE_COMPRESSION_END"
+      - "BREAKOUT_TRIGGER"
+    states:
+      - "AFTERSHOCK_STATE"
+      - "POST_EXPANSION_STATE"
+      - "RELAXATION_STATE"
+      - "COMPRESSION_STATE"
+      - "PRE_BREAKOUT_TENSION_STATE"
+      - "HIGH_VOL_REGIME"
+      - "LOW_VOL_REGIME"
+    templates:
+      - "continuation"
+      - "trend_continuation"
+      - "volatility_expansion_follow"
+      - "pullback_entry"
+      - "mean_reversion"
+      - "only_if_regime"
+    runtime_templates:
+      - "mean_reversion"
+      - "continuation"
+      - "trend_continuation"
+      - "volatility_expansion_follow"
+      - "pullback_entry"
+      - "only_if_regime"
 
-  positioning_extremes:
-    description: "Crowded trades leading to forced liquidation paths."
-    expected_behavior: "reversal_or_squeeze"
-    templates: ["mean_reversion", "continuation", "trend_continuation"]
+  POSITIONING_EXTREMES:
+    description: "Carry/leverage crowding, squeeze, and deleveraging dynamics."
     events:
-      - "funding_extreme_reversal_window"
-      - "funding_extreme_onset"
-      - "funding_persistence_window"
-      - "funding_normalization"
-      - "oi_spike_positive"
-      - "oi_spike_negative"
-      - "oi_flush"
+      - "FUNDING_EXTREME_ONSET"
+      - "FUNDING_FLIP"
+      - "FUNDING_PERSISTENCE_TRIGGER"
+      - "FUNDING_NORMALIZATION_TRIGGER"
+      - "OI_SPIKE_POSITIVE"
+      - "OI_SPIKE_NEGATIVE"
+      - "OI_FLUSH"
       - "LIQUIDATION_CASCADE"
+      - "DELEVERAGING_WAVE"
+    states:
+      - "CROWDING_STATE"
+      - "FUNDING_PERSISTENCE_STATE"
+      - "FUNDING_NORMALIZATION_STATE"
+      - "POST_EXTREME_CARRY_STATE"
+      - "DELEVERAGING_STATE"
+      - "POST_LIQUIDATION_STATE"
+      - "SQUEEZE_RISK_STATE"
+    templates:
+      - "reversal_or_squeeze"
+      - "mean_reversion"
+      - "continuation"
+      - "exhaustion_reversal"
+      - "convexity_capture"
+      - "only_if_funding"
+      - "only_if_oi"
+      - "tail_risk_avoid"
+    runtime_templates:
+      - "reversal_or_squeeze"
+      - "mean_reversion"
+      - "continuation"
+      - "exhaustion_reversal"
+      - "convexity_capture"
+      - "only_if_funding"
+      - "only_if_oi"
+      - "tail_risk_avoid"
 
-  exhaustion_reversion:
-    description: "Energy depletion leading to reversal."
-    expected_behavior: "mean_reversion"
-    templates: ["mean_reversion"]
+  FORCED_FLOW_AND_EXHAUSTION:
+    description: "Forced directional flows that transition into depletion/exhaustion."
     events:
-      - "directional_exhaustion_after_forced_flow"
+      - "FORCED_FLOW_EXHAUSTION"
+      - "TREND_EXHAUSTION_TRIGGER"
+      - "MOMENTUM_DIVERGENCE_TRIGGER"
+      - "CLIMAX_VOLUME_BAR"
+      - "FAILED_CONTINUATION"
+    states:
+      - "POST_FORCED_FLOW_STATE"
+      - "EXHAUSTION_STATE"
+      - "DISTRIBUTION_ACCUMULATION_STATE"
+      - "POST_CLIMAX_STATE"
+      - "MEAN_REVERSION_WINDOW_STATE"
+    templates:
+      - "mean_reversion"
+      - "exhaustion_reversal"
+      - "momentum_fade"
+      - "range_reversion"
+      - "only_if_trend"
+      - "drawdown_filter"
+    runtime_templates:
+      - "mean_reversion"
+      - "exhaustion_reversal"
+      - "momentum_fade"
+      - "range_reversion"
+      - "only_if_trend"
+      - "drawdown_filter"
 
-  cross_signal:
-    description: "Multi-variable coincidences indicating structural desync."
-    expected_behavior: "variable"
-    templates: ["mean_reversion", "continuation"]
+  TREND_STRUCTURE:
+    description: "Range-to-trend transitions and trend-state continuation/failure."
     events:
-      - "cross_venue_desync"
+      - "RANGE_BREAKOUT"
+      - "FALSE_BREAKOUT"
+      - "TREND_ACCELERATION"
+      - "TREND_DECELERATION"
+      - "PULLBACK_PIVOT"
+      - "SUPPORT_RESISTANCE_BREAK"
+    states:
+      - "BREAKOUT_HOLD_STATE"
+      - "POST_BREAKOUT_RETEST_STATE"
+      - "TRENDING_STATE"
+      - "CHOP_STATE"
+      - "PULLBACK_STATE"
+      - "FAILURE_STATE"
+    templates:
+      - "breakout_followthrough"
+      - "false_breakout_reversal"
+      - "pullback_entry"
+      - "trend_continuation"
+      - "continuation"
+      - "only_if_trend"
+    runtime_templates:
+      - "breakout_followthrough"
+      - "false_breakout_reversal"
+      - "pullback_entry"
+      - "trend_continuation"
+      - "continuation"
+      - "only_if_trend"
 
+  STATISTICAL_DISLOCATION:
+    description: "Distributional stretch and overshoot/repair dynamics."
+    events:
+      - "ZSCORE_STRETCH"
+      - "BAND_BREAK"
+      - "OVERSHOOT_AFTER_SHOCK"
+      - "GAP_OVERSHOOT"
+    states:
+      - "STRETCHED_STATE"
+      - "OVERSHOOT_STATE"
+      - "REPAIR_WINDOW_STATE"
+      - "REVERSION_IN_PROGRESS_STATE"
+    templates:
+      - "mean_reversion"
+      - "overshoot_repair"
+      - "tail_risk_avoid"
+    runtime_templates:
+      - "mean_reversion"
+      - "overshoot_repair"
+      - "tail_risk_avoid"
+
+  REGIME_TRANSITION:
+    description: "Cross-regime transitions that reparameterize strategy behavior."
+    events:
+      - "VOL_REGIME_SHIFT_EVENT"
+      - "TREND_TO_CHOP_SHIFT"
+      - "CHOP_TO_TREND_SHIFT"
+      - "CORRELATION_BREAKDOWN_EVENT"
+      - "BETA_SPIKE_EVENT"
+    states:
+      - "RISK_ON_STATE"
+      - "RISK_OFF_STATE"
+      - "CORRELATION_BROKEN_STATE"
+      - "NEW_REGIME_STABILIZATION_STATE"
+      - "TRANSITION_TURBULENCE_STATE"
+    templates:
+      - "only_if_regime"
+      - "continuation"
+      - "mean_reversion"
+      - "drawdown_filter"
+      - "tail_risk_avoid"
+    runtime_templates:
+      - "only_if_regime"
+      - "continuation"
+      - "mean_reversion"
+      - "drawdown_filter"
+      - "tail_risk_avoid"
+
+  INFORMATION_DESYNC:
+    description: "Cross-venue/cross-signal information inefficiency and reconciliation."
+    events:
+      - "CROSS_VENUE_DESYNC"
+      - "INDEX_COMPONENT_DIVERGENCE"
+      - "SPOT_PERP_BASIS_SHOCK"
+      - "LEAD_LAG_BREAK"
+    states:
+      - "DESYNC_PERSISTENCE_STATE"
+      - "BASIS_ELEVATED_STATE"
+      - "CONVERGENCE_WINDOW_STATE"
+      - "ARBITRAGE_CROWDING_STATE"
+    templates:
+      - "desync_repair"
+      - "convergence"
+      - "basis_repair"
+      - "lead_lag_follow"
+      - "divergence_continuation"
+    runtime_templates:
+      - "desync_repair"
+      - "convergence"
+      - "basis_repair"
+      - "lead_lag_follow"
+      - "divergence_continuation"
+
+  TEMPORAL_STRUCTURE:
+    description: "Session/calendar/funding/news timing effects."
+    events:
+      - "SESSION_OPEN_EVENT"
+      - "SESSION_CLOSE_EVENT"
+      - "FUNDING_TIMESTAMP_EVENT"
+      - "SCHEDULED_NEWS_WINDOW_EVENT"
+    states:
+      - "OPEN_WINDOW_STATE"
+      - "CLOSE_WINDOW_STATE"
+      - "POST_FUNDING_WINDOW_STATE"
+      - "PRE_NEWS_STATE"
+      - "POST_NEWS_AFTERSHOCK_STATE"
+    templates:
+      - "mean_reversion"
+      - "volatility_expansion_follow"
+      - "only_if_no_news_window"
+    runtime_templates:
+      - "mean_reversion"
+      - "continuation"
+
+  EXECUTION_FRICTION:
+    description: "Tradability and cost-environment transitions affecting execution viability."
+    events:
+      - "SPREAD_REGIME_WIDENING_EVENT"
+      - "SLIPPAGE_SPIKE_EVENT"
+      - "FEE_REGIME_CHANGE_EVENT"
+    states:
+      - "HIGH_FRICTION_STATE"
+      - "LOW_FRICTION_STATE"
+      - "ILLIQUID_EXECUTION_STATE"
+    templates:
+      - "slippage_aware_filter"
+      - "tail_risk_avoid"
+      - "only_if_liquidity"
+    runtime_templates:
+      - "slippage_aware_filter"
+      - "tail_risk_avoid"
+
+# Runtime event ids are canonical-only.
+runtime_event_aliases:
+  LIQUIDITY_VACUUM: "LIQUIDITY_VACUUM"
+  VOL_SHOCK: "VOL_SHOCK"
+  FUNDING_EXTREME_ONSET: "FUNDING_EXTREME_ONSET"
+  FUNDING_PERSISTENCE_TRIGGER: "FUNDING_PERSISTENCE_TRIGGER"
+  FUNDING_NORMALIZATION_TRIGGER: "FUNDING_NORMALIZATION_TRIGGER"
+  OI_SPIKE_POSITIVE: "OI_SPIKE_POSITIVE"
+  OI_SPIKE_NEGATIVE: "OI_SPIKE_NEGATIVE"
+  OI_FLUSH: "OI_FLUSH"
+  LIQUIDATION_CASCADE: "LIQUIDATION_CASCADE"
+  FORCED_FLOW_EXHAUSTION: "FORCED_FLOW_EXHAUSTION"
+  CROSS_VENUE_DESYNC: "CROSS_VENUE_DESYNC"
+
+# Feature (non-event) templates remain separate from event/state discovery templates.
 default_feature_templates: ["feature_conditioned_prediction"]

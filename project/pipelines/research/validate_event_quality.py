@@ -225,16 +225,17 @@ def _compute_sensitivity(
 
 # Known severity columns per event type (in priority order)
 _SEVERITY_COLS: Dict[str, List[str]] = {
-    "vol_shock_relaxation": ["rv_shock_magnitude", "shock_severity", "range_pct"],
-    "liquidity_vacuum": ["depth_drop_pct", "stress_score", "spread_bps"],
-    "liquidity_refill_lag_window": ["refill_lag_bars", "lag_severity"],
-    "liquidity_absence_window": ["absence_duration_bars", "severity"],
-    "vol_aftershock_window": ["secondary_shock_magnitude", "shock_severity"],
-    "directional_exhaustion_after_forced_flow": ["exhaustion_score", "range_pct"],
-    "cross_venue_desync": ["basis_bps", "desync_magnitude"],
-    "funding_extreme_reversal_window": ["funding_rate_abs", "funding_z_score"],
-    "range_compression_breakout_window": ["compression_duration_bars", "atr_pct"],
-    "funding_episodes": ["episode_magnitude", "funding_rate_abs"],
+    "VOL_SHOCK": ["rv_shock_magnitude", "shock_severity", "range_pct"],
+    "LIQUIDITY_VACUUM": ["depth_drop_pct", "stress_score", "spread_bps"],
+    "FORCED_FLOW_EXHAUSTION": ["exhaustion_score", "range_pct"],
+    "CROSS_VENUE_DESYNC": ["basis_bps", "desync_magnitude"],
+    "FUNDING_EXTREME_ONSET": ["episode_magnitude", "funding_rate_abs"],
+    "FUNDING_PERSISTENCE_TRIGGER": ["episode_magnitude", "funding_rate_abs"],
+    "FUNDING_NORMALIZATION_TRIGGER": ["episode_magnitude", "funding_rate_abs"],
+    "OI_SPIKE_POSITIVE": ["oi_z", "oi_pct_change"],
+    "OI_SPIKE_NEGATIVE": ["oi_z", "oi_pct_change"],
+    "OI_FLUSH": ["oi_z", "oi_pct_change"],
+    "LIQUIDATION_CASCADE": ["liquidation_notional", "liquidation_count"],
 }
 
 

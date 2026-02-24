@@ -7,6 +7,7 @@ gate_e1:
 gate_v1_phase2:
   max_q_value: 0.05
   min_after_cost_expectancy_bps: 0.1
+  conservative_cost_multiplier: 1.5
   require_sign_stability: true
   min_sample_size: 50
   # Quality floors controlling compile eligibility
@@ -14,6 +15,31 @@ gate_v1_phase2:
   quality_floor_strict: 0.66
   quality_floor_fallback: 0.66
   min_events_fallback: 100
+
+# Profiled phase2 overrides.
+# - discovery: high-recall research tuning
+# - promotion: strict defaults for production/certification
+gate_v1_phase2_profiles:
+  discovery:
+    event_overrides:
+      OI_SPIKE_NEGATIVE:
+        min_after_cost_expectancy_bps: 0.0
+        conservative_cost_multiplier: 1.1
+      OI_SPIKE_POSITIVE:
+        max_q_value: 0.10
+        min_after_cost_expectancy_bps: 0.0
+        conservative_cost_multiplier: 1.1
+      LIQUIDATION_CASCADE:
+        max_q_value: 0.13
+        min_after_cost_expectancy_bps: -5.0
+        conservative_cost_multiplier: 1.0
+      LIQUIDITY_VACUUM:
+        max_q_value: 0.10
+        min_after_cost_expectancy_bps: -2.0
+        conservative_cost_multiplier: 1.0
+        require_sign_stability: false
+  promotion:
+    event_overrides: {}
 
 gate_v1_fallback:
   min_t_stat: 2.5

@@ -44,6 +44,8 @@ def _load_event_specs() -> Dict[str, EventRegistrySpec]:
             data = yaml.safe_load(f)
         if not data:
             continue
+        if bool(data.get("deprecated", False)) or not bool(data.get("active", True)):
+            continue
         missing = required - set(data.keys())
         if missing:
             _log.debug("Skipping %s — missing registry fields: %s", yaml_file.name, missing)
@@ -77,22 +79,9 @@ REGISTRY_EVENT_COLUMNS = [
     "features_at_event",
 ]
 
-# Some phase-1 analyzers emit multiple event families into one shared CSV.
-# For subtype specs we strictly keep exact matches; for aggregate specs we map
-# to an explicit union of child family labels.
-AGGREGATE_EVENT_TYPE_UNIONS: Dict[str, Sequence[str]] = {
-    "funding_episodes": (
-        "funding_extreme_onset",
-        "funding_acceleration",
-        "funding_persistence_window",
-        "funding_normalization",
-    ),
-    "oi_shocks": (
-        "oi_spike_positive",
-        "oi_spike_negative",
-        "oi_flush",
-    ),
-}
+# Some phase-1 analyzers emit multiple canonical event types into one shared CSV.
+# Filtering remains event-type exact unless an explicit canonical union is declared.
+AGGREGATE_EVENT_TYPE_UNIONS: Dict[str, Sequence[str]] = {}
 
 
 def expected_event_types_for_spec(event_type: str) -> Sequence[str]:

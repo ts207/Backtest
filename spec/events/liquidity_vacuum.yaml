@@ -1,4 +1,0 @@
-event_type: "liquidity_vacuum"
-reports_dir: "liquidity_vacuum"
-events_file: "liquidity_vacuum_events.csv"
-signal_column: "liquidity_vacuum_event"

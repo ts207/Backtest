@@ -12,13 +12,12 @@ import pipelines.research.export_edge_candidates as export_edge_candidates
 
 def test_export_chain_includes_declared_subtype_families():
     expected_scripts = {
-        "funding_extreme_onset": "analyze_funding_episode_events.py",
-        "funding_acceleration": "analyze_funding_episode_events.py",
-        "funding_persistence_window": "analyze_funding_episode_events.py",
-        "funding_normalization": "analyze_funding_episode_events.py",
-        "oi_spike_positive": "analyze_oi_shock_events.py",
-        "oi_spike_negative": "analyze_oi_shock_events.py",
-        "oi_flush": "analyze_oi_shock_events.py",
+        "FUNDING_EXTREME_ONSET": "analyze_funding_episode_events.py",
+        "FUNDING_PERSISTENCE_TRIGGER": "analyze_funding_episode_events.py",
+        "FUNDING_NORMALIZATION_TRIGGER": "analyze_funding_episode_events.py",
+        "OI_SPIKE_POSITIVE": "analyze_oi_shock_events.py",
+        "OI_SPIKE_NEGATIVE": "analyze_oi_shock_events.py",
+        "OI_FLUSH": "analyze_oi_shock_events.py",
     }
     chain_map = {event: script for event, script, _ in export_edge_candidates.PHASE2_EVENT_CHAIN}
     for event_type, expected_script in expected_scripts.items():
@@ -47,7 +46,7 @@ def test_export_execute_chain_uses_phase2_candidate_discovery(monkeypatch, tmp_p
     monkeypatch.setattr(
         export_edge_candidates,
         "PHASE2_EVENT_CHAIN",
-        [("liquidity_vacuum", "analyze_liquidity_vacuum.py", [])],
+        [("LIQUIDITY_VACUUM", "analyze_liquidity_vacuum.py", [])],
     )
     monkeypatch.setattr(export_edge_candidates.subprocess, "run", fake_run)
 

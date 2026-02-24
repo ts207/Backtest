@@ -229,7 +229,7 @@ def _build_event_and_control_rows(
         event_rv_rank = float(rv_rank[idx]) if np.isfinite(rv_rank[idx]) else np.nan
         rows_event.append(
             {
-                "event_type": "directional_exhaustion_after_forced_flow",
+                "event_type": "FORCED_FLOW_EXHAUSTION",
                 "event_id": event_id,
                 "symbol": symbol,
                 "anchor_ts": timestamps[idx],
@@ -369,7 +369,7 @@ def main() -> int:
     sign.to_csv(sign_path, index=False)
 
     summary = {
-        "event_type": "directional_exhaustion_after_forced_flow",
+        "event_type": "FORCED_FLOW_EXHAUSTION",
         "phase": 1,
         "window": {"x": 0, "y": args.window_end},
         "anchor_mode": args.anchor_mode,

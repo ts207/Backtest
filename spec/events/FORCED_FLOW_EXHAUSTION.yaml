@@ -1,0 +1,4 @@
+event_type: "FORCED_FLOW_EXHAUSTION"
+reports_dir: "directional_exhaustion_after_forced_flow"
+events_file: "directional_exhaustion_after_forced_flow_events.csv"
+signal_column: "forced_flow_exhaustion_event"

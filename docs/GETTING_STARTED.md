@@ -42,7 +42,7 @@ This executes ingest -> cleaned bars -> features -> context -> market context by
   --end 2026-01-31 \
   --run_hypothesis_generator 0 \
   --run_phase2_conditional 1 \
-  --phase2_event_type liquidity_vacuum \
+  --phase2_event_type LIQUIDITY_VACUUM \
   --run_bridge_eval_phase2 1
 ```
 

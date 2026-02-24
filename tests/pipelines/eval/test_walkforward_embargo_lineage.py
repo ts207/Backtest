@@ -23,7 +23,7 @@ def test_expected_blueprints_reject_missing_bridge_embargo_lineage(tmp_path):
         [
             {
                 "id": "bp_001",
-                "event_type": "vol_shock_relaxation",
+                "event_type": "VOL_SHOCK",
                 "symbol_scope": {"mode": "single_symbol", "symbols": ["BTCUSDT"], "candidate_symbol": "BTCUSDT"},
                 "lineage": {"promotion_track": "standard"},
             }
@@ -47,7 +47,7 @@ def test_expected_blueprints_reject_mismatched_bridge_embargo_lineage(tmp_path):
         [
             {
                 "id": "bp_001",
-                "event_type": "vol_shock_relaxation",
+                "event_type": "VOL_SHOCK",
                 "symbol_scope": {"mode": "single_symbol", "symbols": ["BTCUSDT"], "candidate_symbol": "BTCUSDT"},
                 "lineage": {"promotion_track": "standard", "bridge_embargo_days_used": 0},
             }
@@ -71,7 +71,7 @@ def test_expected_blueprints_accept_matching_bridge_embargo_lineage(tmp_path):
         [
             {
                 "id": "bp_001",
-                "event_type": "vol_shock_relaxation",
+                "event_type": "VOL_SHOCK",
                 "symbol_scope": {"mode": "single_symbol", "symbols": ["BTCUSDT"], "candidate_symbol": "BTCUSDT"},
                 "lineage": {"promotion_track": "standard", "bridge_embargo_days_used": 1},
             }

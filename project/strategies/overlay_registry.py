@@ -35,7 +35,7 @@ DEFAULT_OVERLAY_SPECS: Dict[str, Dict[str, Any]] = {
     "funding_extreme_filter": {
         "spec_version": PINNED_SPEC_VERSION,
         "name": "funding_extreme_filter",
-        "event": "funding_extreme_reversal_window",
+        "event": "FUNDING_EXTREME_ONSET",
         "condition": "funding_percentile_high",
         "action": "risk_throttle_0.75",
         "status": "APPROVED",

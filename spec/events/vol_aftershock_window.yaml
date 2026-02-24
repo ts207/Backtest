@@ -1,4 +1,0 @@
-event_type: "vol_aftershock_window"
-reports_dir: "vol_aftershock_window"
-events_file: "vol_aftershock_window_events.csv"
-signal_column: "vol_aftershock_event"

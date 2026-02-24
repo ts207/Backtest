@@ -25,9 +25,8 @@ BARS_PER_YEAR_5M = BARS_PER_YEAR_BY_TIMEFRAME["5m"]
 NUMERIC_CONDITION_PATTERN = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(>=|<=|==|>|<)\s*(-?\d+(?:\.\d+)?)\s*$")
 
 MOMENTUM_EVENT_TYPES = {
-    "range_compression_breakout_window",
-    "vol_aftershock_window",
-    "cross_venue_desync",
+    "VOL_SHOCK",
+    "CROSS_VENUE_DESYNC",
 }
 
 

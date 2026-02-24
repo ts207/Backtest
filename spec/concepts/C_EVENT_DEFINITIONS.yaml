@@ -1,6 +1,6 @@
 concept_id: C_EVENT_DEFINITIONS
 name: Event Definitions
-definition: technical implementation of triggers, thresholds, and dependencies for every registry event type.
+definition: technical implementation of causal EVENT triggers (t0 anchors), with STATE windows derived downstream from source events.
 dependencies: [C_DATA_SCHEMA, C_EVENT_REGISTRY]
 data_requirements:
   - dataset: feature_vectors
@@ -23,3 +23,5 @@ artifacts:
     path: project/events/registry.py
   - type: logic
     path: project/pipelines/research/build_event_registry.py
+  - type: taxonomy
+    path: spec/multiplicity/taxonomy.yaml

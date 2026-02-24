@@ -1,3 +1,5 @@
+state_registry_ref: "spec/states/state_registry.yaml"
+
 state_families:
   - name: vol_regime
     allowed_values: [low, mid, high]

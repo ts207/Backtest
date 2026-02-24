@@ -1,90 +1,71 @@
 families:
-  # --- Focused signal families (mean_reversion only at 60m to minimize BH FDR inflated pool) ---
-  funding_normalization:
-    templates:
-      - mean_reversion
-    horizons:
-      - 60m
+  VOL_SHOCK:
+    canonical_family: VOLATILITY_TRANSITION
+    templates: [mean_reversion, continuation, trend_continuation]
+    horizons: [60m]
     max_candidates_per_run: 500
-  funding_extreme_reversal_window:
-    templates:
-      - mean_reversion
-    horizons:
-      - 60m
-    max_candidates_per_run: 500
-  directional_exhaustion_after_forced_flow:
-    templates:
-      - mean_reversion
-    horizons:
-      - 60m
-    max_candidates_per_run: 500
-  vol_shock_relaxation:
-    templates:
-      - mean_reversion
-    horizons:
-      - 60m
-    max_candidates_per_run: 500
-  vol_aftershock_window:
-    templates:
-      - mean_reversion
-    horizons:
-      - 60m
-    max_candidates_per_run: 500
-  liquidity_vacuum:
-    templates:
-      - mean_reversion
-      - continuation
-    horizons:
-      - 5m
-      - 15m
-      - 60m
+
+  LIQUIDITY_VACUUM:
+    canonical_family: LIQUIDITY_DISLOCATION
+    templates: [mean_reversion, stop_run_repair, overshoot_repair, continuation, only_if_liquidity, slippage_aware_filter]
+    conditioning_cols: []
+    horizons: [15m]
     max_candidates_per_run: 1000
-  funding_persistence_window:
-    templates:
-      - mean_reversion
-      - continuation
-    horizons:
-      - 5m
-      - 60m
+
+  FORCED_FLOW_EXHAUSTION:
+    canonical_family: FORCED_FLOW_AND_EXHAUSTION
+    templates: [mean_reversion, exhaustion_reversal, momentum_fade, range_reversion, only_if_trend, drawdown_filter]
+    horizons: [60m]
     max_candidates_per_run: 500
-  oi_flush:
-    templates:
-      - mean_reversion
-    horizons:
-      - 5m
-      - 60m
+
+  CROSS_VENUE_DESYNC:
+    canonical_family: INFORMATION_DESYNC
+    templates: [desync_repair, convergence, basis_repair, lead_lag_follow, divergence_continuation]
+    horizons: [5m, 15m, 60m]
+    max_candidates_per_run: 600
+
+  FUNDING_EXTREME_ONSET:
+    canonical_family: POSITIONING_EXTREMES
+    templates: [reversal_or_squeeze, mean_reversion, continuation, exhaustion_reversal, convexity_capture, only_if_funding, only_if_oi, tail_risk_avoid]
+    horizons: [5m, 60m]
     max_candidates_per_run: 500
-  vol_aftershock_window:
-    templates:
-      - mean_reversion
-      - continuation
-      - trend_continuation
-      - liquidity_reversion_v2
-    horizons:
-      - 5m
-      - 15m
-      - 60m
-    max_candidates_per_run: 1000
-  range_compression_breakout_window:
-    templates:
-      - mean_reversion
-      - continuation
-      - liquidity_reversion_v2
-    horizons:
-      - 5m
-      - 15m
-      - 60m
-    max_candidates_per_run: 1000
-  liquidity_absence_window:
-    templates:
-      - mean_reversion
-      - continuation
-      - liquidity_reversion_v2
-    horizons:
-      - 5m
-      - 15m
-      - 60m
-    max_candidates_per_run: 1000
+
+  FUNDING_PERSISTENCE_TRIGGER:
+    canonical_family: POSITIONING_EXTREMES
+    templates: [reversal_or_squeeze, mean_reversion, continuation, exhaustion_reversal, convexity_capture, only_if_funding, only_if_oi, tail_risk_avoid]
+    horizons: [5m, 60m]
+    max_candidates_per_run: 500
+
+  FUNDING_NORMALIZATION_TRIGGER:
+    canonical_family: POSITIONING_EXTREMES
+    templates: [reversal_or_squeeze, mean_reversion, continuation, exhaustion_reversal, convexity_capture, only_if_funding, only_if_oi, tail_risk_avoid]
+    horizons: [60m]
+    max_candidates_per_run: 500
+
+  OI_SPIKE_POSITIVE:
+    canonical_family: POSITIONING_EXTREMES
+    templates: [reversal_or_squeeze, mean_reversion, continuation, exhaustion_reversal, convexity_capture, only_if_funding, only_if_oi, tail_risk_avoid]
+    horizons: [60m]
+    max_candidates_per_run: 250
+
+  OI_SPIKE_NEGATIVE:
+    canonical_family: POSITIONING_EXTREMES
+    templates: [reversal_or_squeeze, mean_reversion, continuation, exhaustion_reversal, convexity_capture, only_if_funding, only_if_oi, tail_risk_avoid]
+    horizons: [5m, 60m]
+    max_candidates_per_run: 250
+
+  OI_FLUSH:
+    canonical_family: POSITIONING_EXTREMES
+    templates: [reversal_or_squeeze, mean_reversion, continuation, exhaustion_reversal, convexity_capture, only_if_funding, only_if_oi, tail_risk_avoid]
+    horizons: [5m, 60m]
+    max_candidates_per_run: 500
+
+  LIQUIDATION_CASCADE:
+    canonical_family: POSITIONING_EXTREMES
+    templates: [reversal_or_squeeze, mean_reversion, continuation, exhaustion_reversal, convexity_capture, only_if_funding, only_if_oi, tail_risk_avoid]
+    conditioning_cols: []
+    horizons: [5m]
+    max_candidates_per_run: 300
 
 budget:
   global_max_candidates: 10000

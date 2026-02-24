@@ -712,6 +712,40 @@ def _purge_engine_artifacts(run_id: str, data_root: Path = DATA_ROOT) -> Dict[st
     }
 
 
+def _write_trigger_coverage(run_dir: Path, metrics: Dict[str, object], enabled: int = 1) -> Dict[str, object]:
+    """Persist DSL trigger coverage diagnostics derived from engine metrics."""
+    out = {"by_strategy": {}, "missing_any": [], "all_zero_strategies": []}
+    if not int(enabled):
+        return out
+
+    strategy_metadata = metrics.get("strategy_metadata", {}) if isinstance(metrics, dict) else {}
+    if not isinstance(strategy_metadata, dict):
+        strategy_metadata = {}
+
+    missing_set = set()
+    for strategy_name, meta in strategy_metadata.items():
+        if not isinstance(meta, dict):
+            continue
+        coverage = meta.get("trigger_coverage")
+        if not isinstance(coverage, dict):
+            continue
+        out["by_strategy"][str(strategy_name)] = {
+            "blueprint_id": meta.get("blueprint_id"),
+            "coverage": coverage,
+        }
+        for missing in coverage.get("missing", []):
+            missing_set.add(str(missing))
+        if bool(coverage.get("all_zero", False)):
+            out["all_zero_strategies"].append(str(strategy_name))
+
+    out["missing_any"] = sorted(missing_set)
+    out["all_zero_strategies"] = sorted(set(out["all_zero_strategies"]))
+    run_dir = Path(run_dir)
+    (run_dir / "engine").mkdir(parents=True, exist_ok=True)
+    (run_dir / "engine" / "trigger_coverage.json").write_text(json.dumps(out, indent=2, sort_keys=True), encoding="utf-8")
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Backtest registered strategies")
     parser.add_argument("--run_id", required=True)
@@ -872,6 +906,7 @@ def main() -> int:
         else:
             base_strategy_params = _build_base_strategy_params(config, trade_day_timezone)
             base_strategy_params["execution_model"] = dict(resolved_costs.execution_model)
+            base_strategy_params["fail_on_zero_trigger_coverage"] = int(args.fail_on_zero_trigger_coverage)
             strategy_params_by_name = {}
             bp_map = {f"dsl_interpreter_v1__{_sanitize_id(bp.id)}": bp for bp in selected_blueprints}
             strategy_weight = 1.0 / float(len(selected_blueprints))
@@ -895,6 +930,25 @@ def main() -> int:
             end_ts=end_ts,
             timeframe=args.timeframe,
         )
+        trigger_coverage = _write_trigger_coverage(
+            run_dir=DATA_ROOT / "runs" / run_id,
+            metrics=engine_results.get("metrics", {}),
+            enabled=int(args.write_trigger_coverage),
+        )
+        if int(args.write_trigger_coverage):
+            trigger_coverage_path = DATA_ROOT / "runs" / run_id / "engine" / "trigger_coverage.json"
+            if trigger_coverage_path.exists():
+                outputs.append(
+                    {
+                        "path": str(trigger_coverage_path),
+                        "rows": len(trigger_coverage.get("by_strategy", {})),
+                        "start_ts": None,
+                        "end_ts": None,
+                    }
+                )
+        if int(args.fail_on_zero_trigger_coverage) and trigger_coverage.get("all_zero_strategies"):
+            failed = ", ".join(sorted(trigger_coverage.get("all_zero_strategies", [])))
+            raise ValueError(f"All-zero trigger coverage for strategies: {failed}")
 
         for strategy_name in strategies:
             strategy_path = engine_results["engine_dir"] / f"strategy_returns_{strategy_name}.csv"
@@ -1067,41 +1121,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
-def _write_trigger_coverage(run_dir: Path, results: list, enabled: int = 1):
-    """Persist DSL trigger coverage diagnostics (best-effort).
-
-    Writes: <run_dir>/engine/trigger_coverage.json
-    Structure:
-      {
-        "by_strategy": { "<strategy_name>": { "blueprint_id": ..., "coverage": {...} }, ... },
-        "missing_any": [...],
-        "all_zero_strategies": [...]
-      }
-    """
-    if not int(enabled):
-        return
-    out = {"by_strategy": {}, "missing_any": [], "all_zero_strategies": []}
-    missing_set = set()
-    for r in results or []:
-        # StrategyResult compatibility: tolerate dict-like and object-like
-        name = getattr(r, "strategy_name", None) or (r.get("strategy_name") if isinstance(r, dict) else None) or "unknown"
-        diag = getattr(r, "diagnostics", None) or (r.get("diagnostics") if isinstance(r, dict) else {}) or {}
-        dsl = diag.get("dsl", {}) if isinstance(diag, dict) else {}
-        cov = dsl.get("trigger_coverage")
-        if cov is None:
-            continue
-        blueprint_id = None
-        meta = getattr(r, "strategy_metadata", None) or (r.get("strategy_metadata") if isinstance(r, dict) else {}) or {}
-        blueprint_id = meta.get("blueprint_id") if isinstance(meta, dict) else None
-        out["by_strategy"][name] = {"blueprint_id": blueprint_id, "coverage": cov}
-        for m in cov.get("missing", []) if isinstance(cov, dict) else []:
-            missing_set.add(str(m))
-        if isinstance(cov, dict) and cov.get("all_zero", False):
-            out["all_zero_strategies"].append(name)
-
-    out["missing_any"] = sorted(missing_set)
-    run_dir = Path(run_dir)
-    (run_dir / "engine").mkdir(parents=True, exist_ok=True)
-    (run_dir / "engine" / "trigger_coverage.json").write_text(json.dumps(out, indent=2, sort_keys=True))

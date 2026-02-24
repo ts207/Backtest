@@ -280,3 +280,20 @@ class TestPhase2CostResolution:
         assert "--shift_labels_k" in option_strings, (
             "--shift_labels_k must be in parser"
         )
+
+    def test_parser_has_cost_calibration_args(self):
+        """Parser must expose ToB calibration flags for candidate-level economic gating."""
+        from pipelines.research.phase2_candidate_discovery import _make_parser
+
+        parser = _make_parser()
+        option_strings = [
+            opt
+            for action in parser._actions
+            for opt in action.option_strings
+        ]
+        for expected in (
+            "--cost_calibration_mode",
+            "--cost_min_tob_coverage",
+            "--cost_tob_tolerance_minutes",
+        ):
+            assert expected in option_strings, f"Parser must expose {expected}"

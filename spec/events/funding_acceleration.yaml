@@ -1,4 +1,0 @@
-event_type: "funding_acceleration"
-reports_dir: "funding_events"
-events_file: "funding_episode_events.csv"
-signal_column: "funding_acceleration_event"

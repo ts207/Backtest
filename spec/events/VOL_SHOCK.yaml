@@ -1,0 +1,4 @@
+event_type: "VOL_SHOCK"
+reports_dir: "vol_shock_relaxation"
+events_file: "vol_shock_relaxation_events.csv"
+signal_column: "vol_shock_relaxation_event"

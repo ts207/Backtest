@@ -22,41 +22,49 @@ from strategy_dsl.contract_v1 import is_executable_action, is_executable_conditi
 from strategies.registry import list_strategies
 
 EVENT_FAMILY_STRATEGY_ROUTING: Dict[str, Dict[str, str]] = {
-    "vol_shock_relaxation": {
+    "VOL_SHOCK": {
         "execution_family": "breakout_mechanics",
         "base_strategy": "vol_compression_v1",
     },
-    "vol_aftershock_window": {
-        "execution_family": "breakout_mechanics",
-        "base_strategy": "vol_compression_v1",
-    },
-    "range_compression_breakout_window": {
-        "execution_family": "breakout_mechanics",
-        "base_strategy": "vol_compression_v1",
-    },
-    "liquidity_refill_lag_window": {
-        "execution_family": "breakout_mechanics",
-        "base_strategy": "liquidity_refill_lag_v1",
-    },
-    "liquidity_absence_window": {
-        "execution_family": "breakout_mechanics",
-        "base_strategy": "liquidity_absence_gate_v1",
-    },
-    "liquidity_vacuum": {
+    "LIQUIDITY_VACUUM": {
         "execution_family": "breakout_mechanics",
         "base_strategy": "liquidity_vacuum_v1",
     },
-    "funding_extreme_reversal_window": {
+    "FUNDING_EXTREME_ONSET": {
         "execution_family": "carry_imbalance",
         "base_strategy": "funding_extreme_reversal_v1",
     },
-    "directional_exhaustion_after_forced_flow": {
+    "FUNDING_PERSISTENCE_TRIGGER": {
+        "execution_family": "carry_imbalance",
+        "base_strategy": "funding_extreme_reversal_v1",
+    },
+    "FUNDING_NORMALIZATION_TRIGGER": {
+        "execution_family": "carry_imbalance",
+        "base_strategy": "funding_extreme_reversal_v1",
+    },
+    "FORCED_FLOW_EXHAUSTION": {
         "execution_family": "exhaustion_overshoot",
         "base_strategy": "forced_flow_exhaustion_v1",
     },
-    "cross_venue_desync": {
+    "CROSS_VENUE_DESYNC": {
         "execution_family": "spread_dislocation",
         "base_strategy": "cross_venue_desync_v1",
+    },
+    "OI_SPIKE_POSITIVE": {
+        "execution_family": "carry_imbalance",
+        "base_strategy": "funding_extreme_reversal_v1",
+    },
+    "OI_SPIKE_NEGATIVE": {
+        "execution_family": "carry_imbalance",
+        "base_strategy": "funding_extreme_reversal_v1",
+    },
+    "OI_FLUSH": {
+        "execution_family": "carry_imbalance",
+        "base_strategy": "funding_extreme_reversal_v1",
+    },
+    "LIQUIDATION_CASCADE": {
+        "execution_family": "carry_imbalance",
+        "base_strategy": "funding_extreme_reversal_v1",
     },
 }
 
@@ -209,8 +217,10 @@ def _risk_controls_from_action(action: str) -> Dict[str, object]:
 
 
 def _route_event_family(event: str) -> Optional[Dict[str, str]]:
-    key = str(event).strip().lower()
-    return EVENT_FAMILY_STRATEGY_ROUTING.get(key)
+    key = str(event).strip()
+    if key in EVENT_FAMILY_STRATEGY_ROUTING:
+        return EVENT_FAMILY_STRATEGY_ROUTING.get(key)
+    return EVENT_FAMILY_STRATEGY_ROUTING.get(key.upper())
 
 
 def _infer_condition_from_blueprint(blueprint: Dict[str, object]) -> str:
