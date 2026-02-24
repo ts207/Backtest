@@ -1,0 +1,296 @@
+2026-02-23 20:25:22,307 INFO --- Starting Light Data Ingestion (Parallel) ---
+2026-02-23 20:25:22,307 INFO Starting Parallel: /home/tstuv/backtest/Backtest/.venv/bin/python project/pipelines/ingest/ingest_binance_um_ohlcv_5m.py --run_id discovery_2020_2025 --symbols BTCUSDT,ETHUSDT --start 2020-06-01 --end 2025-07-10 --force 0
+2026-02-23 20:25:22,308 INFO Starting Parallel: /home/tstuv/backtest/Backtest/.venv/bin/python project/pipelines/ingest/ingest_binance_spot_ohlcv_5m.py --run_id discovery_2020_2025 --symbols BTCUSDT,ETHUSDT --start 2020-06-01 --end 2025-07-10 --force 0
+2026-02-23 20:25:22,308 INFO Starting Parallel: /home/tstuv/backtest/Backtest/.venv/bin/python project/pipelines/ingest/ingest_binance_um_mark_price_5m.py --run_id discovery_2020_2025 --symbols BTCUSDT,ETHUSDT --start 2020-06-01 --end 2025-07-10 --force 0
+2026-02-23 20:25:22,754 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2020-06.zip
+2026-02-23 20:25:22,758 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2020-06.zip
+2026-02-23 20:25:22,758 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2020-06.zip
+2026-02-23 20:25:23,947 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2020-07.zip
+2026-02-23 20:25:23,956 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2020/month=06/ohlcv_BTCUSDT_5m_2020-06.parquet
+2026-02-23 20:25:23,956 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2020-07.zip
+2026-02-23 20:25:24,141 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2020-07.zip
+2026-02-23 20:25:24,261 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2020-08.zip
+2026-02-23 20:25:25,129 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2020/month=07/ohlcv_BTCUSDT_5m_2020-07.parquet
+2026-02-23 20:25:25,129 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2020-08.zip
+2026-02-23 20:25:25,262 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2020-09.zip
+2026-02-23 20:25:25,288 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2020-08.zip
+2026-02-23 20:25:26,299 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2020-10.zip
+2026-02-23 20:25:26,307 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2020/month=08/ohlcv_BTCUSDT_5m_2020-08.parquet
+2026-02-23 20:25:26,307 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2020-09.zip
+2026-02-23 20:25:26,462 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2020-09.zip
+2026-02-23 20:25:27,275 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2020-11.zip
+2026-02-23 20:25:27,354 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2020/month=09/ohlcv_BTCUSDT_5m_2020-09.parquet
+2026-02-23 20:25:27,354 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2020-10.zip
+2026-02-23 20:25:27,616 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2020-10.zip
+2026-02-23 20:25:28,288 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2020-12.zip
+2026-02-23 20:25:28,430 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2020/month=10/ohlcv_BTCUSDT_5m_2020-10.parquet
+2026-02-23 20:25:28,431 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2020-11.zip
+2026-02-23 20:25:28,704 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2020-11.zip
+2026-02-23 20:25:28,716 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2021-07.zip
+2026-02-23 20:25:29,551 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2020/month=11/ohlcv_BTCUSDT_5m_2020-11.parquet
+2026-02-23 20:25:29,551 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2020-12.zip
+2026-02-23 20:25:29,754 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2022-07.zip
+2026-02-23 20:25:29,856 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2020-12.zip
+2026-02-23 20:25:30,240 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2022-10.zip
+2026-02-23 20:25:30,611 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2020/month=12/ohlcv_BTCUSDT_5m_2020-12.parquet
+2026-02-23 20:25:30,800 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-01.zip
+2026-02-23 20:25:31,053 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2021-02.zip
+2026-02-23 20:25:31,274 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2023-02.zip
+2026-02-23 20:25:32,002 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2024/month=01/ohlcv_BTCUSDT_5m_2024-01.parquet
+2026-02-23 20:25:32,002 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-02.zip
+2026-02-23 20:25:32,220 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2021-03.zip
+2026-02-23 20:25:32,319 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2023-11.zip
+2026-02-23 20:25:33,091 INFO Wrote 8352 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2024/month=02/ohlcv_BTCUSDT_5m_2024-02.parquet
+2026-02-23 20:25:33,092 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-03.zip
+2026-02-23 20:25:33,318 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2021-04.zip
+2026-02-23 20:25:33,350 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2024-01.zip
+2026-02-23 20:25:34,297 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2024/month=03/ohlcv_BTCUSDT_5m_2024-03.parquet
+2026-02-23 20:25:34,297 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-04.zip
+2026-02-23 20:25:34,394 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2024-02.zip
+2026-02-23 20:25:34,527 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2021-08.zip
+2026-02-23 20:25:35,362 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2024-03.zip
+2026-02-23 20:25:35,438 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2024/month=04/ohlcv_BTCUSDT_5m_2024-04.parquet
+2026-02-23 20:25:35,438 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-05.zip
+2026-02-23 20:25:35,614 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2021-09.zip
+2026-02-23 20:25:36,389 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2024-04.zip
+2026-02-23 20:25:36,608 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2024/month=05/ohlcv_BTCUSDT_5m_2024-05.parquet
+2026-02-23 20:25:36,608 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-06.zip
+2026-02-23 20:25:36,861 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2023-03.zip
+2026-02-23 20:25:37,018 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2024/month=06/ohlcv_BTCUSDT_5m_2024-06.parquet
+2026-02-23 20:25:37,019 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-07.zip
+2026-02-23 20:25:37,436 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2024-05.zip
+2026-02-23 20:25:38,015 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-01.zip
+2026-02-23 20:25:38,084 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2024/month=07/ohlcv_BTCUSDT_5m_2024-07.parquet
+2026-02-23 20:25:38,084 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-08.zip
+2026-02-23 20:25:38,331 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-02.zip
+2026-02-23 20:25:38,432 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2024-06.zip
+2026-02-23 20:25:39,265 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2024/month=08/ohlcv_BTCUSDT_5m_2024-08.parquet
+2026-02-23 20:25:39,265 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-09.zip
+2026-02-23 20:25:39,422 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-03.zip
+2026-02-23 20:25:39,453 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2024-07.zip
+2026-02-23 20:25:40,338 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2024/month=09/ohlcv_BTCUSDT_5m_2024-09.parquet
+2026-02-23 20:25:40,339 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-10.zip
+2026-02-23 20:25:40,432 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2024-08.zip
+2026-02-23 20:25:40,575 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-04.zip
+2026-02-23 20:25:41,401 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2024/month=10/ohlcv_BTCUSDT_5m_2024-10.parquet
+2026-02-23 20:25:41,401 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-11.zip
+2026-02-23 20:25:41,466 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2024-09.zip
+2026-02-23 20:25:41,711 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-05.zip
+2026-02-23 20:25:42,462 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2024/month=11/ohlcv_BTCUSDT_5m_2024-11.parquet
+2026-02-23 20:25:42,462 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-12.zip
+2026-02-23 20:25:42,505 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2024-10.zip
+2026-02-23 20:25:42,783 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2024-11.zip
+2026-02-23 20:25:42,787 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2024/month=12/ohlcv_BTCUSDT_5m_2024-12.parquet
+2026-02-23 20:25:42,787 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2025-01.zip
+2026-02-23 20:25:42,794 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-06.zip
+2026-02-23 20:25:43,206 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2025/month=01/ohlcv_BTCUSDT_5m_2025-01.parquet
+2026-02-23 20:25:43,207 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2025-02.zip
+2026-02-23 20:25:43,243 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-07.zip
+2026-02-23 20:25:43,799 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2024-12.zip
+2026-02-23 20:25:44,215 INFO Wrote 8064 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2025/month=02/ohlcv_BTCUSDT_5m_2025-02.parquet
+2026-02-23 20:25:44,216 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2025-03.zip
+2026-02-23 20:25:44,421 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-08.zip
+2026-02-23 20:25:44,849 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2025-01.zip
+2026-02-23 20:25:45,337 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2025/month=03/ohlcv_BTCUSDT_5m_2025-03.parquet
+2026-02-23 20:25:45,337 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2025-04.zip
+2026-02-23 20:25:45,578 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-09.zip
+2026-02-23 20:25:45,860 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2025-02.zip
+2026-02-23 20:25:45,994 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-10.zip
+2026-02-23 20:25:46,386 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2025/month=04/ohlcv_BTCUSDT_5m_2025-04.parquet
+2026-02-23 20:25:46,386 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2025-05.zip
+2026-02-23 20:25:46,870 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2025-03.zip
+2026-02-23 20:25:47,180 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-11.zip
+2026-02-23 20:25:47,528 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2025/month=05/ohlcv_BTCUSDT_5m_2025-05.parquet
+2026-02-23 20:25:47,528 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2025-06.zip
+2026-02-23 20:25:47,905 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2025-04.zip
+2026-02-23 20:25:48,337 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2024-12.zip
+2026-02-23 20:25:48,568 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2025/month=06/ohlcv_BTCUSDT_5m_2025-06.parquet
+2026-02-23 20:25:48,569 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2025-07.zip
+2026-02-23 20:25:48,879 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2025-05.zip
+2026-02-23 20:25:49,293 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2025-06.zip
+2026-02-23 20:25:49,487 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2025-01.zip
+2026-02-23 20:25:49,628 INFO Wrote 2880 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/BTCUSDT/ohlcv_5m/year=2025/month=07/ohlcv_BTCUSDT_5m_2025-07.parquet
+2026-02-23 20:25:49,628 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2020-06.zip
+2026-02-23 20:25:50,271 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/BTCUSDT/5m/BTCUSDT-5m-2025-07.zip
+2026-02-23 20:25:50,588 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2020/month=06/ohlcv_ETHUSDT_5m_2020-06.parquet
+2026-02-23 20:25:50,588 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2020-07.zip
+2026-02-23 20:25:50,603 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2025-02.zip
+2026-02-23 20:25:51,280 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2020-06.zip
+2026-02-23 20:25:51,538 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2020/month=07/ohlcv_ETHUSDT_5m_2020-07.parquet
+2026-02-23 20:25:51,538 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2020-08.zip
+2026-02-23 20:25:51,760 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2025-03.zip
+2026-02-23 20:25:52,360 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2020-07.zip
+2026-02-23 20:25:52,522 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2020/month=08/ohlcv_ETHUSDT_5m_2020-08.parquet
+2026-02-23 20:25:52,522 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2020-09.zip
+2026-02-23 20:25:52,936 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2025-04.zip
+2026-02-23 20:25:53,300 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2020-08.zip
+2026-02-23 20:25:53,349 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2025-05.zip
+2026-02-23 20:25:53,501 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2020/month=09/ohlcv_ETHUSDT_5m_2020-09.parquet
+2026-02-23 20:25:53,501 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2020-10.zip
+2026-02-23 20:25:54,259 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2020-09.zip
+2026-02-23 20:25:54,431 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2025-06.zip
+2026-02-23 20:25:54,538 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2020/month=10/ohlcv_ETHUSDT_5m_2020-10.parquet
+2026-02-23 20:25:54,538 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2020-11.zip
+2026-02-23 20:25:55,207 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2020-10.zip
+2026-02-23 20:25:55,569 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/5m/BTCUSDT-5m-2025-07.zip
+2026-02-23 20:25:55,602 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2020/month=11/ohlcv_ETHUSDT_5m_2020-11.parquet
+2026-02-23 20:25:55,602 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2020-12.zip
+2026-02-23 20:25:56,218 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2020-11.zip
+2026-02-23 20:25:56,634 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2020/month=12/ohlcv_ETHUSDT_5m_2020-12.parquet
+2026-02-23 20:25:56,750 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2020-06.zip
+2026-02-23 20:25:57,152 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2020-12.zip
+2026-02-23 20:25:57,235 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-01.zip
+2026-02-23 20:25:57,921 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2020-07.zip
+2026-02-23 20:25:58,173 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2022-07.zip
+2026-02-23 20:25:58,345 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2020-08.zip
+2026-02-23 20:25:58,374 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2024/month=01/ohlcv_ETHUSDT_5m_2024-01.parquet
+2026-02-23 20:25:58,374 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-02.zip
+2026-02-23 20:25:59,237 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2022-10.zip
+2026-02-23 20:25:59,492 INFO Wrote 8352 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2024/month=02/ohlcv_ETHUSDT_5m_2024-02.parquet
+2026-02-23 20:25:59,492 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-03.zip
+2026-02-23 20:25:59,549 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2020-09.zip
+2026-02-23 20:26:00,294 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2023-02.zip
+2026-02-23 20:26:00,692 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2024/month=03/ohlcv_ETHUSDT_5m_2024-03.parquet
+2026-02-23 20:26:00,692 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-04.zip
+2026-02-23 20:26:00,703 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2020-10.zip
+2026-02-23 20:26:01,370 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2023-11.zip
+2026-02-23 20:26:01,741 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2024/month=04/ohlcv_ETHUSDT_5m_2024-04.parquet
+2026-02-23 20:26:01,741 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-05.zip
+2026-02-23 20:26:01,861 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2020-11.zip
+2026-02-23 20:26:02,380 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2024-01.zip
+2026-02-23 20:26:02,850 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2024/month=05/ohlcv_ETHUSDT_5m_2024-05.parquet
+2026-02-23 20:26:02,850 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-06.zip
+2026-02-23 20:26:02,973 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2020-12.zip
+2026-02-23 20:26:03,336 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2024-02.zip
+2026-02-23 20:26:04,035 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2024/month=06/ohlcv_ETHUSDT_5m_2024-06.parquet
+2026-02-23 20:26:04,035 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-07.zip
+2026-02-23 20:26:04,153 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2021-02.zip
+2026-02-23 20:26:04,331 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2024-03.zip
+2026-02-23 20:26:05,222 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2024/month=07/ohlcv_ETHUSDT_5m_2024-07.parquet
+2026-02-23 20:26:05,222 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-08.zip
+2026-02-23 20:26:05,339 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2021-03.zip
+2026-02-23 20:26:05,349 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2024-04.zip
+2026-02-23 20:26:06,289 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2024-05.zip
+2026-02-23 20:26:06,400 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2024/month=08/ohlcv_ETHUSDT_5m_2024-08.parquet
+2026-02-23 20:26:06,400 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-09.zip
+2026-02-23 20:26:06,528 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2021-04.zip
+2026-02-23 20:26:07,300 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2024-06.zip
+2026-02-23 20:26:07,584 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2024/month=09/ohlcv_ETHUSDT_5m_2024-09.parquet
+2026-02-23 20:26:07,584 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-10.zip
+2026-02-23 20:26:07,667 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2021-08.zip
+2026-02-23 20:26:08,347 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2024-07.zip
+2026-02-23 20:26:08,757 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2024/month=10/ohlcv_ETHUSDT_5m_2024-10.parquet
+2026-02-23 20:26:08,758 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-11.zip
+2026-02-23 20:26:08,855 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2021-09.zip
+2026-02-23 20:26:09,284 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2024-08.zip
+2026-02-23 20:26:09,867 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2024/month=11/ohlcv_ETHUSDT_5m_2024-11.parquet
+2026-02-23 20:26:09,867 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-12.zip
+2026-02-23 20:26:10,044 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2023-03.zip
+2026-02-23 20:26:10,416 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2024-09.zip
+2026-02-23 20:26:11,056 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2024/month=12/ohlcv_ETHUSDT_5m_2024-12.parquet
+2026-02-23 20:26:11,056 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2025-01.zip
+2026-02-23 20:26:11,239 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-01.zip
+2026-02-23 20:26:11,448 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2024-10.zip
+2026-02-23 20:26:12,164 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2025/month=01/ohlcv_ETHUSDT_5m_2025-01.parquet
+2026-02-23 20:26:12,165 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2025-02.zip
+2026-02-23 20:26:12,409 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-02.zip
+2026-02-23 20:26:12,423 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2024-11.zip
+2026-02-23 20:26:13,231 INFO Wrote 8064 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2025/month=02/ohlcv_ETHUSDT_5m_2025-02.parquet
+2026-02-23 20:26:13,232 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2025-03.zip
+2026-02-23 20:26:13,432 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2024-12.zip
+2026-02-23 20:26:13,586 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-03.zip
+2026-02-23 20:26:14,400 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2025/month=03/ohlcv_ETHUSDT_5m_2025-03.parquet
+2026-02-23 20:26:14,400 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2025-04.zip
+2026-02-23 20:26:14,463 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2025-01.zip
+2026-02-23 20:26:14,745 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-04.zip
+2026-02-23 20:26:15,490 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2025-02.zip
+2026-02-23 20:26:15,495 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2025/month=04/ohlcv_ETHUSDT_5m_2025-04.parquet
+2026-02-23 20:26:15,495 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2025-05.zip
+2026-02-23 20:26:15,908 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-05.zip
+2026-02-23 20:26:16,509 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2025-03.zip
+2026-02-23 20:26:16,670 INFO Wrote 8928 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2025/month=05/ohlcv_ETHUSDT_5m_2025-05.parquet
+2026-02-23 20:26:16,670 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2025-06.zip
+2026-02-23 20:26:17,072 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-06.zip
+2026-02-23 20:26:17,530 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2025-04.zip
+2026-02-23 20:26:17,829 INFO Wrote 8640 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2025/month=06/ohlcv_ETHUSDT_5m_2025-06.parquet
+2026-02-23 20:26:17,830 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2025-07.zip
+2026-02-23 20:26:18,181 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-07.zip
+2026-02-23 20:26:18,561 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2025-05.zip
+2026-02-23 20:26:18,947 INFO Wrote 2880 rows to /home/tstuv/backtest/Backtest/data/lake/raw/binance/perp/ETHUSDT/ohlcv_5m/year=2025/month=07/ohlcv_ETHUSDT_5m_2025-07.parquet
+2026-02-23 20:26:19,330 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-08.zip
+2026-02-23 20:26:19,555 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2025-06.zip
+2026-02-23 20:26:19,767 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-09.zip
+2026-02-23 20:26:19,965 INFO Downloading monthly archive https://data.binance.vision/data/futures/um/monthly/markPriceKlines/ETHUSDT/5m/ETHUSDT-5m-2025-07.zip
+2026-02-23 20:26:20,933 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-10.zip
+2026-02-23 20:26:22,115 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-11.zip
+2026-02-23 20:26:23,184 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2024-12.zip
+2026-02-23 20:26:24,347 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2025-01.zip
+2026-02-23 20:26:25,428 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2025-02.zip
+2026-02-23 20:26:26,622 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2025-03.zip
+2026-02-23 20:26:27,711 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2025-04.zip
+2026-02-23 20:26:28,797 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2025-05.zip
+2026-02-23 20:26:29,869 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2025-06.zip
+2026-02-23 20:26:31,017 INFO Downloading monthly archive https://data.binance.vision/data/spot/monthly/klines/ETHUSDT/5m/ETHUSDT-5m-2025-07.zip
+2026-02-23 20:26:32,248 INFO --- Starting Book Ticker Ingestion (Heavy) ---
+2026-02-23 20:26:32,248 INFO Running: /home/tstuv/backtest/Backtest/.venv/bin/python project/pipelines/ingest/ingest_binance_um_book_ticker.py --run_id discovery_2020_2025 --symbols BTCUSDT,ETHUSDT --start 2020-06-01 --end 2025-07-10 --force 0
+2026-02-23 20:26:32,650 INFO [BTCUSDT] Starting ingestion
+2026-02-23 20:26:32,650 INFO [ETHUSDT] Starting ingestion
+2026-02-23 20:41:41,410 ERROR Ingestion failed
+concurrent.futures.process._RemoteTraceback: 
+"""
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/concurrent/futures/process.py", line 263, in _process_worker
+    r = call_item.fn(*call_item.args, **call_item.kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tstuv/backtest/Backtest/project/pipelines/ingest/ingest_binance_um_book_ticker.py", line 206, in _ingest_symbol
+    n, start, end, writer = _process_csv_stream_to_parquet(f, out_path, symbol, "archive_monthly", range_start, range_end_exclusive, writer)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tstuv/backtest/Backtest/project/pipelines/ingest/ingest_binance_um_book_ticker.py", line 142, in _process_csv_stream_to_parquet
+    df = _clean_book_ticker_chunk(chunk, symbol, source)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tstuv/backtest/Backtest/project/pipelines/ingest/ingest_binance_um_book_ticker.py", line 125, in _clean_book_ticker_chunk
+    df = df.dropna(subset=["timestamp", "bid_price", "ask_price"]).copy()
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tstuv/backtest/Backtest/.venv/lib/python3.12/site-packages/pandas/core/frame.py", line 6671, in dropna
+    agg_obj = self.take(indices, axis=agg_axis)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tstuv/backtest/Backtest/.venv/lib/python3.12/site-packages/pandas/core/generic.py", line 4133, in take
+    new_data = self._mgr.take(
+               ^^^^^^^^^^^^^^^
+  File "/home/tstuv/backtest/Backtest/.venv/lib/python3.12/site-packages/pandas/core/internals/managers.py", line 894, in take
+    return self.reindex_indexer(
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tstuv/backtest/Backtest/.venv/lib/python3.12/site-packages/pandas/core/internals/managers.py", line 680, in reindex_indexer
+    new_blocks = self._slice_take_blocks_ax0(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tstuv/backtest/Backtest/.venv/lib/python3.12/site-packages/pandas/core/internals/managers.py", line 843, in _slice_take_blocks_ax0
+    nb = blk.take_nd(taker, axis=0, new_mgr_locs=mgr_locs)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tstuv/backtest/Backtest/.venv/lib/python3.12/site-packages/pandas/core/internals/blocks.py", line 1307, in take_nd
+    new_values = algos.take_nd(
+                 ^^^^^^^^^^^^^^
+  File "/home/tstuv/backtest/Backtest/.venv/lib/python3.12/site-packages/pandas/core/array_algos/take.py", line 110, in take_nd
+    return arr.take(
+           ^^^^^^^^^
+  File "/home/tstuv/backtest/Backtest/.venv/lib/python3.12/site-packages/pandas/core/arrays/_mixins.py", line 168, in take
+    new_data = take(
+               ^^^^^
+  File "/home/tstuv/backtest/Backtest/.venv/lib/python3.12/site-packages/pandas/core/algorithms.py", line 1239, in take
+    result = arr.take(indices, axis=axis)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+IndexError: index 1 is out of bounds for axis 0 with size 1
+"""
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/tstuv/backtest/Backtest/project/pipelines/ingest/ingest_binance_um_book_ticker.py", line 283, in main
+    res = future.result()
+          ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+IndexError: index 1 is out of bounds for axis 0 with size 1
+2026-02-23 20:41:41,487 ERROR Script project/pipelines/ingest/ingest_binance_um_book_ticker.py failed with return code 1
