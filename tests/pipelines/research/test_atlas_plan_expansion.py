@@ -135,3 +135,7 @@ def test_composite_regime_feasibility_check(mock_atlas_env):
                 cond_keys.extend(p["conditioning"].keys())
         assert "vol_regime" in cond_keys
         assert "funding_bps" in cond_keys
+        assert all(str(p.get("candidate_id", "")).strip() for p in plan_data)
+        assert all(str(p.get("hypothesis_id", "")).strip() for p in plan_data)
+        assert all(str(p.get("template_id", "")).strip() for p in plan_data)
+        assert all("condition_signature" in p for p in plan_data)

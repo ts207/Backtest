@@ -53,8 +53,12 @@ from pipelines.research.analyze_conditional_expectancy import (
 
 PRIMARY_OUTPUT_COLUMNS = [
     "runtime_event_type", "canonical_event_type", "canonical_family", "state_id", "state_provenance",
-    "state_activation", "state_activation_hash", "template_verb", "operator_id", "operator_version",
+    "state_activation", "state_activation_hash",
+    "hypothesis_id", "hypothesis_version", "hypothesis_spec_path", "hypothesis_metric", "hypothesis_output_schema",
+    "hypothesis_candidate_id",
+    "template_id", "template_verb", "operator_id", "operator_version",
     "candidate_id", "condition", "condition_desc", "action", "action_family", "candidate_type",
+    "condition_signature", "horizon_bars", "entry_lag_bars", "direction_rule",
     "overlay_base_candidate_id", "sample_size", "train_samples", "validation_samples", "test_samples",
     "baseline_mode", "delta_adverse_mean", "delta_adverse_ci_low", "delta_adverse_ci_high",
     "delta_opportunity_mean", "delta_opportunity_ci_low", "delta_opportunity_ci_high", "delta_exposure_mean",
@@ -1940,6 +1944,17 @@ def main():
             state_provenance = str(plan_row.get("state_provenance", "none")).strip() or "none"
             state_activation = str(plan_row.get("state_activation", "")).strip() or None
             state_activation_hash = str(plan_row.get("state_activation_hash", "")).strip() or None
+            hypothesis_id = str(plan_row.get("hypothesis_id", "")).strip()
+            hypothesis_version = int(plan_row.get("hypothesis_version", 0) or 0)
+            hypothesis_spec_path = str(plan_row.get("hypothesis_spec_path", "")).strip()
+            hypothesis_metric = str(plan_row.get("hypothesis_metric", "")).strip()
+            hypothesis_output_schema = plan_row.get("hypothesis_output_schema", [])
+            hypothesis_candidate_id = str(plan_row.get("candidate_id", "")).strip()
+            template_id = str(plan_row.get("template_id", rule)).strip() or str(rule)
+            horizon_bars = int(plan_row.get("horizon_bars", _horizon_to_bars(horizon)) or _horizon_to_bars(horizon))
+            entry_lag_bars = int(plan_row.get("entry_lag_bars", args.entry_lag_bars) or args.entry_lag_bars)
+            direction_rule = str(plan_row.get("direction_rule", "")).strip() or "both"
+            condition_signature = str(plan_row.get("condition_signature", "")).strip() or "all"
             
             if event_type != args.event_type:
                 continue
@@ -2054,18 +2069,29 @@ def main():
                 "runtime_event_type": runtime_event_type,
                 "canonical_event_type": canonical_event_type,
                 "canonical_family": canonical_family,
+                "hypothesis_id": hypothesis_id,
+                "hypothesis_version": hypothesis_version,
+                "hypothesis_spec_path": hypothesis_spec_path,
+                "hypothesis_metric": hypothesis_metric,
+                "hypothesis_output_schema": hypothesis_output_schema,
+                "hypothesis_candidate_id": hypothesis_candidate_id,
                 "event_type": event_type,
                 "rule_template": rule,
+                "template_id": template_id,
                 "template_verb": rule,
                 "operator_id": str(operator_def.get("operator_id", rule)).strip() or rule,
                 "operator_version": operator_version,
                 "horizon": horizon,
+                "horizon_bars": horizon_bars,
+                "entry_lag_bars": entry_lag_bars,
+                "direction_rule": direction_rule,
                 "symbol": symbol,
                 "state_id": state_id,
                 "state_provenance": state_provenance,
                 "state_activation": state_activation,
                 "state_activation_hash": state_activation_hash,
                 "conditioning": cond_label,
+                "condition_signature": condition_signature,
                 "expectancy": effect,
                 "after_cost_expectancy": after_cost,
                 "after_cost_expectancy_per_trade": after_cost,
@@ -2239,18 +2265,29 @@ def main():
                             "runtime_event_type": args.event_type,
                             "canonical_event_type": args.event_type,
                             "canonical_family": canonical_family_for_event,
+                            "hypothesis_id": "",
+                            "hypothesis_version": 0,
+                            "hypothesis_spec_path": "",
+                            "hypothesis_metric": "",
+                            "hypothesis_output_schema": [],
+                            "hypothesis_candidate_id": "",
                             "event_type": args.event_type,
                             "rule_template": rule,
+                            "template_id": rule,
                             "template_verb": rule,
                             "operator_id": str(operator_def.get("operator_id", rule)).strip() or rule,
                             "operator_version": operator_version,
                             "horizon": horizon,
+                            "horizon_bars": _horizon_to_bars(horizon),
+                            "entry_lag_bars": int(args.entry_lag_bars),
+                            "direction_rule": str(operator_def.get("side_policy", "both")).strip() or "both",
                             "symbol": symbol,
                             "state_id": state_id,
                             "state_provenance": "none",
                             "state_activation": None,
                             "state_activation_hash": None,
                             "conditioning": cond_name,
+                            "condition_signature": str(cond_name or "all"),
                             "expectancy": eff,
                             "after_cost_expectancy": aft_cost,
                             "after_cost_expectancy_per_trade": aft_cost,

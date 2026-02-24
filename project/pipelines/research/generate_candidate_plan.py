@@ -16,7 +16,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from pipelines._lib.io_utils import ensure_dir, read_parquet
+from pipelines._lib.io_utils import (
+    choose_partition_dir,
+    ensure_dir,
+    list_parquet_files,
+    read_parquet,
+    run_scoped_lake_path,
+)
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.ontology_contract import (
     bool_field,
@@ -34,6 +40,11 @@ from pipelines._lib.ontology_contract import (
 )
 from events.registry import EVENT_REGISTRY_SPECS
 from pipelines.research.feasibility_guard import FeasibilityGuard
+from pipelines.research.hypothesis_spec_translator import (
+    load_active_hypothesis_specs,
+    load_template_side_policy,
+    translate_candidate_hypotheses,
+)
 
 # Planner Budgets
 MAX_TOTAL_CANDIDATES = 200
@@ -55,6 +66,34 @@ def _check_market_context_exists(symbol: str, run_id: str) -> bool:
     path = DATA_ROOT / "lake" / "context" / "market_state" / symbol / "5m.parquet"
     run_scoped = DATA_ROOT / "lake" / "runs" / run_id / "context" / "market_state" / symbol / "5m.parquet"
     return path.exists() or run_scoped.exists()
+
+
+def _load_symbol_available_condition_keys(symbol: str, run_id: str, *, strict: bool) -> Set[str]:
+    keys: Set[str] = set()
+
+    def _collect_columns(paths: List[Path]) -> None:
+        src = choose_partition_dir(paths)
+        files = list_parquet_files(src) if src else []
+        if not files:
+            return
+        frame = read_parquet([files[0]])
+        if frame.empty:
+            return
+        keys.update([str(col).strip() for col in frame.columns if str(col).strip()])
+
+    feature_paths = [
+        run_scoped_lake_path(DATA_ROOT, run_id, "features", "perp", symbol, "5m", "features_v1"),
+        DATA_ROOT / "lake" / "features" / "perp" / symbol / "5m" / "features_v1",
+    ]
+    context_paths = [
+        run_scoped_lake_path(DATA_ROOT, run_id, "context", "market_state", symbol, "5m.parquet"),
+        DATA_ROOT / "lake" / "context" / "market_state" / symbol / "5m.parquet",
+    ]
+    _collect_columns(feature_paths)
+    _collect_columns(context_paths)
+    if not strict:
+        keys.update({"severity_bucket", "vol_regime", "carry_state", "funding_rate_bps"})
+    return keys
 
 def _match_assets(filter_str: str, universe: List[str]) -> List[str]:
     if not filter_str or filter_str == "*":
@@ -101,6 +140,18 @@ def main() -> int:
     parser.add_argument("--max_family_safe_states_per_event", type=int, default=2)
     parser.add_argument("--min_events_per_state", type=int, default=200)
     parser.add_argument(
+        "--hypothesis_spec_strict",
+        type=int,
+        default=0,
+        help="If 1, fail when active hypothesis spec keys are missing from joined condition columns.",
+    )
+    parser.add_argument(
+        "--hypothesis_spec_enabled",
+        type=int,
+        default=1,
+        help="If 1, bind candidate rows to active spec/hypotheses/*.yaml translator output.",
+    )
+    parser.add_argument(
         "--state_expansion_strict",
         type=int,
         default=0,
@@ -135,11 +186,19 @@ def main() -> int:
 
         allow_hash_mismatch = bool(int(args.allow_ontology_hash_mismatch))
         state_expansion_strict = bool(int(args.state_expansion_strict))
+        hypothesis_spec_enabled = bool(int(args.hypothesis_spec_enabled))
+        hypothesis_spec_strict = bool(int(args.hypothesis_spec_strict))
         current_ontology_hash = ontology_spec_hash(PROJECT_ROOT.parent)
         current_component_hashes = ontology_component_hashes(PROJECT_ROOT.parent)
         current_component_fields = ontology_component_hash_fields(current_component_hashes)
         state_registry = _load_state_registry(PROJECT_ROOT.parent)
         source_state_map, family_safe_state_map = _build_state_expansion_maps(state_registry)
+        hypothesis_specs = (
+            load_active_hypothesis_specs(PROJECT_ROOT.parent)
+            if hypothesis_spec_enabled
+            else []
+        )
+        template_side_policy = load_template_side_policy(PROJECT_ROOT.parent)
         template_ontology_hash = choose_template_ontology_hash(templates_df)
         if not template_ontology_hash:
             raise ValueError("candidate_templates missing or inconsistent ontology_spec_hash values")
@@ -166,6 +225,7 @@ def main() -> int:
         seen_plan_ids = set()
         plan_duplicates = 0
         feasibility_report = []
+        hypothesis_audit_rows: List[Dict[str, object]] = []
         total_count = 0
         # Load Atlas Exclusions
         exclusions_path = DATA_ROOT / "reports" / "atlas_verification" / args.run_id / "planner_excluded_claims.json"
@@ -188,6 +248,61 @@ def main() -> int:
                 logging.getLogger(__name__).warning(f"Failed to read exclusions file: {e}")
                 # User requested: Fail closed if exclusions exist but cannot be parsed.
                 raise ValueError(f"Failed to parse planner_excluded_claims.json: {e}")
+
+        def _expand_hypothesis_rows(
+            *,
+            base_row: Dict[str, object],
+            claim_id: str,
+            template_id: str,
+            available_condition_keys: Set[str],
+        ) -> List[Dict[str, object]]:
+            if (not hypothesis_spec_enabled) or (not hypothesis_specs):
+                row = dict(base_row)
+                row["hypothesis_id"] = "HYPOTHESIS_UNBOUND"
+                row["hypothesis_version"] = 0
+                row["hypothesis_spec_path"] = ""
+                row["template_id"] = str(row.get("rule_template", "")).strip()
+                row["horizon_bars"] = 12
+                row["entry_lag_bars"] = int(row.get("entry_lag_bars", 0) or 0)
+                row["direction_rule"] = "both"
+                cond = row.get("conditioning", {}) if isinstance(row.get("conditioning", {}), dict) else {}
+                if cond:
+                    parts = [f"{k}={cond[k]}" for k in sorted(cond.keys())]
+                    row["condition_signature"] = "&".join(parts)
+                    row["condition"] = " AND ".join([f'{k} == "{cond[k]}"' for k in sorted(cond.keys())])
+                else:
+                    row["condition_signature"] = "all"
+                    row["condition"] = "all"
+                row["hypothesis_metric"] = "lift_bps"
+                row["hypothesis_output_schema"] = [
+                    "lift_bps",
+                    "p_value",
+                    "q_value",
+                    "n",
+                    "effect_ci",
+                    "stability_score",
+                    "net_after_cost",
+                ]
+                row["candidate_id"] = "cand_" + hashlib.sha256(
+                    str(row.get("plan_row_id", "")).encode("utf-8")
+                ).hexdigest()[:24]
+                return [row]
+
+            translated_rows, translated_audit = translate_candidate_hypotheses(
+                base_candidate=base_row,
+                hypothesis_specs=hypothesis_specs,
+                available_condition_keys=available_condition_keys,
+                template_side_policy=template_side_policy,
+                strict=hypothesis_spec_strict,
+            )
+            for a in translated_audit:
+                audit_row = dict(a)
+                audit_row["template_id"] = template_id
+                audit_row["claim_id"] = claim_id
+                audit_row["plan_row_id"] = str(base_row.get("plan_row_id", ""))
+                audit_row["symbol"] = str(base_row.get("symbol", ""))
+                hypothesis_audit_rows.append(audit_row)
+            return translated_rows
 
 
         # Templates are already sorted by priority from Stage 1
@@ -325,6 +440,11 @@ def main() -> int:
                         "reason": fail_reason
                     })
                     continue
+                available_condition_keys = _load_symbol_available_condition_keys(
+                    symbol,
+                    args.run_id,
+                    strict=hypothesis_spec_strict,
+                )
                 
                 for state_row in state_variants:
                     raw_state_id = state_row.get("state_id")
@@ -360,36 +480,49 @@ def main() -> int:
                             plan_row_id = (
                                 f"{claim_id}:{event_type or row.get('feature_name')}:{rule}:{horizon}:{state_token}:all:{symbol}"
                             )
-                        
-                            if plan_row_id in seen_plan_ids:
-                                plan_duplicates += 1
-                            else:
-                                seen_plan_ids.add(plan_row_id)
-                                plan_row = {
-                                    "plan_row_id": plan_row_id,
-                                    "source_claim_ids": [claim_id],
-                                    "source_concept_ids": [row['concept_id']],
-                                    "object_type": object_type,
-                                    "runtime_event_type": runtime_event_type,
-                                    "canonical_event_type": canonical_event_type,
-                                    "canonical_family": canonical_family,
-                                    "event_type": event_type or "microstructure_proxy",
-                                    "rule_template": rule,
-                                    "horizon": horizon,
-                                    "symbol": symbol,
-                                    "state_id": state_id,
-                                    "state_provenance": state_provenance,
-                                    "state_scope": state_scope,
-                                    "state_activation": state_activation,
-                                    "state_activation_hash": state_activation_hash,
-                                    "conditioning": {},
-                                    "min_events": min_events_required,
-                                    "state_min_events": state_min_events if state_id else 0,
-                                    "ontology_spec_hash": template_ontology_hash,
-                                    "ontology_in_canonical_registry": bool_field(row.get("ontology_in_canonical_registry", False)),
-                                    "ontology_unknown_templates": parse_list_field(row.get("ontology_unknown_templates", [])),
-                                }
-                                plan_rows.append(plan_row)
+                            plan_row = {
+                                "plan_row_id": plan_row_id,
+                                "source_claim_ids": [claim_id],
+                                "source_concept_ids": [row['concept_id']],
+                                "object_type": object_type,
+                                "runtime_event_type": runtime_event_type,
+                                "canonical_event_type": canonical_event_type,
+                                "canonical_family": canonical_family,
+                                "event_type": event_type or "microstructure_proxy",
+                                "rule_template": rule,
+                                "horizon": horizon,
+                                "symbol": symbol,
+                                "state_id": state_id,
+                                "state_provenance": state_provenance,
+                                "state_scope": state_scope,
+                                "state_activation": state_activation,
+                                "state_activation_hash": state_activation_hash,
+                                "conditioning": {},
+                                "min_events": min_events_required,
+                                "state_min_events": state_min_events if state_id else 0,
+                                "ontology_spec_hash": template_ontology_hash,
+                                "ontology_in_canonical_registry": bool_field(row.get("ontology_in_canonical_registry", False)),
+                                "ontology_unknown_templates": parse_list_field(row.get("ontology_unknown_templates", [])),
+                            }
+                            translated_rows = _expand_hypothesis_rows(
+                                base_row=plan_row,
+                                claim_id=claim_id,
+                                template_id=template_id,
+                                available_condition_keys=available_condition_keys,
+                            )
+                            for translated in translated_rows:
+                                if total_count >= MAX_TOTAL_CANDIDATES or claim_candidates >= MAX_CANDIDATES_PER_CLAIM:
+                                    break
+                                translated_row_id = str(translated.get("plan_row_id", plan_row_id)).strip() or plan_row_id
+                                hypothesis_id = str(translated.get("hypothesis_id", "")).strip()
+                                if hypothesis_id:
+                                    translated_row_id = f"{translated_row_id}:{hypothesis_id}"
+                                    translated["plan_row_id"] = translated_row_id
+                                if translated_row_id in seen_plan_ids:
+                                    plan_duplicates += 1
+                                    continue
+                                seen_plan_ids.add(translated_row_id)
+                                plan_rows.append(translated)
                                 total_count += 1
                                 claim_candidates += 1
                         
@@ -424,35 +557,49 @@ def main() -> int:
                                         f"{claim_id}:{event_type or row.get('feature_name')}:{rule}:{horizon}:"
                                         f"{state_token}:{c_key}_{c_val}:{symbol}"
                                     )
-                                    if plan_row_id in seen_plan_ids:
-                                        plan_duplicates += 1
-                                    else:
-                                        seen_plan_ids.add(plan_row_id)
-                                        plan_row = {
-                                            "plan_row_id": plan_row_id,
-                                            "source_claim_ids": [claim_id],
-                                            "source_concept_ids": [row['concept_id']],
-                                            "object_type": object_type,
-                                            "runtime_event_type": runtime_event_type,
-                                            "canonical_event_type": canonical_event_type,
-                                            "canonical_family": canonical_family,
-                                            "event_type": event_type or "microstructure_proxy",
-                                            "rule_template": rule,
-                                            "horizon": horizon,
-                                            "symbol": symbol,
-                                            "state_id": state_id,
-                                            "state_provenance": state_provenance,
-                                            "state_scope": state_scope,
-                                            "state_activation": state_activation,
-                                            "state_activation_hash": state_activation_hash,
-                                            "conditioning": {c_key: c_val},
-                                            "min_events": min_events_required,
-                                            "state_min_events": state_min_events if state_id else 0,
-                                            "ontology_spec_hash": template_ontology_hash,
-                                            "ontology_in_canonical_registry": bool_field(row.get("ontology_in_canonical_registry", False)),
-                                            "ontology_unknown_templates": parse_list_field(row.get("ontology_unknown_templates", [])),
-                                        }
-                                        plan_rows.append(plan_row)
+                                    plan_row = {
+                                        "plan_row_id": plan_row_id,
+                                        "source_claim_ids": [claim_id],
+                                        "source_concept_ids": [row['concept_id']],
+                                        "object_type": object_type,
+                                        "runtime_event_type": runtime_event_type,
+                                        "canonical_event_type": canonical_event_type,
+                                        "canonical_family": canonical_family,
+                                        "event_type": event_type or "microstructure_proxy",
+                                        "rule_template": rule,
+                                        "horizon": horizon,
+                                        "symbol": symbol,
+                                        "state_id": state_id,
+                                        "state_provenance": state_provenance,
+                                        "state_scope": state_scope,
+                                        "state_activation": state_activation,
+                                        "state_activation_hash": state_activation_hash,
+                                        "conditioning": {c_key: c_val},
+                                        "min_events": min_events_required,
+                                        "state_min_events": state_min_events if state_id else 0,
+                                        "ontology_spec_hash": template_ontology_hash,
+                                        "ontology_in_canonical_registry": bool_field(row.get("ontology_in_canonical_registry", False)),
+                                        "ontology_unknown_templates": parse_list_field(row.get("ontology_unknown_templates", [])),
+                                    }
+                                    translated_rows = _expand_hypothesis_rows(
+                                        base_row=plan_row,
+                                        claim_id=claim_id,
+                                        template_id=template_id,
+                                        available_condition_keys=available_condition_keys,
+                                    )
+                                    for translated in translated_rows:
+                                        if total_count >= MAX_TOTAL_CANDIDATES or claim_candidates >= MAX_CANDIDATES_PER_CLAIM:
+                                            break
+                                        translated_row_id = str(translated.get("plan_row_id", plan_row_id)).strip() or plan_row_id
+                                        hypothesis_id = str(translated.get("hypothesis_id", "")).strip()
+                                        if hypothesis_id:
+                                            translated_row_id = f"{translated_row_id}:{hypothesis_id}"
+                                            translated["plan_row_id"] = translated_row_id
+                                        if translated_row_id in seen_plan_ids:
+                                            plan_duplicates += 1
+                                            continue
+                                        seen_plan_ids.add(translated_row_id)
+                                        plan_rows.append(translated)
                                         total_count += 1
                                         claim_candidates += 1
             
@@ -475,6 +622,9 @@ def main() -> int:
         
         # Write Feasibility Report
         pd.DataFrame(feasibility_report).to_parquet(out_dir / "plan_feasibility_report.parquet", index=False)
+        hypothesis_audit_df = pd.DataFrame(hypothesis_audit_rows)
+        hypothesis_audit_path = out_dir / "hypothesis_execution_audit.parquet"
+        hypothesis_audit_df.to_parquet(hypothesis_audit_path, index=False)
         
         # Generate Hash
         plan_bytes = plan_path.read_bytes()
@@ -502,9 +652,22 @@ def main() -> int:
                 "hash": exclusions_hash,
                 "excluded_claims_count": exclusions_count,
                 "mode": "file" if exclusions_path.exists() else "none"
+            },
+            "hypothesis_specs": {
+                "enabled": bool(hypothesis_spec_enabled),
+                "strict": bool(hypothesis_spec_strict),
+                "active_specs": [str(spec.get("hypothesis_id", "")) for spec in hypothesis_specs],
+                "audit_path": str(hypothesis_audit_path.relative_to(PROJECT_ROOT.parent)),
+                "audit_rows": int(len(hypothesis_audit_df)),
             }
         }
-        
+        hypothesis_status_counts = {}
+        if not hypothesis_audit_df.empty and "status" in hypothesis_audit_df.columns:
+            hypothesis_status_counts = {
+                str(k): int(v)
+                for k, v in hypothesis_audit_df["status"].value_counts(dropna=False).to_dict().items()
+            }
+
         finalize_manifest(manifest, "success", stats={
             "total_candidates": len(plan_rows),
             "inputs_hashes": inputs_hashes,
@@ -517,6 +680,10 @@ def main() -> int:
             "state_registry_hash": current_component_fields.get("state_registry_hash"),
             "verb_lexicon_hash": current_component_fields.get("verb_lexicon_hash"),
             "ontology_hash_mismatches": list(hash_mismatches),
+            "hypothesis_spec_enabled": int(hypothesis_spec_enabled),
+            "hypothesis_spec_strict": int(hypothesis_spec_strict),
+            "hypothesis_specs_executed": int(sum(1 for r in hypothesis_audit_rows if str(r.get("status", "")).startswith("executed"))),
+            "hypothesis_audit_status_counts": hypothesis_status_counts,
         })
 
         
