@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import pandas as pd
 
-from pipelines.research.phase2_candidate_discovery import _apply_hierarchical_shrinkage
+from pipelines.research.phase2_candidate_discovery import (
+    _apply_hierarchical_shrinkage,
+    _effective_sample_size,
+    _estimate_adaptive_lambda,
+    _regime_conditioned_tau_days,
+    _time_decay_weights,
+    calculate_expectancy_stats,
+)
 
 
 def _base_rows() -> pd.DataFrame:
@@ -229,3 +236,97 @@ def test_adaptive_lambda_insufficient_data_skips_state_pooling():
     assert (out["lambda_state_status"] == "insufficient_data").all()
     assert (out["shrinkage_weight_state"] == 1.0).all()
     assert (out["effect_shrunk_state"] == out["effect_raw"]).all()
+
+
+def test_time_decay_weights_respect_floor_and_recency_order():
+    ts = pd.to_datetime(
+        ["2026-01-10T00:00:00Z", "2026-01-09T00:00:00Z", "2026-01-01T00:00:00Z"],
+        utc=True,
+    )
+    w = _time_decay_weights(
+        pd.Series(ts),
+        ref_ts=ts.max(),
+        tau_seconds=86400.0,
+        floor_weight=0.02,
+    )
+    assert w.iloc[0] >= w.iloc[1] >= w.iloc[2]
+    assert (w >= 0.02).all()
+
+
+def test_effective_sample_size_less_than_count_when_weights_uneven():
+    w = pd.Series([1.0, 0.5, 0.25, 0.125], dtype=float)
+    n_eff = _effective_sample_size(w)
+    assert 0.0 < n_eff < float(len(w))
+
+
+def test_adaptive_lambda_smoothing_and_shock_cap_applied():
+    units = pd.DataFrame(
+        [
+            {"verb": "mean_reversion", "horizon": "5m", "event": "A", "n": 500.0, "mean": 0.20, "var": 0.10},
+            {"verb": "mean_reversion", "horizon": "5m", "event": "B", "n": 500.0, "mean": -0.20, "var": 0.10},
+        ]
+    )
+    prev = {("mean_reversion", "5m"): 1000.0}
+    out = _estimate_adaptive_lambda(
+        units_df=units,
+        parent_cols=["verb", "horizon"],
+        child_col="event",
+        n_col="n",
+        mean_col="mean",
+        var_col="var",
+        lambda_name="lambda_state",
+        fixed_lambda=100.0,
+        adaptive=True,
+        lambda_min=5.0,
+        lambda_max=5000.0,
+        eps=1e-8,
+        min_total_samples=10,
+        previous_lambda_by_parent=prev,
+        lambda_smoothing_alpha=1.0,
+        lambda_shock_cap_pct=0.5,
+    )
+    row = out.iloc[0]
+    assert row["lambda_state_status"] == "adaptive_smoothed"
+    assert row["lambda_state_prev"] == 1000.0
+    assert 500.0 <= row["lambda_state"] <= 1500.0
+
+
+def test_regime_conditioned_tau_mapping_contract():
+    tau = _regime_conditioned_tau_days(
+        canonical_family="POSITIONING_EXTREMES",
+        vol_regime="HIGH_VOL_REGIME",
+        liquidity_state="LOW_LIQUIDITY_STATE",
+        base_tau_days_override=None,
+    )
+    assert abs(tau - 25.2) < 1e-9
+
+
+def test_calculate_expectancy_stats_emits_regime_conditioned_tau_metrics():
+    ts = pd.date_range("2026-01-01", periods=120, freq="5min", tz="UTC")
+    features = pd.DataFrame({"timestamp": ts, "close": 100.0 + pd.Series(range(len(ts)), dtype=float)})
+    events = pd.DataFrame(
+        {
+            "enter_ts": [ts[20], ts[40], ts[60], ts[80], ts[100]],
+            "vol_regime": ["LOW_VOL_REGIME", "MID_VOL_REGIME", "HIGH_VOL_REGIME", "VOL_SHOCK_STATE", "HIGH_VOL_REGIME"],
+            "liquidity_state": ["NORMAL_LIQUIDITY_STATE", "NORMAL_LIQUIDITY_STATE", "LOW_LIQUIDITY_STATE", "LOW_LIQUIDITY_STATE", "DEPTH_RECOVERY_STATE"],
+        }
+    )
+
+    stats = calculate_expectancy_stats(
+        sym_events=events,
+        features_df=features,
+        rule="continuation",
+        canonical_family="POSITIONING_EXTREMES",
+        horizon="5m",
+        min_samples=2,
+        time_decay_enabled=True,
+        time_decay_tau_seconds=60.0 * 86400.0,
+        time_decay_floor_weight=0.02,
+        regime_conditioned_decay=True,
+        regime_tau_smoothing_alpha=0.15,
+        regime_tau_min_days=3.0,
+        regime_tau_max_days=365.0,
+    )
+    assert stats["n_effective"] > 0.0
+    assert stats["mean_tau_days"] > 0.0
+    assert stats["learning_rate_mean"] > 0.0

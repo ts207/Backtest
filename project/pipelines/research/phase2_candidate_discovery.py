@@ -82,6 +82,7 @@ PRIMARY_OUTPUT_COLUMNS = [
     "effect_raw", "effect_shrunk_family", "effect_shrunk_event", "effect_shrunk_state",
     "shrinkage_weight_family", "shrinkage_weight_event", "shrinkage_weight_state",
     "p_value_raw", "p_value_shrunk", "p_value_for_fdr", "std_return", "gate_state_information",
+    "effective_sample_size", "time_weight_sum", "mean_weight_age_days", "time_decay_tau_days", "time_decay_learning_rate",
     "lambda_family", "lambda_event", "lambda_state",
     "lambda_family_status", "lambda_event_status", "lambda_state_status",
 ]
@@ -95,6 +96,108 @@ _TEMPLATE_DIRECTION: Dict[str, int] = {
     "carry": 1,
     "breakout": 1,
 }
+
+_TAU_BY_FAMILY_DAYS: Dict[str, float] = {
+    "LIQUIDITY_DISLOCATION": 15.0,
+    "VOLATILITY_TRANSITION": 30.0,
+    "POSITIONING_EXTREMES": 60.0,
+    "FORCED_FLOW_AND_EXHAUSTION": 90.0,
+    "FLOW_EXHAUSTION": 90.0,
+    "TREND_STRUCTURE": 90.0,
+    "STATISTICAL_DISLOCATION": 30.0,
+    "REGIME_TRANSITION": 180.0,
+    "INFORMATION_DESYNC": 60.0,
+    "CROSS_SIGNAL": 60.0,
+    "TEMPORAL_STRUCTURE": 30.0,
+    "EXECUTION_FRICTION": 20.0,
+}
+
+_VOL_REGIME_MULTIPLIER: Dict[str, float] = {
+    "LOW": 1.4,
+    "MID": 1.0,
+    "HIGH": 0.7,
+    "SHOCK": 0.4,
+}
+
+_LIQUIDITY_STATE_MULTIPLIER: Dict[str, float] = {
+    "LOW": 0.6,
+    "NORMAL": 1.0,
+    "RECOVERY": 1.2,
+}
+
+
+def _resolve_tau_days(canonical_family: str, override_days: Optional[float]) -> float:
+    if override_days is not None and float(override_days) > 0.0:
+        return float(override_days)
+    key = str(canonical_family or "").strip().upper()
+    return float(_TAU_BY_FAMILY_DAYS.get(key, 60.0))
+
+
+def _time_decay_weights(
+    event_ts: pd.Series,
+    *,
+    ref_ts: pd.Timestamp,
+    tau_seconds: float,
+    floor_weight: float,
+) -> pd.Series:
+    if event_ts.empty:
+        return pd.Series(dtype=float)
+    if float(tau_seconds) <= 0.0:
+        return pd.Series(1.0, index=event_ts.index, dtype=float)
+    delta = (ref_ts - pd.to_datetime(event_ts, utc=True, errors="coerce")).dt.total_seconds().fillna(0.0).clip(lower=0.0)
+    w = np.exp(-delta / float(tau_seconds))
+    floor = max(0.0, min(1.0, float(floor_weight)))
+    return pd.Series(np.maximum(w, floor), index=event_ts.index, dtype=float)
+
+
+def _effective_sample_size(weights: pd.Series) -> float:
+    w = pd.to_numeric(weights, errors="coerce").fillna(0.0).clip(lower=0.0)
+    s1 = float(w.sum())
+    s2 = float((w * w).sum())
+    if s1 <= 0.0 or s2 <= 0.0:
+        return 0.0
+    return float((s1 * s1) / s2)
+
+
+def _normalize_vol_regime(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return "MID"
+    if "shock" in text:
+        return "SHOCK"
+    if "high" in text:
+        return "HIGH"
+    if "low" in text:
+        return "LOW"
+    if "mid" in text or "normal" in text:
+        return "MID"
+    return "MID"
+
+
+def _normalize_liquidity_state(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return "NORMAL"
+    if "recovery" in text:
+        return "RECOVERY"
+    if any(token in text for token in ("low", "absence", "illiquid", "collapse", "vacuum")):
+        return "LOW"
+    return "NORMAL"
+
+
+def _regime_conditioned_tau_days(
+    *,
+    canonical_family: str,
+    vol_regime: Any,
+    liquidity_state: Any,
+    base_tau_days_override: Optional[float],
+) -> float:
+    tau = _resolve_tau_days(canonical_family, base_tau_days_override)
+    vol_key = _normalize_vol_regime(vol_regime)
+    liq_key = _normalize_liquidity_state(liquidity_state)
+    tau *= float(_VOL_REGIME_MULTIPLIER.get(vol_key, 1.0))
+    tau *= float(_LIQUIDITY_STATE_MULTIPLIER.get(liq_key, 1.0))
+    return float(tau)
 
 
 def _make_family_id(
@@ -246,6 +349,9 @@ def _estimate_adaptive_lambda(
     lambda_max: float,
     eps: float,
     min_total_samples: int,
+    previous_lambda_by_parent: Optional[Dict[Tuple[Any, ...], float]] = None,
+    lambda_smoothing_alpha: float = 0.1,
+    lambda_shock_cap_pct: float = 0.5,
 ) -> pd.DataFrame:
     if units_df.empty:
         return pd.DataFrame(columns=parent_cols + [lambda_name, f"{lambda_name}_status", f"{lambda_name}_sigma_within", f"{lambda_name}_sigma_between", f"{lambda_name}_total_n", f"{lambda_name}_child_count"])
@@ -258,6 +364,8 @@ def _estimate_adaptive_lambda(
         base[f"{lambda_name}_sigma_between"] = np.nan
         base[f"{lambda_name}_total_n"] = np.nan
         base[f"{lambda_name}_child_count"] = np.nan
+        base[f"{lambda_name}_raw"] = np.nan
+        base[f"{lambda_name}_prev"] = np.nan
         return base
 
     rows: List[Dict[str, Any]] = []
@@ -293,8 +401,25 @@ def _estimate_adaptive_lambda(
             lam_raw = float(sigma_within / max(sigma_between, float(eps)))
             lam = float(np.clip(lam_raw, float(lambda_min), float(lambda_max)))
 
+        lam_raw = float(lam)
+        lam_prev = np.nan
+        if status == "adaptive" and previous_lambda_by_parent:
+            key_tuple = tuple(parent_payload[c] for c in parent_cols)
+            prev_val = previous_lambda_by_parent.get(key_tuple)
+            if prev_val is not None and float(prev_val) > 0.0:
+                lam_prev = float(prev_val)
+                alpha = max(0.0, min(1.0, float(lambda_smoothing_alpha)))
+                smoothed = ((1.0 - alpha) * lam_prev) + (alpha * lam_raw)
+                cap = max(0.0, float(lambda_shock_cap_pct))
+                lo = lam_prev * (1.0 - cap)
+                hi = lam_prev * (1.0 + cap)
+                lam = float(np.clip(smoothed, lo, hi))
+                status = "adaptive_smoothed"
+
         row = dict(parent_payload)
         row[lambda_name] = float(lam)
+        row[f"{lambda_name}_raw"] = float(lam_raw)
+        row[f"{lambda_name}_prev"] = float(lam_prev) if np.isfinite(lam_prev) else np.nan
         row[f"{lambda_name}_status"] = status
         row[f"{lambda_name}_sigma_within"] = float(sigma_within) if np.isfinite(sigma_within) else np.nan
         row[f"{lambda_name}_sigma_between"] = float(sigma_between) if np.isfinite(sigma_between) else np.nan
@@ -315,6 +440,9 @@ def _apply_hierarchical_shrinkage(
     adaptive_lambda_max: float = 5000.0,
     adaptive_lambda_eps: float = 1e-8,
     adaptive_lambda_min_total_samples: int = 200,
+    previous_lambda_maps: Optional[Dict[str, Dict[Tuple[Any, ...], float]]] = None,
+    lambda_smoothing_alpha: float = 0.1,
+    lambda_shock_cap_pct: float = 0.5,
 ) -> pd.DataFrame:
     """Empirical-Bayes partial pooling across family -> event -> state."""
     if raw_df.empty:
@@ -337,7 +465,10 @@ def _apply_hierarchical_shrinkage(
     out = raw_df.copy()
     out["effect_raw"] = pd.to_numeric(out.get("expectancy", 0.0), errors="coerce").fillna(0.0)
     out["p_value_raw"] = pd.to_numeric(out.get("p_value", 1.0), errors="coerce").fillna(1.0).clip(0.0, 1.0)
-    out["_n"] = pd.to_numeric(out.get("n_events", out.get("sample_size", 0)), errors="coerce").fillna(0.0).clip(lower=0.0)
+    out["_n"] = pd.to_numeric(
+        out.get("effective_sample_size", out.get("n_events", out.get("sample_size", 0))),
+        errors="coerce",
+    ).fillna(0.0).clip(lower=0.0)
     if "std_return" not in out.columns:
         out["std_return"] = np.nan
     out["std_return"] = pd.to_numeric(out["std_return"], errors="coerce")
@@ -399,6 +530,9 @@ def _apply_hierarchical_shrinkage(
         lambda_max=float(adaptive_lambda_max),
         eps=float(adaptive_lambda_eps),
         min_total_samples=int(adaptive_lambda_min_total_samples),
+        previous_lambda_by_parent=(previous_lambda_maps or {}).get("family"),
+        lambda_smoothing_alpha=float(lambda_smoothing_alpha),
+        lambda_shock_cap_pct=float(lambda_shock_cap_pct),
     )
     out = out.merge(
         lambda_family_df[
@@ -410,6 +544,8 @@ def _apply_hierarchical_shrinkage(
                 "lambda_family_sigma_between",
                 "lambda_family_total_n",
                 "lambda_family_child_count",
+                "lambda_family_raw",
+                "lambda_family_prev",
             ]
         ],
         on=global_cols,
@@ -451,6 +587,9 @@ def _apply_hierarchical_shrinkage(
         lambda_max=float(adaptive_lambda_max),
         eps=float(adaptive_lambda_eps),
         min_total_samples=int(adaptive_lambda_min_total_samples),
+        previous_lambda_by_parent=(previous_lambda_maps or {}).get("event"),
+        lambda_smoothing_alpha=float(lambda_smoothing_alpha),
+        lambda_shock_cap_pct=float(lambda_shock_cap_pct),
     )
     out = out.merge(
         lambda_event_df[
@@ -462,6 +601,8 @@ def _apply_hierarchical_shrinkage(
                 "lambda_event_sigma_between",
                 "lambda_event_total_n",
                 "lambda_event_child_count",
+                "lambda_event_raw",
+                "lambda_event_prev",
             ]
         ],
         on=family_cols,
@@ -504,6 +645,9 @@ def _apply_hierarchical_shrinkage(
         lambda_max=float(adaptive_lambda_max),
         eps=float(adaptive_lambda_eps),
         min_total_samples=int(adaptive_lambda_min_total_samples),
+        previous_lambda_by_parent=(previous_lambda_maps or {}).get("state"),
+        lambda_smoothing_alpha=float(lambda_smoothing_alpha),
+        lambda_shock_cap_pct=float(lambda_shock_cap_pct),
     )
     out = out.merge(
         lambda_state_df[
@@ -515,6 +659,8 @@ def _apply_hierarchical_shrinkage(
                 "lambda_state_sigma_between",
                 "lambda_state_total_n",
                 "lambda_state_child_count",
+                "lambda_state_raw",
+                "lambda_state_prev",
             ]
         ],
         on=event_cols,
@@ -878,8 +1024,16 @@ def _join_events_to_features(
     feat = features_df.sort_values("timestamp").reset_index(drop=True)
 
     # Use merge_asof: for each event, find the latest feature bar <= event_ts
+    extra_evt_cols = []
+    for col in ("vol_regime", "liquidity_state", "market_liquidity_state", "depth_state"):
+        if col in evt.columns:
+            extra_evt_cols.append(col)
+    evt_cols = ["_event_ts"] + extra_evt_cols
+    evt_for_join = evt[evt_cols].rename(
+        columns={"_event_ts": "timestamp", **{c: f"evt_{c}" for c in extra_evt_cols}}
+    )
     merged = pd.merge_asof(
-        evt[["_event_ts"]].rename(columns={"_event_ts": "timestamp"}),
+        evt_for_join,
         feat,
         on="timestamp",
         direction="backward",
@@ -892,9 +1046,17 @@ def calculate_expectancy_stats(
     features_df: pd.DataFrame,
     rule: str,
     horizon: str,
+    canonical_family: str = "",
     shift_labels_k: int = 0,
     entry_lag_bars: int = 1,
     min_samples: int = 30,
+    time_decay_enabled: bool = False,
+    time_decay_tau_seconds: Optional[float] = None,
+    time_decay_floor_weight: float = 0.02,
+    regime_conditioned_decay: bool = False,
+    regime_tau_smoothing_alpha: float = 0.15,
+    regime_tau_min_days: float = 3.0,
+    regime_tau_max_days: float = 365.0,
 ) -> Dict[str, Any]:
     """
     Real PIT expectancy calculation.
@@ -913,9 +1075,14 @@ def calculate_expectancy_stats(
             "mean_return": 0.0,
             "p_value": 1.0,
             "n_events": 0.0,
+            "n_effective": 0.0,
             "stability_pass": False,
             "std_return": 0.0,
             "t_stat": 0.0,
+            "time_weight_sum": 0.0,
+            "mean_weight_age_days": 0.0,
+            "mean_tau_days": 0.0,
+            "learning_rate_mean": 0.0,
         }
 
     if int(entry_lag_bars) < 1:
@@ -931,9 +1098,14 @@ def calculate_expectancy_stats(
             "mean_return": 0.0,
             "p_value": 1.0,
             "n_events": 0.0,
+            "n_effective": 0.0,
             "stability_pass": False,
             "std_return": 0.0,
             "t_stat": 0.0,
+            "time_weight_sum": 0.0,
+            "mean_weight_age_days": 0.0,
+            "mean_tau_days": 0.0,
+            "learning_rate_mean": 0.0,
         }
 
     # Compute forward return at t0 using aligned feature rows.
@@ -943,6 +1115,9 @@ def calculate_expectancy_stats(
     feat_ts_idx = pd.DatetimeIndex(features_df["timestamp"])
 
     event_returns: List[float] = []
+    event_ts_list: List[pd.Timestamp] = []
+    event_vol_list: List[Any] = []
+    event_liq_list: List[Any] = []
     for _, row in merged.iterrows():
         ts = row["timestamp"]
         # Find position of this feature row in features_df
@@ -965,22 +1140,78 @@ def calculate_expectancy_stats(
 
         directional_ret = float(fwd_ret) * direction
         event_returns.append(directional_ret)
+        event_ts_list.append(pd.to_datetime(ts, utc=True, errors="coerce"))
+        event_vol_list.append(row.get("evt_vol_regime", ""))
+        event_liq_list.append(row.get("evt_liquidity_state", row.get("evt_market_liquidity_state", row.get("evt_depth_state", ""))))
 
     if len(event_returns) < min_samples:
         std_ret = float(pd.Series(event_returns, dtype=float).std()) if len(event_returns) > 1 else 0.0
+        n_eff = float(len(event_returns))
         return {
             "mean_return": 0.0,
             "p_value": 1.0,
             "n_events": float(len(event_returns)),
+            "n_effective": n_eff,
             "stability_pass": False,
             "std_return": std_ret,
             "t_stat": 0.0,
+            "time_weight_sum": float(len(event_returns)),
+            "mean_weight_age_days": 0.0,
+            "mean_tau_days": 0.0,
+            "learning_rate_mean": 0.0,
         }
 
     returns_series = pd.Series(event_returns, dtype=float)
-    stats = _distribution_stats(returns_series)
-    mean_ret = stats["mean_return"]
-    t_stat = stats["t_stat"]
+    ts_series = pd.to_datetime(pd.Series(event_ts_list), utc=True, errors="coerce")
+    if bool(time_decay_enabled):
+        ref_ts = ts_series.max()
+        tau_seconds_default = float(time_decay_tau_seconds or (60.0 * 60.0 * 24.0 * 60.0))
+        if bool(regime_conditioned_decay):
+            tau_days_list: List[float] = []
+            prev_tau_days: Optional[float] = None
+            alpha = max(0.0, min(1.0, float(regime_tau_smoothing_alpha)))
+            for vol_regime, liq_state in zip(event_vol_list, event_liq_list):
+                raw_tau_days = _regime_conditioned_tau_days(
+                    canonical_family=canonical_family,
+                    vol_regime=vol_regime,
+                    liquidity_state=liq_state,
+                    base_tau_days_override=(tau_seconds_default / 86400.0),
+                )
+                raw_tau_days = float(np.clip(raw_tau_days, float(regime_tau_min_days), float(regime_tau_max_days)))
+                if prev_tau_days is None:
+                    smoothed_tau_days = raw_tau_days
+                else:
+                    smoothed_tau_days = ((1.0 - alpha) * prev_tau_days) + (alpha * raw_tau_days)
+                tau_days_list.append(float(smoothed_tau_days))
+                prev_tau_days = float(smoothed_tau_days)
+            tau_seconds_arr = np.array(tau_days_list, dtype=float) * 86400.0
+            age_seconds = (ref_ts - ts_series).dt.total_seconds().fillna(0.0).clip(lower=0.0).values
+            raw_w = np.exp(-age_seconds / np.maximum(tau_seconds_arr, 1e-9))
+            weights = pd.Series(np.maximum(raw_w, float(time_decay_floor_weight)), index=returns_series.index, dtype=float)
+        else:
+            weights = _time_decay_weights(
+                ts_series,
+                ref_ts=ref_ts,
+                tau_seconds=tau_seconds_default,
+                floor_weight=float(time_decay_floor_weight),
+            )
+    else:
+        weights = pd.Series(1.0, index=returns_series.index, dtype=float)
+
+    n_eff = _effective_sample_size(weights)
+    w_sum = float(weights.sum())
+    if w_sum <= 0.0:
+        mean_ret = float(returns_series.mean())
+        var_ret = float(returns_series.var(ddof=0))
+    else:
+        mean_ret = float((returns_series * weights).sum() / w_sum)
+        var_ret = float(((weights * (returns_series - mean_ret) ** 2).sum()) / w_sum)
+
+    std_ret = float(np.sqrt(max(var_ret, 0.0)))
+    if std_ret > 0.0 and n_eff > 1.0:
+        t_stat = float(mean_ret / (std_ret / np.sqrt(max(n_eff, 1.0))))
+    else:
+        t_stat = 0.0
     p_value = _two_sided_p_from_t(t_stat)
 
     # Sign stability: first vs second time half
@@ -988,17 +1219,41 @@ def calculate_expectancy_stats(
     mid = n // 2
     first_half = pd.Series(event_returns[:mid], dtype=float)
     second_half = pd.Series(event_returns[mid:], dtype=float)
-    first_sign = first_half.mean()
-    second_sign = second_half.mean()
+    first_w = weights.iloc[:mid] if len(weights) >= mid else pd.Series(1.0, index=first_half.index, dtype=float)
+    second_w = weights.iloc[mid:] if len(weights) >= n else pd.Series(1.0, index=second_half.index, dtype=float)
+    first_sign = float((first_half * first_w).sum() / max(float(first_w.sum()), 1e-12)) if not first_half.empty else 0.0
+    second_sign = float((second_half * second_w).sum() / max(float(second_w.sum()), 1e-12)) if not second_half.empty else 0.0
     stability_pass = (np.sign(first_sign) == np.sign(second_sign)) and (first_sign != 0) and (second_sign != 0)
+
+    if bool(time_decay_enabled) and not ts_series.empty:
+        ref_ts = ts_series.max()
+        age_days = (ref_ts - ts_series).dt.total_seconds().fillna(0.0).clip(lower=0.0) / 86400.0
+        mean_weight_age_days = float((age_days * weights).sum() / max(float(weights.sum()), 1e-12))
+        if bool(regime_conditioned_decay):
+            tau_days_vals = np.maximum(np.array(tau_days_list, dtype=float), 1e-9)
+            mean_tau_days = float(np.mean(tau_days_vals))
+            learning_rate_mean = float(np.mean(1.0 / tau_days_vals))
+        else:
+            tau_days_const = float(time_decay_tau_seconds or (60.0 * 60.0 * 24.0 * 60.0)) / 86400.0
+            mean_tau_days = tau_days_const
+            learning_rate_mean = 1.0 / max(tau_days_const, 1e-9)
+    else:
+        mean_weight_age_days = 0.0
+        mean_tau_days = 0.0
+        learning_rate_mean = 0.0
 
     return {
         "mean_return": mean_ret,
         "p_value": p_value,
         "n_events": float(n),
+        "n_effective": float(n_eff if n_eff > 0.0 else n),
         "stability_pass": bool(stability_pass),
-        "std_return": float(stats.get("std_return", 0.0)),
+        "std_return": std_ret,
         "t_stat": float(t_stat),
+        "time_weight_sum": w_sum,
+        "mean_weight_age_days": mean_weight_age_days,
+        "mean_tau_days": mean_tau_days,
+        "learning_rate_mean": learning_rate_mean,
     }
 
 
@@ -1220,6 +1475,60 @@ def _make_parser() -> argparse.ArgumentParser:
         help="Minimum total samples required per parent group before adaptive lambda is estimated.",
     )
     parser.add_argument(
+        "--enable_time_decay",
+        type=int,
+        default=1,
+        help="If 1, compute expectancy statistics with exponential time decay.",
+    )
+    parser.add_argument(
+        "--time_decay_half_life_days",
+        type=float,
+        default=None,
+        help="Optional global half-life override in days for time-decayed weighting.",
+    )
+    parser.add_argument(
+        "--time_decay_floor_weight",
+        type=float,
+        default=0.02,
+        help="Minimum historical anchor weight for time-decayed weighting.",
+    )
+    parser.add_argument(
+        "--enable_regime_conditioned_decay",
+        type=int,
+        default=1,
+        help="If 1, adjust decay half-life by vol_regime and liquidity_state.",
+    )
+    parser.add_argument(
+        "--regime_tau_smoothing_alpha",
+        type=float,
+        default=0.15,
+        help="EMA smoothing alpha for regime-conditioned tau transitions.",
+    )
+    parser.add_argument(
+        "--regime_tau_min_days",
+        type=float,
+        default=3.0,
+        help="Minimum tau (days) after regime multipliers.",
+    )
+    parser.add_argument(
+        "--regime_tau_max_days",
+        type=float,
+        default=365.0,
+        help="Maximum tau (days) after regime multipliers.",
+    )
+    parser.add_argument(
+        "--lambda_smoothing_alpha",
+        type=float,
+        default=0.1,
+        help="EMA alpha for run-to-run adaptive lambda smoothing.",
+    )
+    parser.add_argument(
+        "--lambda_shock_cap_pct",
+        type=float,
+        default=0.5,
+        help="Maximum run-to-run fractional lambda change cap (e.g. 0.5 = +/-50%).",
+    )
+    parser.add_argument(
         "--min_information_weight_state",
         type=float,
         default=0.2,
@@ -1283,6 +1592,126 @@ def _validate_candidate_plan_ontology(
                 )
 
     return errors
+
+
+def _load_previous_lambda_maps(
+    *,
+    data_root: Path,
+    event_type: str,
+    current_run_id: str,
+) -> Tuple[Dict[str, Dict[Tuple[Any, ...], float]], Optional[Path]]:
+    phase2_root = data_root / "reports" / "phase2"
+    pattern = f"*/{event_type}/phase2_lambda_snapshot.parquet"
+    candidates = []
+    for path in phase2_root.glob(pattern):
+        try:
+            run_id = path.parts[-3]
+        except Exception:
+            continue
+        if str(run_id) == str(current_run_id):
+            continue
+        candidates.append(path)
+    if not candidates:
+        return {}, None
+
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    source = candidates[0]
+    try:
+        df = pd.read_parquet(source)
+    except Exception:
+        return {}, None
+
+    out: Dict[str, Dict[Tuple[Any, ...], float]] = {"family": {}, "event": {}, "state": {}}
+    if df.empty or "level" not in df.columns or "lambda_value" not in df.columns:
+        return out, source
+
+    def _safe_float(x: Any) -> Optional[float]:
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            return None
+        if not np.isfinite(v) or v <= 0.0:
+            return None
+        return v
+
+    for _, row in df.iterrows():
+        level = str(row.get("level", "")).strip().lower()
+        lam = _safe_float(row.get("lambda_value"))
+        if lam is None or level not in out:
+            continue
+        verb = str(row.get("template_verb", "")).strip()
+        horizon = str(row.get("horizon", "")).strip()
+        family = str(row.get("canonical_family", "")).strip().upper()
+        event = str(row.get("canonical_event_type", "")).strip().upper()
+        if level == "family":
+            key = (verb, horizon)
+        elif level == "event":
+            key = (verb, horizon, family)
+        else:
+            key = (verb, horizon, family, event)
+        out[level][key] = lam
+    return out, source
+
+
+def _build_lambda_snapshot(fdr_df: pd.DataFrame) -> pd.DataFrame:
+    if fdr_df.empty:
+        return pd.DataFrame(
+            columns=[
+                "level",
+                "template_verb",
+                "horizon",
+                "canonical_family",
+                "canonical_event_type",
+                "lambda_value",
+                "lambda_status",
+            ]
+        )
+
+    rows: List[Dict[str, Any]] = []
+
+    fam_cols = ["template_verb", "horizon", "lambda_family", "lambda_family_status"]
+    for _, r in fdr_df[[c for c in fam_cols if c in fdr_df.columns]].drop_duplicates().iterrows():
+        rows.append(
+            {
+                "level": "family",
+                "template_verb": str(r.get("template_verb", "")),
+                "horizon": str(r.get("horizon", "")),
+                "canonical_family": "",
+                "canonical_event_type": "",
+                "lambda_value": float(pd.to_numeric(r.get("lambda_family", 0.0), errors="coerce") or 0.0),
+                "lambda_status": str(r.get("lambda_family_status", "")),
+            }
+        )
+
+    evt_cols = ["template_verb", "horizon", "canonical_family", "lambda_event", "lambda_event_status"]
+    for _, r in fdr_df[[c for c in evt_cols if c in fdr_df.columns]].drop_duplicates().iterrows():
+        rows.append(
+            {
+                "level": "event",
+                "template_verb": str(r.get("template_verb", "")),
+                "horizon": str(r.get("horizon", "")),
+                "canonical_family": str(r.get("canonical_family", "")).upper(),
+                "canonical_event_type": "",
+                "lambda_value": float(pd.to_numeric(r.get("lambda_event", 0.0), errors="coerce") or 0.0),
+                "lambda_status": str(r.get("lambda_event_status", "")),
+            }
+        )
+
+    st_cols = ["template_verb", "horizon", "canonical_family", "canonical_event_type", "lambda_state", "lambda_state_status"]
+    for _, r in fdr_df[[c for c in st_cols if c in fdr_df.columns]].drop_duplicates().iterrows():
+        rows.append(
+            {
+                "level": "state",
+                "template_verb": str(r.get("template_verb", "")),
+                "horizon": str(r.get("horizon", "")),
+                "canonical_family": str(r.get("canonical_family", "")).upper(),
+                "canonical_event_type": str(r.get("canonical_event_type", "")).upper(),
+                "lambda_value": float(pd.to_numeric(r.get("lambda_state", 0.0), errors="coerce") or 0.0),
+                "lambda_status": str(r.get("lambda_state_status", "")),
+            }
+        )
+
+    return pd.DataFrame(rows)
 
 
 def main():
@@ -1495,6 +1924,8 @@ def main():
                 
             conditioning_map = plan_row.get("conditioning", {})
             min_samples = plan_row.get("min_events", args.min_samples)
+            tau_days = _resolve_tau_days(canonical_family, args.time_decay_half_life_days)
+            tau_seconds = float(tau_days) * 86400.0
             
             # Filter events for this symbol
             sym_events = events_df[events_df["symbol"] == symbol] if "symbol" in events_df.columns else events_df
@@ -1519,16 +1950,28 @@ def main():
                 continue
                 
             exp_stats = calculate_expectancy_stats(
-                bucket_events, features_df, rule, horizon,
+                bucket_events, features_df, rule, horizon, canonical_family=canonical_family,
                 shift_labels_k=args.shift_labels_k,
                 entry_lag_bars=args.entry_lag_bars,
                 min_samples=min_samples,
+                time_decay_enabled=bool(int(args.enable_time_decay)),
+                time_decay_tau_seconds=tau_seconds,
+                time_decay_floor_weight=float(args.time_decay_floor_weight),
+                regime_conditioned_decay=bool(int(args.enable_regime_conditioned_decay)),
+                regime_tau_smoothing_alpha=float(args.regime_tau_smoothing_alpha),
+                regime_tau_min_days=float(args.regime_tau_min_days),
+                regime_tau_max_days=float(args.regime_tau_max_days),
             )
             effect = float(exp_stats["mean_return"])
             pval = float(exp_stats["p_value"])
             n_joined = float(exp_stats["n_events"])
+            n_effective = float(exp_stats.get("n_effective", n_joined))
             stability_pass = bool(exp_stats["stability_pass"])
             std_return = float(exp_stats.get("std_return", 0.0))
+            mean_weight_age_days = float(exp_stats.get("mean_weight_age_days", 0.0))
+            time_weight_sum = float(exp_stats.get("time_weight_sum", n_joined))
+            mean_tau_days = float(exp_stats.get("mean_tau_days", tau_days))
+            learning_rate_mean = float(exp_stats.get("learning_rate_mean", 0.0))
             
             # Helper to add results with Atlas lineage
             cost_estimate = cost_calibrator.estimate(symbol=symbol, events_df=bucket_events)
@@ -1600,6 +2043,11 @@ def main():
                 "p_value": pval,
                 "sample_size": _resolved_sample_size(n_joined, len(sym_events)),
                 "n_events": int(n_joined),
+                "effective_sample_size": n_effective,
+                "time_weight_sum": time_weight_sum,
+                "mean_weight_age_days": mean_weight_age_days,
+                "time_decay_tau_days": mean_tau_days if bool(int(args.enable_time_decay)) else 0.0,
+                "time_decay_learning_rate": learning_rate_mean if bool(int(args.enable_time_decay)) else 0.0,
                 "std_return": std_return,
                 "sign": 1 if effect > 0 else -1,
                 "gate_economic": econ_pass,
@@ -1656,6 +2104,8 @@ def main():
 
             for rule in templates:
                 for horizon in horizons:
+                    tau_days = _resolve_tau_days(canonical_family_for_event, args.time_decay_half_life_days)
+                    tau_seconds = float(tau_days) * 86400.0
                     operator_def = _validate_operator_for_event(
                         template_verb=str(rule),
                         canonical_family=canonical_family_for_event,
@@ -1664,18 +2114,43 @@ def main():
                     operator_version = str(operator_def.get("operator_version", operator_registry_version)).strip() or operator_registry_version
                     # 3a. Base candidate (all events for this symbol)
                     exp_stats = calculate_expectancy_stats(
-                        sym_all_events, features_df, rule, horizon,
+                        sym_all_events, features_df, rule, horizon, canonical_family=canonical_family_for_event,
                         shift_labels_k=args.shift_labels_k,
                         entry_lag_bars=args.entry_lag_bars,
                         min_samples=args.min_samples,
+                        time_decay_enabled=bool(int(args.enable_time_decay)),
+                        time_decay_tau_seconds=tau_seconds,
+                        time_decay_floor_weight=float(args.time_decay_floor_weight),
+                        regime_conditioned_decay=bool(int(args.enable_regime_conditioned_decay)),
+                        regime_tau_smoothing_alpha=float(args.regime_tau_smoothing_alpha),
+                        regime_tau_min_days=float(args.regime_tau_min_days),
+                        regime_tau_max_days=float(args.regime_tau_max_days),
                     )
                     effect = float(exp_stats["mean_return"])
                     pval = float(exp_stats["p_value"])
                     n_joined = float(exp_stats["n_events"])
+                    n_effective = float(exp_stats.get("n_effective", n_joined))
                     stability_pass = bool(exp_stats["stability_pass"])
                     std_return = float(exp_stats.get("std_return", 0.0))
+                    mean_weight_age_days = float(exp_stats.get("mean_weight_age_days", 0.0))
+                    time_weight_sum = float(exp_stats.get("time_weight_sum", n_joined))
+                    mean_tau_days = float(exp_stats.get("mean_tau_days", tau_days))
+                    learning_rate_mean = float(exp_stats.get("learning_rate_mean", 0.0))
                     
-                    def _add_res(eff, pv, n, stab, std_ret, bucket_events_for_cost, cond_name="all"):
+                    def _add_res(
+                        eff,
+                        pv,
+                        n,
+                        n_eff,
+                        stab,
+                        std_ret,
+                        mean_age_days,
+                        weight_sum,
+                        tau_days_local,
+                        learning_rate_local,
+                        bucket_events_for_cost,
+                        cond_name="all",
+                    ):
                         # Economic Gate with candidate-level cost calibration.
                         cost_estimate = cost_calibrator.estimate(symbol=symbol, events_df=bucket_events_for_cost)
                         candidate_cost_bps = float(cost_estimate.cost_bps)
@@ -1753,6 +2228,11 @@ def main():
                             "p_value": pv,
                             "sample_size": _resolved_sample_size(n, len(sym_all_events)),
                             "n_events": int(n),
+                            "effective_sample_size": float(n_eff),
+                            "time_weight_sum": float(weight_sum),
+                            "mean_weight_age_days": float(mean_age_days),
+                            "time_decay_tau_days": float(tau_days_local) if bool(int(args.enable_time_decay)) else 0.0,
+                            "time_decay_learning_rate": float(learning_rate_local) if bool(int(args.enable_time_decay)) else 0.0,
                             "std_return": float(std_ret),
                             "sign": 1 if eff > 0 else -1,
                             "gate_economic": ec_pass,
@@ -1784,7 +2264,20 @@ def main():
                             "candidate_plan_hash": "",
                         })
 
-                    _add_res(effect, pval, n_joined, stability_pass, std_return, sym_all_events, "all")
+                    _add_res(
+                        effect,
+                        pval,
+                        n_joined,
+                        n_effective,
+                        stability_pass,
+                        std_return,
+                        mean_weight_age_days,
+                        time_weight_sum,
+                        mean_tau_days,
+                        learning_rate_mean,
+                        sym_all_events,
+                        "all",
+                    )
 
                     # 3b. Conditioned candidates (refined buckets)
                     for col in CONDITIONING_COLS:
@@ -1808,17 +2301,42 @@ def main():
                                 continue
                                 
                             exp_stats_bucket = calculate_expectancy_stats(
-                                bucket_events, features_df, rule, horizon,
+                                bucket_events, features_df, rule, horizon, canonical_family=canonical_family_for_event,
                                 shift_labels_k=args.shift_labels_k,
                                 entry_lag_bars=args.entry_lag_bars,
                                 min_samples=effective_min_samples,
+                                time_decay_enabled=bool(int(args.enable_time_decay)),
+                                time_decay_tau_seconds=tau_seconds,
+                                time_decay_floor_weight=float(args.time_decay_floor_weight),
+                                regime_conditioned_decay=bool(int(args.enable_regime_conditioned_decay)),
+                                regime_tau_smoothing_alpha=float(args.regime_tau_smoothing_alpha),
+                                regime_tau_min_days=float(args.regime_tau_min_days),
+                                regime_tau_max_days=float(args.regime_tau_max_days),
                             )
                             eff_b = float(exp_stats_bucket["mean_return"])
                             pv_b = float(exp_stats_bucket["p_value"])
                             n_b = float(exp_stats_bucket["n_events"])
+                            n_eff_b = float(exp_stats_bucket.get("n_effective", n_b))
                             stab_b = bool(exp_stats_bucket["stability_pass"])
                             std_b = float(exp_stats_bucket.get("std_return", 0.0))
-                            _add_res(eff_b, pv_b, n_b, stab_b, std_b, bucket_events, f"{col}_{val}")
+                            mean_age_b = float(exp_stats_bucket.get("mean_weight_age_days", 0.0))
+                            weight_sum_b = float(exp_stats_bucket.get("time_weight_sum", n_b))
+                            mean_tau_b = float(exp_stats_bucket.get("mean_tau_days", tau_days))
+                            learning_rate_b = float(exp_stats_bucket.get("learning_rate_mean", 0.0))
+                            _add_res(
+                                eff_b,
+                                pv_b,
+                                n_b,
+                                n_eff_b,
+                                stab_b,
+                                std_b,
+                                mean_age_b,
+                                weight_sum_b,
+                                mean_tau_b,
+                                learning_rate_b,
+                                bucket_events,
+                                f"{col}_{val}",
+                            )
 
     if not results:
         log.warning("No results produced — check features/events availability for %s. Continuing.", args.event_type)
@@ -1829,6 +2347,11 @@ def main():
         sys.exit(0)
 
     raw_df = pd.DataFrame(results)
+    prev_lambda_maps, prev_lambda_source = _load_previous_lambda_maps(
+        data_root=DATA_ROOT,
+        event_type=str(args.event_type),
+        current_run_id=str(args.run_id),
+    )
 
     if bool(int(args.enable_hierarchical_shrinkage)):
         raw_df = _apply_hierarchical_shrinkage(
@@ -1841,6 +2364,9 @@ def main():
             adaptive_lambda_max=float(args.adaptive_lambda_max),
             adaptive_lambda_eps=float(args.adaptive_lambda_eps),
             adaptive_lambda_min_total_samples=int(args.adaptive_lambda_min_total_samples),
+            previous_lambda_maps=prev_lambda_maps,
+            lambda_smoothing_alpha=float(args.lambda_smoothing_alpha),
+            lambda_shock_cap_pct=float(args.lambda_shock_cap_pct),
         )
     else:
         raw_df["effect_raw"] = pd.to_numeric(raw_df.get("expectancy", 0.0), errors="coerce").fillna(0.0)
@@ -1939,6 +2465,10 @@ def main():
         "horizon",
         "state_id",
         "n_events",
+        "effective_sample_size",
+        "mean_weight_age_days",
+        "time_decay_tau_days",
+        "time_decay_learning_rate",
         "lambda_state",
         "lambda_state_status",
         "shrinkage_weight_state",
@@ -1949,6 +2479,10 @@ def main():
     diag_df = fdr_df[[c for c in diagnostics_cols if c in fdr_df.columns]].copy()
     diag_df.to_parquet(reports_root / "phase2_shrinkage_diagnostics.parquet", index=False)
     diag_df.to_csv(reports_root / "phase2_shrinkage_diagnostics.csv", index=False)
+
+    lambda_snapshot_df = _build_lambda_snapshot(fdr_df)
+    lambda_snapshot_df.to_parquet(reports_root / "phase2_lambda_snapshot.parquet", index=False)
+    lambda_snapshot_df.to_csv(reports_root / "phase2_lambda_snapshot.csv", index=False)
 
     report = {
         "spec_hashes": spec_hashes,
@@ -1961,6 +2495,7 @@ def main():
             "run_manifest_ontology_spec_hash": run_manifest_ontology_hash,
             "current_ontology_spec_hash": current_ontology_hash,
             "operator_registry_version": operator_registry_version,
+            "previous_lambda_source": str(prev_lambda_source) if prev_lambda_source else "",
             **current_ontology_components,
         },
         "family_definition": "Option B (symbol, event_type, rule_template, horizon) — F-3 fix",
@@ -1981,6 +2516,15 @@ def main():
             "adaptive_lambda_max": float(args.adaptive_lambda_max),
             "adaptive_lambda_eps": float(args.adaptive_lambda_eps),
             "adaptive_lambda_min_total_samples": int(args.adaptive_lambda_min_total_samples),
+            "enable_time_decay": bool(int(args.enable_time_decay)),
+            "time_decay_half_life_days": float(args.time_decay_half_life_days) if args.time_decay_half_life_days else None,
+            "time_decay_floor_weight": float(args.time_decay_floor_weight),
+            "enable_regime_conditioned_decay": bool(int(args.enable_regime_conditioned_decay)),
+            "regime_tau_smoothing_alpha": float(args.regime_tau_smoothing_alpha),
+            "regime_tau_min_days": float(args.regime_tau_min_days),
+            "regime_tau_max_days": float(args.regime_tau_max_days),
+            "lambda_smoothing_alpha": float(args.lambda_smoothing_alpha),
+            "lambda_shock_cap_pct": float(args.lambda_shock_cap_pct),
             "min_information_weight_state": float(args.min_information_weight_state),
         },
         "summary": {
@@ -1999,6 +2543,10 @@ def main():
             "mean_lambda_state": float(pd.to_numeric(fdr_df.get("lambda_state", 0.0), errors="coerce").fillna(0.0).mean()),
             "median_lambda_state": float(pd.to_numeric(fdr_df.get("lambda_state", 0.0), errors="coerce").fillna(0.0).median()),
             "lambda_state_status_counts": {str(k): int(v) for k, v in fdr_df.get("lambda_state_status", pd.Series(dtype="object")).fillna("").value_counts().to_dict().items()},
+            "mean_effective_sample_size": float(pd.to_numeric(fdr_df.get("effective_sample_size", 0.0), errors="coerce").fillna(0.0).mean()),
+            "mean_weight_age_days": float(pd.to_numeric(fdr_df.get("mean_weight_age_days", 0.0), errors="coerce").fillna(0.0).mean()),
+            "mean_time_decay_tau_days": float(pd.to_numeric(fdr_df.get("time_decay_tau_days", 0.0), errors="coerce").fillna(0.0).mean()),
+            "mean_time_decay_learning_rate": float(pd.to_numeric(fdr_df.get("time_decay_learning_rate", 0.0), errors="coerce").fillna(0.0).mean()),
         },
     }
 

@@ -26,6 +26,7 @@ from pipelines._lib.ontology_contract import (
     validate_state_registry_source_events,
     validate_candidate_templates_schema,
 )
+from events.registry import EVENT_REGISTRY_SPECS
 
 def _load_global_defaults() -> Dict[str, Any]:
     return load_global_defaults(project_root=PROJECT_ROOT)
@@ -337,6 +338,108 @@ def _state_registry_rows(state_registry: Dict[str, Any]) -> List[Dict[str, Any]]
     return []
 
 
+def _iter_family_events(families: Dict[str, Any]) -> List[tuple[str, Dict[str, Any]]]:
+    out: List[tuple[str, Dict[str, Any]]] = []
+    if not isinstance(families, dict):
+        return out
+    for _, family_cfg in families.items():
+        if not isinstance(family_cfg, dict):
+            continue
+        events_raw = family_cfg.get("events", [])
+        if isinstance(events_raw, dict):
+            for ev_key, ev_meta in events_raw.items():
+                ev = _norm_label(ev_key)
+                if not ev:
+                    continue
+                out.append((ev, ev_meta if isinstance(ev_meta, dict) else {}))
+        elif isinstance(events_raw, list):
+            for item in events_raw:
+                if isinstance(item, str):
+                    ev = _norm_label(item)
+                    if ev:
+                        out.append((ev, {}))
+                elif isinstance(item, dict):
+                    ev = _norm_label(item.get("event_type") or item.get("event_id") or item.get("id") or "")
+                    if ev:
+                        out.append((ev, item))
+    return out
+
+
+def _collect_planned_events(
+    taxonomy: Dict[str, Any],
+    canonical_registry: Dict[str, Any],
+) -> set[str]:
+    planned: set[str] = set()
+    for key in ("planned_events", "planned_event_types"):
+        for source in (taxonomy, canonical_registry):
+            value = source.get(key, []) if isinstance(source, dict) else []
+            if isinstance(value, list):
+                planned.update({_norm_label(x) for x in value if str(x).strip()})
+
+    impl_by_event = taxonomy.get("implementation_status_by_event", {}) if isinstance(taxonomy, dict) else {}
+    if isinstance(impl_by_event, dict):
+        for ev, status in impl_by_event.items():
+            if str(status).strip().lower() in {"planned", "roadmap", "future"}:
+                planned.add(_norm_label(ev))
+
+    for ev, meta in _iter_family_events(taxonomy.get("families", {})):
+        status = str(meta.get("implementation_status", meta.get("status", ""))).strip().lower()
+        if status in {"planned", "roadmap", "future"}:
+            planned.add(ev)
+    for ev, meta in _iter_family_events(canonical_registry.get("families", {})):
+        status = str(meta.get("implementation_status", meta.get("status", ""))).strip().lower()
+        if status in {"planned", "roadmap", "future"}:
+            planned.add(ev)
+
+    return {x for x in planned if x}
+
+
+def _collect_family_event_types(doc: Dict[str, Any]) -> set[str]:
+    out: set[str] = set()
+    for ev, _ in _iter_family_events(doc.get("families", {}) if isinstance(doc, dict) else {}):
+        if ev:
+            out.add(ev)
+    return out
+
+
+def _implemented_registry_event_types() -> set[str]:
+    return {_norm_label(ev) for ev in EVENT_REGISTRY_SPECS.keys() if str(ev).strip()}
+
+
+def _validate_implemented_event_contract(
+    *,
+    taxonomy: Dict[str, Any],
+    canonical_registry: Dict[str, Any],
+    allow_planned: bool,
+) -> Dict[str, List[str]]:
+    implemented = _implemented_registry_event_types()
+    taxonomy_events = _collect_family_event_types(taxonomy)
+    canonical_events = _collect_family_event_types(canonical_registry)
+    planned_events = _collect_planned_events(taxonomy, canonical_registry)
+
+    taxonomy_unimplemented = sorted(
+        ev for ev in taxonomy_events
+        if ev not in implemented and (not allow_planned or ev not in planned_events)
+    )
+    canonical_unimplemented = sorted(
+        ev for ev in canonical_events
+        if ev not in implemented and (not allow_planned or ev not in planned_events)
+    )
+    planned_unimplemented = sorted(
+        ev for ev in (taxonomy_events | canonical_events)
+        if ev not in implemented and ev in planned_events
+    )
+    return {
+        "implemented_event_types": sorted(implemented),
+        "taxonomy_events": sorted(taxonomy_events),
+        "canonical_registry_events": sorted(canonical_events),
+        "planned_events": sorted(planned_events),
+        "taxonomy_unimplemented_nonplanned": taxonomy_unimplemented,
+        "canonical_unimplemented_nonplanned": canonical_unimplemented,
+        "planned_unimplemented_events": planned_unimplemented,
+    }
+
+
 def _get_templates_for_event(event_type: str, taxonomy: Optional[Dict[str, Any]] = None) -> List[str]:
     """Determine rule templates for a given event type based on taxonomy."""
     if taxonomy is None:
@@ -414,6 +517,18 @@ def main() -> int:
         default=(1 if str(os.getenv("CI", "")).strip() else 0),
         help="Fail closed on ontology spec/template mismatches (default: 1 in CI, else 0).",
     )
+    parser.add_argument(
+        "--implemented_only_events",
+        type=int,
+        default=1,
+        help="If 1, only generate event templates for active registry-backed events.",
+    )
+    parser.add_argument(
+        "--allow_planned_unimplemented",
+        type=int,
+        default=1,
+        help="If 1, planned (roadmap) events are allowed in taxonomy/registry validation output without strict failure.",
+    )
     args = parser.parse_args()
 
     atlas_dir = PROJECT_ROOT.parent / args.atlas_dir
@@ -429,6 +544,8 @@ def main() -> int:
         
         df = pd.read_csv(backlog_path)
         strict_ontology = bool(int(args.ontology_strict))
+        implemented_only_events = bool(int(args.implemented_only_events))
+        allow_planned_unimplemented = bool(int(args.allow_planned_unimplemented))
         taxonomy = _load_taxonomy(strict=strict_ontology)
         canonical_registry = _load_canonical_event_registry(strict=strict_ontology)
         state_registry = _load_state_registry(strict=strict_ontology)
@@ -438,6 +555,21 @@ def main() -> int:
         event_ontology_index = _build_event_ontology_index(taxonomy, state_registry)
         canonical_event_info = _build_canonical_event_info(canonical_registry)
         canonical_events = set(canonical_event_info.keys())
+        implemented_contract = _validate_implemented_event_contract(
+            taxonomy=taxonomy,
+            canonical_registry=canonical_registry,
+            allow_planned=allow_planned_unimplemented,
+        )
+        implemented_events = set(implemented_contract["implemented_event_types"])
+        nonplanned_unimplemented = sorted(
+            set(implemented_contract["taxonomy_unimplemented_nonplanned"])
+            | set(implemented_contract["canonical_unimplemented_nonplanned"])
+        )
+        if strict_ontology and nonplanned_unimplemented:
+            raise ValueError(
+                "Unimplemented non-planned events in ontology specs: "
+                + ", ".join(nonplanned_unimplemented)
+            )
         state_registry_issues = validate_state_registry_source_events(
             state_registry=state_registry,
             canonical_event_types=canonical_events,
@@ -477,6 +609,7 @@ def main() -> int:
         
         candidate_templates = []
         spec_tasks = []
+        skipped_event_claims: List[Dict[str, str]] = []
         
         print("Iterating over active claims...")
         for i, row in active_claims.iterrows():
@@ -501,6 +634,25 @@ def main() -> int:
                         strict=strict_ontology,
                     )
                     event_type = str(ontology_ctx["canonical_event_type"])
+                    if implemented_only_events and event_type not in implemented_events:
+                        reason = (
+                            "planned_unimplemented_event"
+                            if event_type in set(implemented_contract["planned_events"])
+                            else "unimplemented_event"
+                        )
+                        if strict_ontology and reason == "unimplemented_event":
+                            raise ValueError(
+                                f"Claim {claim_id} resolved to non-implemented event {event_type} "
+                                f"outside active registry contract."
+                            )
+                        skipped_event_claims.append(
+                            {
+                                "claim_id": claim_id,
+                                "event_type": event_type,
+                                "reason": reason,
+                            }
+                        )
+                        continue
                     
                     target_path = target_pattern.replace("{event_type}", event_type)
                     spec_exists = (PROJECT_ROOT.parent / target_path).exists()
@@ -696,6 +848,8 @@ def main() -> int:
                 "events_total": int(len(event_types_generated)),
                 "events_in_taxonomy": int(len(events_in_taxonomy)),
                 "events_in_canonical_registry": int(len(events_in_canonical_registry)),
+                "events_in_implemented_contract": int(len(sorted(set(event_types_generated) & set(implemented_contract["implemented_event_types"])))),
+                "implemented_event_types_total": int(len(implemented_contract["implemented_event_types"])),
                 "templates_total": int(len(templates_df)),
                 "event_templates_total": int((templates_df.get("object_type") == "event").sum()) if not templates_df.empty else 0,
                 "feature_templates_total": int((templates_df.get("object_type") == "feature").sum()) if not templates_df.empty else 0,
@@ -708,12 +862,23 @@ def main() -> int:
                         & (~templates_df.get("ontology_fully_known", False))
                     ].shape[0]
                 ) if not templates_df.empty and "ontology_fully_known" in templates_df.columns else 0,
+                "event_claims_skipped_unimplemented": int(len(skipped_event_claims)),
             },
             "unresolved": {
                 "events_missing_in_canonical_registry": events_missing_in_canonical_registry,
                 "templates_missing_in_verb_lexicon": unknown_templates_list,
                 "states_with_missing_source_event": states_with_missing_source_event,
                 "state_registry_validation_issues": state_registry_issues,
+                "taxonomy_unimplemented_nonplanned": implemented_contract["taxonomy_unimplemented_nonplanned"],
+                "canonical_unimplemented_nonplanned": implemented_contract["canonical_unimplemented_nonplanned"],
+                "planned_unimplemented_events": implemented_contract["planned_unimplemented_events"],
+                "skipped_event_claims": skipped_event_claims,
+            },
+            "implementation_contract": {
+                "implemented_only_events": implemented_only_events,
+                "allow_planned_unimplemented": allow_planned_unimplemented,
+                "implemented_event_types": implemented_contract["implemented_event_types"],
+                "planned_events": implemented_contract["planned_events"],
             },
         }
         with (atlas_dir / "ontology_linkage.json").open("w", encoding="utf-8") as f:
@@ -740,9 +905,12 @@ def main() -> int:
             "templates_count": len(candidate_templates),
             "spec_tasks_count": len(spec_tasks),
             "ontology_strict": int(strict_ontology),
+            "implemented_only_events": int(implemented_only_events),
             "ontology_spec_hash": ontology_hash,
             "ontology_event_count": int(len(event_ontology_index)),
             "ontology_canonical_registry_event_count": int(len(canonical_events)),
+            "implemented_event_types_total": int(len(implemented_contract["implemented_event_types"])),
+            "event_claims_skipped_unimplemented": int(len(skipped_event_claims)),
         })
         return 0
 

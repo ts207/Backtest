@@ -306,6 +306,8 @@ def test_ontology_linkage_manifest_counts_and_unresolved_match_parquet(tmp_path)
         str(atlas_dir),
         "--ontology_strict",
         "0",
+        "--implemented_only_events",
+        "0",
     ]
 
     with patch.object(gct, "_load_taxonomy", return_value=taxonomy):
@@ -655,3 +657,136 @@ def test_event_ontology_context_prefers_canonical_family_and_flags_mismatch():
             verb_lexicon=verb_lexicon,
             strict=True,
         )
+
+
+def test_generate_candidate_templates_strict_fails_on_unimplemented_nonplanned_ontology_event(tmp_path):
+    backlog_path = tmp_path / "backlog.csv"
+    pd.DataFrame(
+        [
+            {
+                "claim_id": "CL_IMPL_001",
+                "concept_id": "C_IMPL",
+                "operationalizable": "Y",
+                "status": "unverified",
+                "candidate_type": "event",
+                "statement_summary": 'payload {""event_type"": ""CROSS_VENUE_DESYNC""}',
+                "next_artifact": "spec/events/{event_type}.yaml",
+                "priority_score": 1,
+                "assets": "*",
+            }
+        ]
+    ).to_csv(backlog_path, index=False)
+    atlas_dir = tmp_path / "atlas"
+    atlas_dir.mkdir()
+
+    import pipelines.research.generate_candidate_templates as gct
+
+    taxonomy = {
+        "families": {
+            "INFORMATION_DESYNC": {
+                "events": ["CROSS_VENUE_DESYNC", "FUTURE_EVENT"],
+                "runtime_templates": ["desync_repair"],
+            }
+        }
+    }
+    canonical_registry = {
+        "families": {
+            "INFORMATION_DESYNC": {
+                "events": ["CROSS_VENUE_DESYNC", "FUTURE_EVENT"],
+            }
+        }
+    }
+    state_registry = {"states": []}
+    verb_lexicon = {"verbs": {"cross_signal_relative_value": ["desync_repair"]}}
+
+    test_args = [
+        "generate_candidate_templates.py",
+        "--backlog",
+        str(backlog_path),
+        "--atlas_dir",
+        str(atlas_dir),
+        "--ontology_strict",
+        "1",
+    ]
+
+    with patch.object(gct, "_load_taxonomy", return_value=taxonomy):
+        with patch.object(gct, "_load_canonical_event_registry", return_value=canonical_registry):
+            with patch.object(gct, "_load_state_registry", return_value=state_registry):
+                with patch.object(gct, "_load_template_verb_lexicon", return_value=verb_lexicon):
+                    with patch.object(gct, "_implemented_registry_event_types", return_value={"CROSS_VENUE_DESYNC"}):
+                        with patch.object(sys, "argv", test_args):
+                            rc = gct.main()
+    assert rc == 1
+    assert not (atlas_dir / "candidate_templates.parquet").exists()
+
+
+def test_generate_candidate_templates_planned_unimplemented_is_skipped_but_allowed(tmp_path):
+    backlog_path = tmp_path / "backlog.csv"
+    pd.DataFrame(
+        [
+            {
+                "claim_id": "CL_PLAN_001",
+                "concept_id": "C_PLAN",
+                "operationalizable": "Y",
+                "status": "unverified",
+                "candidate_type": "event",
+                "statement_summary": 'payload {""event_type"": ""FUTURE_EVENT""}',
+                "next_artifact": "spec/events/{event_type}.yaml",
+                "priority_score": 1,
+                "assets": "*",
+            }
+        ]
+    ).to_csv(backlog_path, index=False)
+    atlas_dir = tmp_path / "atlas"
+    atlas_dir.mkdir()
+
+    import pipelines.research.generate_candidate_templates as gct
+
+    taxonomy = {
+        "planned_events": ["FUTURE_EVENT"],
+        "families": {
+            "INFORMATION_DESYNC": {
+                "events": ["FUTURE_EVENT"],
+                "runtime_templates": ["desync_repair"],
+            }
+        },
+    }
+    canonical_registry = {
+        "planned_events": ["FUTURE_EVENT"],
+        "families": {
+            "INFORMATION_DESYNC": {
+                "events": ["FUTURE_EVENT"],
+            }
+        },
+    }
+    state_registry = {"states": []}
+    verb_lexicon = {"verbs": {"cross_signal_relative_value": ["desync_repair"]}}
+
+    test_args = [
+        "generate_candidate_templates.py",
+        "--backlog",
+        str(backlog_path),
+        "--atlas_dir",
+        str(atlas_dir),
+        "--ontology_strict",
+        "0",
+        "--implemented_only_events",
+        "1",
+        "--allow_planned_unimplemented",
+        "1",
+    ]
+
+    with patch.object(gct, "_load_taxonomy", return_value=taxonomy):
+        with patch.object(gct, "_load_canonical_event_registry", return_value=canonical_registry):
+            with patch.object(gct, "_load_state_registry", return_value=state_registry):
+                with patch.object(gct, "_load_template_verb_lexicon", return_value=verb_lexicon):
+                    with patch.object(gct, "_implemented_registry_event_types", return_value={"CROSS_VENUE_DESYNC"}):
+                        with patch.object(sys, "argv", test_args):
+                            rc = gct.main()
+    assert rc == 0
+    templates = pd.read_parquet(atlas_dir / "candidate_templates.parquet")
+    assert templates.empty
+    linkage = json.loads((atlas_dir / "ontology_linkage.json").read_text(encoding="utf-8"))
+    unresolved = linkage.get("unresolved", {})
+    assert unresolved.get("planned_unimplemented_events") == ["FUTURE_EVENT"]
+    assert int(linkage.get("counts", {}).get("event_claims_skipped_unimplemented", 0)) == 1
