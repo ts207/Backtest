@@ -95,6 +95,7 @@ PRIMARY_OUTPUT_COLUMNS = [
     "shrinkage_weight_family", "shrinkage_weight_event", "shrinkage_weight_state",
     "p_value_raw", "p_value_shrunk", "p_value_for_fdr", "std_return", "gate_state_information",
     "effective_sample_size", "time_weight_sum", "mean_weight_age_days", "time_decay_tau_days", "time_decay_learning_rate",
+    "time_decay_tau_up_days", "time_decay_tau_down_days", "time_decay_directional_ratio", "time_decay_directional_up_share",
     "lambda_family", "lambda_event", "lambda_state",
     "lambda_family_status", "lambda_event_status", "lambda_state_status",
 ]
@@ -136,6 +137,40 @@ _LIQUIDITY_STATE_MULTIPLIER: Dict[str, float] = {
     "NORMAL": 1.0,
     "RECOVERY": 1.2,
 }
+
+_DIRECTIONAL_ASYMMETRY_BY_FAMILY: Dict[str, Tuple[float, float]] = {
+    "LIQUIDITY_DISLOCATION": (1.1, 0.5),
+    "VOLATILITY_TRANSITION": (1.0, 0.9),
+    "POSITIONING_EXTREMES": (1.4, 0.7),
+    "FORCED_FLOW_AND_EXHAUSTION": (1.2, 0.8),
+    "FLOW_EXHAUSTION": (1.2, 0.8),
+    "TREND_STRUCTURE": (1.6, 0.8),
+    "REGIME_TRANSITION": (1.2, 0.8),
+}
+
+_EVENT_DIRECTION_NUMERIC_COLS: Tuple[str, ...] = (
+    "evt_event_direction",
+    "evt_direction",
+    "evt_signal_direction",
+    "evt_flow_direction",
+    "evt_breakout_direction",
+    "evt_shock_direction",
+    "evt_move_direction",
+    "evt_leader_direction",
+    "evt_return_1",
+    "evt_return_sign",
+    "evt_sign",
+    "evt_polarity",
+    "evt_funding_z",
+    "evt_basis_z",
+)
+
+_EVENT_DIRECTION_TEXT_COLS: Tuple[str, ...] = (
+    "evt_side",
+    "evt_trade_side",
+    "evt_signal_side",
+    "evt_direction_label",
+)
 
 
 def _resolve_tau_days(canonical_family: str, override_days: Optional[float]) -> float:
@@ -210,6 +245,83 @@ def _regime_conditioned_tau_days(
     tau *= float(_VOL_REGIME_MULTIPLIER.get(vol_key, 1.0))
     tau *= float(_LIQUIDITY_STATE_MULTIPLIER.get(liq_key, 1.0))
     return float(tau)
+
+
+def _direction_sign(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        num = float(value)
+        if np.isfinite(num) and num != 0.0:
+            return 1 if num > 0.0 else -1
+    except (TypeError, ValueError):
+        pass
+
+    token = str(value).strip().lower()
+    if not token:
+        return None
+    if token in {"1", "+1", "up", "long", "buy", "bull", "positive", "pos"}:
+        return 1
+    if token in {"-1", "down", "short", "sell", "bear", "negative", "neg"}:
+        return -1
+    return None
+
+
+def _event_direction_from_joined_row(
+    row: pd.Series,
+    *,
+    canonical_family: str,
+    fallback_direction: int,
+) -> int:
+    family_key = str(canonical_family or "").strip().upper()
+    for col in _EVENT_DIRECTION_NUMERIC_COLS:
+        if col not in row.index:
+            continue
+        sign = _direction_sign(row.get(col))
+        if sign is None:
+            continue
+        if family_key == "POSITIONING_EXTREMES" and col == "evt_funding_z":
+            return -sign
+        return sign
+    for col in _EVENT_DIRECTION_TEXT_COLS:
+        if col not in row.index:
+            continue
+        sign = _direction_sign(row.get(col))
+        if sign is not None:
+            return sign
+    return 1 if int(fallback_direction) >= 0 else -1
+
+
+def _asymmetric_tau_days(
+    *,
+    base_tau_days: float,
+    canonical_family: str,
+    direction: int,
+    default_up_mult: float,
+    default_down_mult: float,
+    min_ratio: float,
+    max_ratio: float,
+) -> Tuple[float, float, float, float]:
+    family_key = str(canonical_family or "").strip().upper()
+    up_mult, down_mult = _DIRECTIONAL_ASYMMETRY_BY_FAMILY.get(
+        family_key,
+        (float(default_up_mult), float(default_down_mult)),
+    )
+    up_mult = float(up_mult if up_mult > 0.0 else max(default_up_mult, 1e-6))
+    down_mult = float(down_mult if down_mult > 0.0 else max(default_down_mult, 1e-6))
+    ratio = up_mult / max(down_mult, 1e-9)
+    min_r = max(1.0, float(min_ratio))
+    max_r = max(min_r, float(max_ratio))
+    if ratio < min_r:
+        down_mult = up_mult / min_r
+    elif ratio > max_r:
+        down_mult = up_mult / max_r
+    ratio = up_mult / max(down_mult, 1e-9)
+
+    tau_up = float(base_tau_days) * up_mult
+    tau_down = float(base_tau_days) * down_mult
+    tau_eff = tau_up if int(direction) >= 0 else tau_down
+    return float(tau_eff), float(tau_up), float(tau_down), float(ratio)
 
 
 def _make_family_id(
@@ -1064,7 +1176,30 @@ def _join_events_to_features(
 
     # Use merge_asof: for each event, find the latest feature bar <= event_ts
     extra_evt_cols = []
-    for col in ("vol_regime", "liquidity_state", "market_liquidity_state", "depth_state"):
+    for col in (
+        "vol_regime",
+        "liquidity_state",
+        "market_liquidity_state",
+        "depth_state",
+        "event_direction",
+        "direction",
+        "signal_direction",
+        "flow_direction",
+        "breakout_direction",
+        "shock_direction",
+        "move_direction",
+        "leader_direction",
+        "return_1",
+        "return_sign",
+        "sign",
+        "polarity",
+        "funding_z",
+        "basis_z",
+        "side",
+        "trade_side",
+        "signal_side",
+        "direction_label",
+    ):
         if col in evt.columns:
             extra_evt_cols.append(col)
     evt_cols = ["_event_ts"] + extra_evt_cols
@@ -1096,6 +1231,12 @@ def calculate_expectancy_stats(
     regime_tau_smoothing_alpha: float = 0.15,
     regime_tau_min_days: float = 3.0,
     regime_tau_max_days: float = 365.0,
+    directional_asymmetry_decay: bool = False,
+    directional_tau_smoothing_alpha: float = 0.15,
+    directional_tau_min_ratio: float = 1.5,
+    directional_tau_max_ratio: float = 3.0,
+    directional_tau_default_up_mult: float = 1.25,
+    directional_tau_default_down_mult: float = 0.65,
 ) -> Dict[str, Any]:
     """
     Real PIT expectancy calculation.
@@ -1122,6 +1263,10 @@ def calculate_expectancy_stats(
             "mean_weight_age_days": 0.0,
             "mean_tau_days": 0.0,
             "learning_rate_mean": 0.0,
+            "mean_tau_up_days": 0.0,
+            "mean_tau_down_days": 0.0,
+            "tau_directional_ratio": 0.0,
+            "directional_up_share": 0.0,
         }
 
     if int(entry_lag_bars) < 1:
@@ -1145,6 +1290,10 @@ def calculate_expectancy_stats(
             "mean_weight_age_days": 0.0,
             "mean_tau_days": 0.0,
             "learning_rate_mean": 0.0,
+            "mean_tau_up_days": 0.0,
+            "mean_tau_down_days": 0.0,
+            "tau_directional_ratio": 0.0,
+            "directional_up_share": 0.0,
         }
 
     # Compute forward return at t0 using aligned feature rows.
@@ -1157,6 +1306,7 @@ def calculate_expectancy_stats(
     event_ts_list: List[pd.Timestamp] = []
     event_vol_list: List[Any] = []
     event_liq_list: List[Any] = []
+    event_dir_list: List[int] = []
     for _, row in merged.iterrows():
         ts = row["timestamp"]
         # Find position of this feature row in features_df
@@ -1182,6 +1332,13 @@ def calculate_expectancy_stats(
         event_ts_list.append(pd.to_datetime(ts, utc=True, errors="coerce"))
         event_vol_list.append(row.get("evt_vol_regime", ""))
         event_liq_list.append(row.get("evt_liquidity_state", row.get("evt_market_liquidity_state", row.get("evt_depth_state", ""))))
+        event_dir_list.append(
+            _event_direction_from_joined_row(
+                row,
+                canonical_family=canonical_family,
+                fallback_direction=direction,
+            )
+        )
 
     if len(event_returns) < min_samples:
         std_ret = float(pd.Series(event_returns, dtype=float).std()) if len(event_returns) > 1 else 0.0
@@ -1198,30 +1355,57 @@ def calculate_expectancy_stats(
             "mean_weight_age_days": 0.0,
             "mean_tau_days": 0.0,
             "learning_rate_mean": 0.0,
+            "mean_tau_up_days": 0.0,
+            "mean_tau_down_days": 0.0,
+            "tau_directional_ratio": 0.0,
+            "directional_up_share": 0.0,
         }
 
     returns_series = pd.Series(event_returns, dtype=float)
     ts_series = pd.to_datetime(pd.Series(event_ts_list), utc=True, errors="coerce")
+    tau_days_list: List[float] = []
+    direction_used: List[int] = []
+    asymmetry_ratio_used: List[float] = []
     if bool(time_decay_enabled):
         ref_ts = ts_series.max()
         tau_seconds_default = float(time_decay_tau_seconds or (60.0 * 60.0 * 24.0 * 60.0))
-        if bool(regime_conditioned_decay):
-            tau_days_list: List[float] = []
+        if bool(regime_conditioned_decay) or bool(directional_asymmetry_decay):
             prev_tau_days: Optional[float] = None
-            alpha = max(0.0, min(1.0, float(regime_tau_smoothing_alpha)))
-            for vol_regime, liq_state in zip(event_vol_list, event_liq_list):
-                raw_tau_days = _regime_conditioned_tau_days(
-                    canonical_family=canonical_family,
-                    vol_regime=vol_regime,
-                    liquidity_state=liq_state,
-                    base_tau_days_override=(tau_seconds_default / 86400.0),
-                )
+            alpha_src = regime_tau_smoothing_alpha if bool(regime_conditioned_decay) else directional_tau_smoothing_alpha
+            alpha = max(0.0, min(1.0, float(alpha_src)))
+            for vol_regime, liq_state, evt_dir in zip(event_vol_list, event_liq_list, event_dir_list):
+                if bool(regime_conditioned_decay):
+                    base_tau_days = _regime_conditioned_tau_days(
+                        canonical_family=canonical_family,
+                        vol_regime=vol_regime,
+                        liquidity_state=liq_state,
+                        base_tau_days_override=(tau_seconds_default / 86400.0),
+                    )
+                    base_tau_days = float(np.clip(base_tau_days, float(regime_tau_min_days), float(regime_tau_max_days)))
+                else:
+                    base_tau_days = float(tau_seconds_default / 86400.0)
+
+                if bool(directional_asymmetry_decay):
+                    raw_tau_days, _, _, asym_ratio = _asymmetric_tau_days(
+                        base_tau_days=base_tau_days,
+                        canonical_family=canonical_family,
+                        direction=int(evt_dir),
+                        default_up_mult=float(directional_tau_default_up_mult),
+                        default_down_mult=float(directional_tau_default_down_mult),
+                        min_ratio=float(directional_tau_min_ratio),
+                        max_ratio=float(directional_tau_max_ratio),
+                    )
+                    asymmetry_ratio_used.append(float(asym_ratio))
+                else:
+                    raw_tau_days = float(base_tau_days)
+
                 raw_tau_days = float(np.clip(raw_tau_days, float(regime_tau_min_days), float(regime_tau_max_days)))
                 if prev_tau_days is None:
                     smoothed_tau_days = raw_tau_days
                 else:
                     smoothed_tau_days = ((1.0 - alpha) * prev_tau_days) + (alpha * raw_tau_days)
                 tau_days_list.append(float(smoothed_tau_days))
+                direction_used.append(1 if int(evt_dir) >= 0 else -1)
                 prev_tau_days = float(smoothed_tau_days)
             tau_seconds_arr = np.array(tau_days_list, dtype=float) * 86400.0
             age_seconds = (ref_ts - ts_series).dt.total_seconds().fillna(0.0).clip(lower=0.0).values
@@ -1268,7 +1452,7 @@ def calculate_expectancy_stats(
         ref_ts = ts_series.max()
         age_days = (ref_ts - ts_series).dt.total_seconds().fillna(0.0).clip(lower=0.0) / 86400.0
         mean_weight_age_days = float((age_days * weights).sum() / max(float(weights.sum()), 1e-12))
-        if bool(regime_conditioned_decay):
+        if bool(regime_conditioned_decay) or bool(directional_asymmetry_decay):
             tau_days_vals = np.maximum(np.array(tau_days_list, dtype=float), 1e-9)
             mean_tau_days = float(np.mean(tau_days_vals))
             learning_rate_mean = float(np.mean(1.0 / tau_days_vals))
@@ -1280,6 +1464,29 @@ def calculate_expectancy_stats(
         mean_weight_age_days = 0.0
         mean_tau_days = 0.0
         learning_rate_mean = 0.0
+
+    if direction_used and tau_days_list:
+        tau_arr = np.array(tau_days_list, dtype=float)
+        dir_arr = np.array(direction_used, dtype=int)
+        up_vals = tau_arr[dir_arr >= 0]
+        down_vals = tau_arr[dir_arr < 0]
+        mean_tau_up_days = float(np.mean(up_vals)) if up_vals.size else 0.0
+        mean_tau_down_days = float(np.mean(down_vals)) if down_vals.size else 0.0
+        tau_directional_ratio = (
+            float(np.mean(asymmetry_ratio_used))
+            if asymmetry_ratio_used
+            else (
+                float(mean_tau_up_days / max(mean_tau_down_days, 1e-9))
+                if (mean_tau_up_days > 0.0 and mean_tau_down_days > 0.0)
+                else 0.0
+            )
+        )
+        directional_up_share = float((dir_arr >= 0).mean()) if dir_arr.size else 0.0
+    else:
+        mean_tau_up_days = 0.0
+        mean_tau_down_days = 0.0
+        tau_directional_ratio = 0.0
+        directional_up_share = 0.0
 
     return {
         "mean_return": mean_ret,
@@ -1293,6 +1500,10 @@ def calculate_expectancy_stats(
         "mean_weight_age_days": mean_weight_age_days,
         "mean_tau_days": mean_tau_days,
         "learning_rate_mean": learning_rate_mean,
+        "mean_tau_up_days": mean_tau_up_days,
+        "mean_tau_down_days": mean_tau_down_days,
+        "tau_directional_ratio": tau_directional_ratio,
+        "directional_up_share": directional_up_share,
     }
 
 
@@ -1560,6 +1771,42 @@ def _make_parser() -> argparse.ArgumentParser:
         type=float,
         default=365.0,
         help="Maximum tau (days) after regime multipliers.",
+    )
+    parser.add_argument(
+        "--enable_directional_asymmetry_decay",
+        type=int,
+        default=1,
+        help="If 1, apply directional asymmetric decay (tau_up != tau_down).",
+    )
+    parser.add_argument(
+        "--directional_tau_smoothing_alpha",
+        type=float,
+        default=0.15,
+        help="EMA smoothing alpha for directional asymmetric tau transitions.",
+    )
+    parser.add_argument(
+        "--directional_tau_min_ratio",
+        type=float,
+        default=1.5,
+        help="Minimum allowed tau_up / tau_down ratio.",
+    )
+    parser.add_argument(
+        "--directional_tau_max_ratio",
+        type=float,
+        default=3.0,
+        help="Maximum allowed tau_up / tau_down ratio.",
+    )
+    parser.add_argument(
+        "--directional_tau_default_up_mult",
+        type=float,
+        default=1.25,
+        help="Default directional multiplier for upside memory.",
+    )
+    parser.add_argument(
+        "--directional_tau_default_down_mult",
+        type=float,
+        default=0.65,
+        help="Default directional multiplier for downside memory.",
     )
     parser.add_argument(
         "--lambda_smoothing_alpha",
@@ -2080,6 +2327,12 @@ def main():
                 regime_tau_smoothing_alpha=float(args.regime_tau_smoothing_alpha),
                 regime_tau_min_days=float(args.regime_tau_min_days),
                 regime_tau_max_days=float(args.regime_tau_max_days),
+                directional_asymmetry_decay=bool(int(args.enable_directional_asymmetry_decay)),
+                directional_tau_smoothing_alpha=float(args.directional_tau_smoothing_alpha),
+                directional_tau_min_ratio=float(args.directional_tau_min_ratio),
+                directional_tau_max_ratio=float(args.directional_tau_max_ratio),
+                directional_tau_default_up_mult=float(args.directional_tau_default_up_mult),
+                directional_tau_default_down_mult=float(args.directional_tau_default_down_mult),
             )
             effect = float(exp_stats["mean_return"])
             pval = float(exp_stats["p_value"])
@@ -2091,6 +2344,10 @@ def main():
             time_weight_sum = float(exp_stats.get("time_weight_sum", n_joined))
             mean_tau_days = float(exp_stats.get("mean_tau_days", tau_days))
             learning_rate_mean = float(exp_stats.get("learning_rate_mean", 0.0))
+            mean_tau_up_days = float(exp_stats.get("mean_tau_up_days", 0.0))
+            mean_tau_down_days = float(exp_stats.get("mean_tau_down_days", 0.0))
+            tau_directional_ratio = float(exp_stats.get("tau_directional_ratio", 0.0))
+            directional_up_share = float(exp_stats.get("directional_up_share", 0.0))
             
             # Helper to add results with Atlas lineage
             cost_estimate = cost_calibrator.estimate(symbol=symbol, events_df=bucket_events)
@@ -2180,6 +2437,10 @@ def main():
                 "mean_weight_age_days": mean_weight_age_days,
                 "time_decay_tau_days": mean_tau_days if bool(int(args.enable_time_decay)) else 0.0,
                 "time_decay_learning_rate": learning_rate_mean if bool(int(args.enable_time_decay)) else 0.0,
+                "time_decay_tau_up_days": mean_tau_up_days if bool(int(args.enable_time_decay)) else 0.0,
+                "time_decay_tau_down_days": mean_tau_down_days if bool(int(args.enable_time_decay)) else 0.0,
+                "time_decay_directional_ratio": tau_directional_ratio if bool(int(args.enable_time_decay)) else 0.0,
+                "time_decay_directional_up_share": directional_up_share if bool(int(args.enable_time_decay)) else 0.0,
                 "std_return": std_return,
                 "sign": 1 if effect > 0 else -1,
                 "gate_economic": econ_pass,
@@ -2257,6 +2518,12 @@ def main():
                         regime_tau_smoothing_alpha=float(args.regime_tau_smoothing_alpha),
                         regime_tau_min_days=float(args.regime_tau_min_days),
                         regime_tau_max_days=float(args.regime_tau_max_days),
+                        directional_asymmetry_decay=bool(int(args.enable_directional_asymmetry_decay)),
+                        directional_tau_smoothing_alpha=float(args.directional_tau_smoothing_alpha),
+                        directional_tau_min_ratio=float(args.directional_tau_min_ratio),
+                        directional_tau_max_ratio=float(args.directional_tau_max_ratio),
+                        directional_tau_default_up_mult=float(args.directional_tau_default_up_mult),
+                        directional_tau_default_down_mult=float(args.directional_tau_default_down_mult),
                     )
                     effect = float(exp_stats["mean_return"])
                     pval = float(exp_stats["p_value"])
@@ -2268,6 +2535,10 @@ def main():
                     time_weight_sum = float(exp_stats.get("time_weight_sum", n_joined))
                     mean_tau_days = float(exp_stats.get("mean_tau_days", tau_days))
                     learning_rate_mean = float(exp_stats.get("learning_rate_mean", 0.0))
+                    mean_tau_up_days = float(exp_stats.get("mean_tau_up_days", 0.0))
+                    mean_tau_down_days = float(exp_stats.get("mean_tau_down_days", 0.0))
+                    tau_directional_ratio = float(exp_stats.get("tau_directional_ratio", 0.0))
+                    directional_up_share = float(exp_stats.get("directional_up_share", 0.0))
                     
                     def _add_res(
                         eff,
@@ -2280,6 +2551,10 @@ def main():
                         weight_sum,
                         tau_days_local,
                         learning_rate_local,
+                        tau_up_days_local,
+                        tau_down_days_local,
+                        tau_directional_ratio_local,
+                        directional_up_share_local,
                         bucket_events_for_cost,
                         cond_name="all",
                     ):
@@ -2378,6 +2653,10 @@ def main():
                             "mean_weight_age_days": float(mean_age_days),
                             "time_decay_tau_days": float(tau_days_local) if bool(int(args.enable_time_decay)) else 0.0,
                             "time_decay_learning_rate": float(learning_rate_local) if bool(int(args.enable_time_decay)) else 0.0,
+                            "time_decay_tau_up_days": float(tau_up_days_local) if bool(int(args.enable_time_decay)) else 0.0,
+                            "time_decay_tau_down_days": float(tau_down_days_local) if bool(int(args.enable_time_decay)) else 0.0,
+                            "time_decay_directional_ratio": float(tau_directional_ratio_local) if bool(int(args.enable_time_decay)) else 0.0,
+                            "time_decay_directional_up_share": float(directional_up_share_local) if bool(int(args.enable_time_decay)) else 0.0,
                             "std_return": float(std_ret),
                             "sign": 1 if eff > 0 else -1,
                             "gate_economic": ec_pass,
@@ -2420,6 +2699,10 @@ def main():
                         time_weight_sum,
                         mean_tau_days,
                         learning_rate_mean,
+                        mean_tau_up_days,
+                        mean_tau_down_days,
+                        tau_directional_ratio,
+                        directional_up_share,
                         sym_all_events,
                         "all",
                     )
@@ -2457,6 +2740,12 @@ def main():
                                 regime_tau_smoothing_alpha=float(args.regime_tau_smoothing_alpha),
                                 regime_tau_min_days=float(args.regime_tau_min_days),
                                 regime_tau_max_days=float(args.regime_tau_max_days),
+                                directional_asymmetry_decay=bool(int(args.enable_directional_asymmetry_decay)),
+                                directional_tau_smoothing_alpha=float(args.directional_tau_smoothing_alpha),
+                                directional_tau_min_ratio=float(args.directional_tau_min_ratio),
+                                directional_tau_max_ratio=float(args.directional_tau_max_ratio),
+                                directional_tau_default_up_mult=float(args.directional_tau_default_up_mult),
+                                directional_tau_default_down_mult=float(args.directional_tau_default_down_mult),
                             )
                             eff_b = float(exp_stats_bucket["mean_return"])
                             pv_b = float(exp_stats_bucket["p_value"])
@@ -2468,6 +2757,10 @@ def main():
                             weight_sum_b = float(exp_stats_bucket.get("time_weight_sum", n_b))
                             mean_tau_b = float(exp_stats_bucket.get("mean_tau_days", tau_days))
                             learning_rate_b = float(exp_stats_bucket.get("learning_rate_mean", 0.0))
+                            mean_tau_up_b = float(exp_stats_bucket.get("mean_tau_up_days", 0.0))
+                            mean_tau_down_b = float(exp_stats_bucket.get("mean_tau_down_days", 0.0))
+                            tau_ratio_b = float(exp_stats_bucket.get("tau_directional_ratio", 0.0))
+                            up_share_b = float(exp_stats_bucket.get("directional_up_share", 0.0))
                             _add_res(
                                 eff_b,
                                 pv_b,
@@ -2479,6 +2772,10 @@ def main():
                                 weight_sum_b,
                                 mean_tau_b,
                                 learning_rate_b,
+                                mean_tau_up_b,
+                                mean_tau_down_b,
+                                tau_ratio_b,
+                                up_share_b,
                                 bucket_events,
                                 f"{col}_{val}",
                             )
@@ -2614,6 +2911,10 @@ def main():
         "mean_weight_age_days",
         "time_decay_tau_days",
         "time_decay_learning_rate",
+        "time_decay_tau_up_days",
+        "time_decay_tau_down_days",
+        "time_decay_directional_ratio",
+        "time_decay_directional_up_share",
         "lambda_state",
         "lambda_state_status",
         "shrinkage_weight_state",
@@ -2668,6 +2969,12 @@ def main():
             "regime_tau_smoothing_alpha": float(args.regime_tau_smoothing_alpha),
             "regime_tau_min_days": float(args.regime_tau_min_days),
             "regime_tau_max_days": float(args.regime_tau_max_days),
+            "enable_directional_asymmetry_decay": bool(int(args.enable_directional_asymmetry_decay)),
+            "directional_tau_smoothing_alpha": float(args.directional_tau_smoothing_alpha),
+            "directional_tau_min_ratio": float(args.directional_tau_min_ratio),
+            "directional_tau_max_ratio": float(args.directional_tau_max_ratio),
+            "directional_tau_default_up_mult": float(args.directional_tau_default_up_mult),
+            "directional_tau_default_down_mult": float(args.directional_tau_default_down_mult),
             "lambda_smoothing_alpha": float(args.lambda_smoothing_alpha),
             "lambda_shock_cap_pct": float(args.lambda_shock_cap_pct),
             "min_information_weight_state": float(args.min_information_weight_state),
@@ -2692,6 +2999,10 @@ def main():
             "mean_weight_age_days": float(pd.to_numeric(fdr_df.get("mean_weight_age_days", 0.0), errors="coerce").fillna(0.0).mean()),
             "mean_time_decay_tau_days": float(pd.to_numeric(fdr_df.get("time_decay_tau_days", 0.0), errors="coerce").fillna(0.0).mean()),
             "mean_time_decay_learning_rate": float(pd.to_numeric(fdr_df.get("time_decay_learning_rate", 0.0), errors="coerce").fillna(0.0).mean()),
+            "mean_time_decay_tau_up_days": float(pd.to_numeric(fdr_df.get("time_decay_tau_up_days", 0.0), errors="coerce").fillna(0.0).mean()),
+            "mean_time_decay_tau_down_days": float(pd.to_numeric(fdr_df.get("time_decay_tau_down_days", 0.0), errors="coerce").fillna(0.0).mean()),
+            "mean_time_decay_directional_ratio": float(pd.to_numeric(fdr_df.get("time_decay_directional_ratio", 0.0), errors="coerce").fillna(0.0).mean()),
+            "mean_time_decay_directional_up_share": float(pd.to_numeric(fdr_df.get("time_decay_directional_up_share", 0.0), errors="coerce").fillna(0.0).mean()),
         },
     }
 

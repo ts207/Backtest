@@ -4,6 +4,7 @@ import pandas as pd
 
 from pipelines.research.phase2_candidate_discovery import (
     _apply_hierarchical_shrinkage,
+    _asymmetric_tau_days,
     _effective_sample_size,
     _estimate_adaptive_lambda,
     _regime_conditioned_tau_days,
@@ -301,6 +302,32 @@ def test_regime_conditioned_tau_mapping_contract():
     assert abs(tau - 25.2) < 1e-9
 
 
+def test_directional_asymmetric_tau_contract():
+    tau_up_eff, tau_up, tau_down, ratio = _asymmetric_tau_days(
+        base_tau_days=60.0,
+        canonical_family="POSITIONING_EXTREMES",
+        direction=1,
+        default_up_mult=1.25,
+        default_down_mult=0.65,
+        min_ratio=1.5,
+        max_ratio=3.0,
+    )
+    tau_down_eff, _, _, _ = _asymmetric_tau_days(
+        base_tau_days=60.0,
+        canonical_family="POSITIONING_EXTREMES",
+        direction=-1,
+        default_up_mult=1.25,
+        default_down_mult=0.65,
+        min_ratio=1.5,
+        max_ratio=3.0,
+    )
+    assert abs(tau_up - 84.0) < 1e-9
+    assert abs(tau_down - 42.0) < 1e-9
+    assert abs(tau_up_eff - tau_up) < 1e-9
+    assert abs(tau_down_eff - tau_down) < 1e-9
+    assert 1.5 <= ratio <= 3.0
+
+
 def test_calculate_expectancy_stats_emits_regime_conditioned_tau_metrics():
     ts = pd.date_range("2026-01-01", periods=120, freq="5min", tz="UTC")
     features = pd.DataFrame({"timestamp": ts, "close": 100.0 + pd.Series(range(len(ts)), dtype=float)})
@@ -309,6 +336,7 @@ def test_calculate_expectancy_stats_emits_regime_conditioned_tau_metrics():
             "enter_ts": [ts[20], ts[40], ts[60], ts[80], ts[100]],
             "vol_regime": ["LOW_VOL_REGIME", "MID_VOL_REGIME", "HIGH_VOL_REGIME", "VOL_SHOCK_STATE", "HIGH_VOL_REGIME"],
             "liquidity_state": ["NORMAL_LIQUIDITY_STATE", "NORMAL_LIQUIDITY_STATE", "LOW_LIQUIDITY_STATE", "LOW_LIQUIDITY_STATE", "DEPTH_RECOVERY_STATE"],
+            "direction": [1, 1, -1, -1, 1],
         }
     )
 
@@ -326,7 +354,17 @@ def test_calculate_expectancy_stats_emits_regime_conditioned_tau_metrics():
         regime_tau_smoothing_alpha=0.15,
         regime_tau_min_days=3.0,
         regime_tau_max_days=365.0,
+        directional_asymmetry_decay=True,
+        directional_tau_smoothing_alpha=0.15,
+        directional_tau_min_ratio=1.5,
+        directional_tau_max_ratio=3.0,
+        directional_tau_default_up_mult=1.25,
+        directional_tau_default_down_mult=0.65,
     )
     assert stats["n_effective"] > 0.0
     assert stats["mean_tau_days"] > 0.0
     assert stats["learning_rate_mean"] > 0.0
+    assert stats["mean_tau_up_days"] > 0.0
+    assert stats["mean_tau_down_days"] > 0.0
+    assert stats["mean_tau_up_days"] > stats["mean_tau_down_days"]
+    assert 1.5 <= stats["tau_directional_ratio"] <= 3.0
