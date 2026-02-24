@@ -1,4 +1,6 @@
 event_type: "COPULA_PAIRS_TRADING"
+active: false
+status: planned
 description: "Pairs trading execution window triggered by copula mispricing index exceeding thresholds."
 reports_dir: "copula_pairs"
 signal_column: "copula_signal"

@@ -16,6 +16,22 @@ ONTOLOGY_SPEC_RELATIVE_PATHS: Dict[str, str] = {
     "template_verb_lexicon": "spec/hypotheses/template_verb_lexicon.yaml",
 }
 
+# State ids that are currently materialized as first-class context columns in
+# market_context_v1. This keeps planner/state filtering and audit behavior
+# deterministic and spec-driven.
+MATERIALIZED_STATE_COLUMNS_BY_ID: Dict[str, str] = {
+    "LOW_LIQUIDITY_STATE": "low_liquidity_state",
+    "SPREAD_ELEVATED_STATE": "spread_elevated_state",
+    "REFILL_LAG_STATE": "refill_lag_state",
+    "AFTERSHOCK_STATE": "aftershock_state",
+    "COMPRESSION_STATE": "compression_state_flag",
+    "HIGH_VOL_REGIME": "high_vol_regime",
+    "LOW_VOL_REGIME": "low_vol_regime",
+    "CROWDING_STATE": "crowding_state",
+    "FUNDING_PERSISTENCE_STATE": "funding_persistence_state",
+    "DELEVERAGING_STATE": "deleveraging_state",
+}
+
 
 def ontology_spec_paths(repo_root: Path) -> Dict[str, Path]:
     return {
@@ -284,6 +300,17 @@ def normalize_state_registry_records(state_registry: Dict[str, Any]) -> List[Dic
             }
         )
     return out
+
+
+def state_id_to_context_column(state_id: Any) -> str:
+    state = str(state_id or "").strip().upper()
+    if not state:
+        return ""
+    return MATERIALIZED_STATE_COLUMNS_BY_ID.get(state, state.lower())
+
+
+def materialized_state_ids() -> List[str]:
+    return sorted(MATERIALIZED_STATE_COLUMNS_BY_ID.keys())
 
 
 def validate_state_registry_source_events(

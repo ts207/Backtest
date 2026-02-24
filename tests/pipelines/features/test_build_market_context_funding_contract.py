@@ -58,3 +58,27 @@ def test_build_market_context_rejects_funding_gaps():
 
     with pytest.raises(ValueError, match="contains gaps"):
         build_market_context._build_market_context(symbol="BTCUSDT", features=features)
+
+
+def test_build_market_context_materializes_canonical_state_columns():
+    features = _feature_frame()
+    features["funding_rate_scaled"] = [0.0002, -0.0002, 0.0003, -0.0003]
+    features["spread_zscore"] = [0.5, 2.0, 2.5, 1.0]
+    features["oi_notional"] = [100.0, 150.0, 200.0, 250.0]
+    features["oi_delta_1h"] = [-10.0, -20.0, -5.0, -40.0]
+
+    out = build_market_context._build_market_context(symbol="BTCUSDT", features=features)
+
+    expected_state_cols = {
+        "low_liquidity_state",
+        "spread_elevated_state",
+        "refill_lag_state",
+        "aftershock_state",
+        "compression_state_flag",
+        "high_vol_regime",
+        "low_vol_regime",
+        "crowding_state",
+        "funding_persistence_state",
+        "deleveraging_state",
+    }
+    assert expected_state_cols.issubset(set(out.columns))

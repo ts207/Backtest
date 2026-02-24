@@ -394,6 +394,41 @@ def _collect_planned_events(
     return {x for x in planned if x}
 
 
+def _collect_declared_implemented_events(
+    taxonomy: Dict[str, Any],
+    canonical_registry: Dict[str, Any],
+) -> set[str]:
+    declared: set[str] = set()
+    for key in ("implemented_events", "implemented_event_types"):
+        for source in (taxonomy, canonical_registry):
+            value = source.get(key, []) if isinstance(source, dict) else []
+            if isinstance(value, list):
+                declared.update({_norm_label(x) for x in value if str(x).strip()})
+
+    impl_by_event = taxonomy.get("implementation_status_by_event", {}) if isinstance(taxonomy, dict) else {}
+    if isinstance(impl_by_event, dict):
+        for ev, status in impl_by_event.items():
+            if str(status).strip().lower() in {"implemented", "active"}:
+                declared.add(_norm_label(ev))
+    impl_by_event = canonical_registry.get("implementation_status_by_event", {}) if isinstance(canonical_registry, dict) else {}
+    if isinstance(impl_by_event, dict):
+        for ev, status in impl_by_event.items():
+            if str(status).strip().lower() in {"implemented", "active"}:
+                declared.add(_norm_label(ev))
+
+    for ev, meta in _iter_family_events(taxonomy.get("families", {})):
+        status = str(meta.get("implementation_status", meta.get("status", ""))).strip().lower()
+        implemented = meta.get("implemented")
+        if status in {"implemented", "active"} or bool(implemented):
+            declared.add(ev)
+    for ev, meta in _iter_family_events(canonical_registry.get("families", {})):
+        status = str(meta.get("implementation_status", meta.get("status", ""))).strip().lower()
+        implemented = meta.get("implemented")
+        if status in {"implemented", "active"} or bool(implemented):
+            declared.add(ev)
+    return {x for x in declared if x}
+
+
 def _collect_family_event_types(doc: Dict[str, Any]) -> set[str]:
     out: set[str] = set()
     for ev, _ in _iter_family_events(doc.get("families", {}) if isinstance(doc, dict) else {}):
@@ -415,7 +450,17 @@ def _validate_implemented_event_contract(
     implemented = _implemented_registry_event_types()
     taxonomy_events = _collect_family_event_types(taxonomy)
     canonical_events = _collect_family_event_types(canonical_registry)
+    ontology_events = taxonomy_events | canonical_events
     planned_events = _collect_planned_events(taxonomy, canonical_registry)
+    declared_implemented_events = _collect_declared_implemented_events(taxonomy, canonical_registry)
+    unlisted_default_planned = any(
+        str(source.get("unlisted_event_status", source.get("default_unlisted_event_status", ""))).strip().lower() == "planned"
+        for source in (taxonomy, canonical_registry)
+        if isinstance(source, dict)
+    )
+    if unlisted_default_planned:
+        planned_events.update({ev for ev in ontology_events if ev not in declared_implemented_events})
+    planned_events = {ev for ev in planned_events if ev}
 
     taxonomy_unimplemented = sorted(
         ev for ev in taxonomy_events
@@ -426,14 +471,20 @@ def _validate_implemented_event_contract(
         if ev not in implemented and (not allow_planned or ev not in planned_events)
     )
     planned_unimplemented = sorted(
-        ev for ev in (taxonomy_events | canonical_events)
+        ev for ev in ontology_events
         if ev not in implemented and ev in planned_events
+    )
+    declared_implemented_missing = sorted(
+        ev for ev in declared_implemented_events
+        if ev not in implemented
     )
     return {
         "implemented_event_types": sorted(implemented),
         "taxonomy_events": sorted(taxonomy_events),
         "canonical_registry_events": sorted(canonical_events),
         "planned_events": sorted(planned_events),
+        "declared_implemented_events": sorted(declared_implemented_events),
+        "declared_implemented_missing_in_registry": declared_implemented_missing,
         "taxonomy_unimplemented_nonplanned": taxonomy_unimplemented,
         "canonical_unimplemented_nonplanned": canonical_unimplemented,
         "planned_unimplemented_events": planned_unimplemented,
@@ -565,10 +616,16 @@ def main() -> int:
             set(implemented_contract["taxonomy_unimplemented_nonplanned"])
             | set(implemented_contract["canonical_unimplemented_nonplanned"])
         )
+        declared_implemented_missing = list(implemented_contract["declared_implemented_missing_in_registry"])
         if strict_ontology and nonplanned_unimplemented:
             raise ValueError(
                 "Unimplemented non-planned events in ontology specs: "
                 + ", ".join(nonplanned_unimplemented)
+            )
+        if strict_ontology and declared_implemented_missing:
+            raise ValueError(
+                "Events declared implemented in ontology but missing active registry specs: "
+                + ", ".join(declared_implemented_missing)
             )
         state_registry_issues = validate_state_registry_source_events(
             state_registry=state_registry,
@@ -610,6 +667,7 @@ def main() -> int:
         candidate_templates = []
         spec_tasks = []
         skipped_event_claims: List[Dict[str, str]] = []
+        planned_candidates: List[Dict[str, Any]] = []
         
         print("Iterating over active claims...")
         for i, row in active_claims.iterrows():
@@ -652,6 +710,19 @@ def main() -> int:
                                 "reason": reason,
                             }
                         )
+                        if reason == "planned_unimplemented_event":
+                            planned_candidates.append(
+                                {
+                                    "claim_id": claim_id,
+                                    "concept_id": row.get("concept_id"),
+                                    "event_type": event_type,
+                                    "runtime_event_type": raw_event_type,
+                                    "canonical_family": str(ontology_ctx.get("canonical_family", "")),
+                                    "statement": statement,
+                                    "priority_score": row.get("priority_score"),
+                                    "assets_filter": row.get("assets"),
+                                }
+                            )
                         continue
                     
                     target_path = target_pattern.replace("{event_type}", event_type)
@@ -770,6 +841,8 @@ def main() -> int:
         
         tasks_df = pd.DataFrame(spec_tasks)
         tasks_df.to_parquet(atlas_dir / "spec_tasks.parquet", index=False)
+        planned_df = pd.DataFrame(planned_candidates)
+        planned_df.to_parquet(atlas_dir / "planned_candidates.parquet", index=False)
 
         event_rows = templates_df[templates_df.get("object_type") == "event"] if not templates_df.empty else pd.DataFrame()
         event_types_generated = sorted(
@@ -863,6 +936,7 @@ def main() -> int:
                     ].shape[0]
                 ) if not templates_df.empty and "ontology_fully_known" in templates_df.columns else 0,
                 "event_claims_skipped_unimplemented": int(len(skipped_event_claims)),
+                "planned_candidates_total": int(len(planned_candidates)),
             },
             "unresolved": {
                 "events_missing_in_canonical_registry": events_missing_in_canonical_registry,
@@ -871,6 +945,7 @@ def main() -> int:
                 "state_registry_validation_issues": state_registry_issues,
                 "taxonomy_unimplemented_nonplanned": implemented_contract["taxonomy_unimplemented_nonplanned"],
                 "canonical_unimplemented_nonplanned": implemented_contract["canonical_unimplemented_nonplanned"],
+                "declared_implemented_missing_in_registry": implemented_contract["declared_implemented_missing_in_registry"],
                 "planned_unimplemented_events": implemented_contract["planned_unimplemented_events"],
                 "skipped_event_claims": skipped_event_claims,
             },
@@ -878,6 +953,7 @@ def main() -> int:
                 "implemented_only_events": implemented_only_events,
                 "allow_planned_unimplemented": allow_planned_unimplemented,
                 "implemented_event_types": implemented_contract["implemented_event_types"],
+                "declared_implemented_events": implemented_contract["declared_implemented_events"],
                 "planned_events": implemented_contract["planned_events"],
             },
         }
@@ -904,6 +980,7 @@ def main() -> int:
         finalize_manifest(manifest, "success", stats={
             "templates_count": len(candidate_templates),
             "spec_tasks_count": len(spec_tasks),
+            "planned_candidates_count": len(planned_candidates),
             "ontology_strict": int(strict_ontology),
             "implemented_only_events": int(implemented_only_events),
             "ontology_spec_hash": ontology_hash,

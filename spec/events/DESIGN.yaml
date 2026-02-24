@@ -1,4 +1,6 @@
 event_type: "DESIGN"
+active: false
+status: planned
 description: "Placeholder event type for claims describing test designs rather than specific market triggers."
 reports_dir: "design"
 signal_column: "is_design_event"

@@ -786,6 +786,9 @@ def test_generate_candidate_templates_planned_unimplemented_is_skipped_but_allow
     assert rc == 0
     templates = pd.read_parquet(atlas_dir / "candidate_templates.parquet")
     assert templates.empty
+    planned = pd.read_parquet(atlas_dir / "planned_candidates.parquet")
+    assert len(planned) == 1
+    assert planned.iloc[0]["event_type"] == "FUTURE_EVENT"
     linkage = json.loads((atlas_dir / "ontology_linkage.json").read_text(encoding="utf-8"))
     unresolved = linkage.get("unresolved", {})
     assert unresolved.get("planned_unimplemented_events") == ["FUTURE_EVENT"]

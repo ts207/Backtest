@@ -30,6 +30,7 @@ from pipelines._lib.run_manifest import (
     validate_feature_schema_columns,
     validate_input_provenance,
 )
+from pipelines._lib.ontology_contract import MATERIALIZED_STATE_COLUMNS_BY_ID
 from features.vol_regime import calculate_rv_percentile_24h
 from features.carry_state import calculate_funding_rate_bps
 from features.state_mapping import map_vol_regime, map_carry_state
@@ -140,6 +141,59 @@ def _build_market_context(symbol: str, features: pd.DataFrame) -> pd.DataFrame:
     out["funding_regime"] = "neutral"
     out.loc[out["funding_mean_32"] <= q_lo, "funding_regime"] = "negative"
     out.loc[out["funding_mean_32"] >= q_hi, "funding_regime"] = "positive"
+
+    # Materialized ontology states (bounded set) for phase2 state expansion.
+    def _feature_series(name: str) -> pd.Series:
+        if name in features.columns:
+            return pd.to_numeric(features[name], errors="coerce")
+        return pd.Series(np.nan, index=features.index, dtype=float)
+
+    spread_z = _feature_series("spread_zscore")
+    rv_96 = _feature_series("rv_96")
+    oi_notional = _feature_series("oi_notional")
+    oi_delta_1h = _feature_series("oi_delta_1h")
+
+    spread_p90 = float(spread_z.quantile(0.90)) if spread_z.notna().any() else np.nan
+    funding_abs = out["funding_rate_bps"].abs()
+    funding_p95 = float(funding_abs.quantile(0.95)) if funding_abs.notna().any() else np.nan
+    oi_p90 = float(oi_notional.quantile(0.90)) if oi_notional.notna().any() else np.nan
+    oi_delta_p10 = float(oi_delta_1h.quantile(0.10)) if oi_delta_1h.notna().any() else np.nan
+    rv_96_med = rv_96.rolling(window=96, min_periods=24).median()
+    funding_extreme = funding_abs >= funding_p95 if np.isfinite(funding_p95) else pd.Series(False, index=out.index)
+
+    out[MATERIALIZED_STATE_COLUMNS_BY_ID["LOW_LIQUIDITY_STATE"]] = (
+        (spread_z >= spread_p90).fillna(False)
+        | (out["rv_percentile_24h"] >= 0.80).fillna(False)
+    )
+    out[MATERIALIZED_STATE_COLUMNS_BY_ID["SPREAD_ELEVATED_STATE"]] = (spread_z >= spread_p90).fillna(False)
+    out[MATERIALIZED_STATE_COLUMNS_BY_ID["REFILL_LAG_STATE"]] = (
+        out[MATERIALIZED_STATE_COLUMNS_BY_ID["LOW_LIQUIDITY_STATE"]]
+        & out[MATERIALIZED_STATE_COLUMNS_BY_ID["LOW_LIQUIDITY_STATE"]]
+        .rolling(window=6, min_periods=1)
+        .max()
+        .astype(bool)
+    )
+    out[MATERIALIZED_STATE_COLUMNS_BY_ID["AFTERSHOCK_STATE"]] = (
+        (rv_96 > (rv_96_med * 1.25)).fillna(False)
+        | (out["rv_percentile_24h"] >= 0.80).fillna(False)
+    )
+    out[MATERIALIZED_STATE_COLUMNS_BY_ID["COMPRESSION_STATE"]] = out["compression_state"].fillna(False).astype(bool)
+    out[MATERIALIZED_STATE_COLUMNS_BY_ID["HIGH_VOL_REGIME"]] = out["vol_regime_code"].eq(2.0)
+    out[MATERIALIZED_STATE_COLUMNS_BY_ID["LOW_VOL_REGIME"]] = out["vol_regime_code"].eq(0.0)
+    out[MATERIALIZED_STATE_COLUMNS_BY_ID["CROWDING_STATE"]] = (
+        funding_extreme.fillna(False)
+        & (oi_notional >= oi_p90).fillna(False)
+    )
+    out[MATERIALIZED_STATE_COLUMNS_BY_ID["FUNDING_PERSISTENCE_STATE"]] = (
+        funding_extreme.fillna(False)
+        .rolling(window=12, min_periods=1)
+        .sum()
+        .ge(6)
+    )
+    out[MATERIALIZED_STATE_COLUMNS_BY_ID["DELEVERAGING_STATE"]] = (
+        (oi_delta_1h <= oi_delta_p10).fillna(False)
+        & (out["rv_percentile_24h"] >= 0.66).fillna(False)
+    )
 
     out["context_def_version"] = "market_context_v1"
     return out

@@ -26,5 +26,8 @@ jobs:
       - name: Check Repo Hygiene
         run: bash project/scripts/check_repo_hygiene.sh
 
+      - name: Ontology Consistency Audit
+        run: python -m project.scripts.ontology_consistency_audit --fail-on-missing
+
       - name: Run tests
         run: python -m pytest -q

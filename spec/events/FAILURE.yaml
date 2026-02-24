@@ -1,4 +1,6 @@
 event_type: "FAILURE"
+active: false
+status: planned
 description: "Placeholder event type for claims describing failure modes or confounding factors."
 reports_dir: "failure"
 signal_column: "is_failure_event"

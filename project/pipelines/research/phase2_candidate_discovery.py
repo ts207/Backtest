@@ -35,6 +35,7 @@ from pipelines._lib.ontology_contract import (
     ontology_spec_paths,
     ontology_spec_hash,
     parse_list_field,
+    state_id_to_context_column,
 )
 from pipelines._lib.bh_fdr_grouping import canonical_bh_group_key
 from pipelines._lib.execution_costs import resolve_execution_costs
@@ -238,6 +239,33 @@ def _resolved_sample_size(joined_event_count: int, symbol_event_count: int) -> i
     except (TypeError, ValueError):
         symbol_total = 0
     return max(0, min(joined, symbol_total if symbol_total > 0 else joined))
+
+
+def _resolve_state_context_column(columns: pd.Index, state_id: Optional[str]) -> Optional[str]:
+    state = str(state_id or "").strip()
+    if not state:
+        return None
+    by_id = state_id_to_context_column(state)
+    candidates = [
+        by_id,
+        state,
+        state.upper(),
+        state.lower(),
+    ]
+    for candidate in candidates:
+        if candidate and candidate in columns:
+            return str(candidate)
+    return None
+
+
+def _bool_mask_from_series(series: pd.Series) -> pd.Series:
+    if series.dtype == bool:
+        return series.fillna(False)
+    values = pd.to_numeric(series, errors="coerce")
+    if values.notna().any():
+        return values.fillna(0.0) > 0.0
+    text = series.astype(str).str.strip().str.lower()
+    return text.isin({"1", "true", "t", "yes", "y", "on", "active"})
 
 
 def _apply_multiplicity_controls(
@@ -1940,6 +1968,15 @@ def main():
                     if col in bucket_events.columns:
                         bucket_events = bucket_events[bucket_events[col] == val]
                         cond_label = f"{col}_{val}"
+
+            if state_id:
+                state_col = _resolve_state_context_column(bucket_events.columns, state_id)
+                if not state_col:
+                    continue
+                state_mask = _bool_mask_from_series(bucket_events[state_col])
+                bucket_events = bucket_events[state_mask]
+                if bucket_events.empty:
+                    continue
             
             if len(bucket_events) < min_samples:
                 # print(f"DEBUG: Insufficient samples for {cond_label}: {len(bucket_events)}")

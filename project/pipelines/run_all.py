@@ -312,6 +312,18 @@ def main() -> int:
     parser.add_argument("--allow_missing_funding", type=int, default=0)
     parser.add_argument("--allow_constant_funding", type=int, default=0)
     parser.add_argument("--allow_funding_timestamp_rounding", type=int, default=0)
+    parser.add_argument(
+        "--run_ontology_consistency_audit",
+        type=int,
+        default=1,
+        help="If 1, run ontology consistency audit preflight before stage execution.",
+    )
+    parser.add_argument(
+        "--ontology_consistency_fail_on_missing",
+        type=int,
+        default=1,
+        help="If 1, ontology consistency preflight fails closed on missing/invalid contract links.",
+    )
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument(
         "--allow_ontology_hash_mismatch",
@@ -446,6 +458,20 @@ def main() -> int:
         for issue in chain_issues:
             print(f"  - {issue}", file=sys.stderr)
         return 1
+
+    if int(args.run_ontology_consistency_audit):
+        audit_cmd = [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "ontology_consistency_audit.py"),
+            "--repo-root",
+            str(PROJECT_ROOT.parent),
+        ]
+        if int(args.ontology_consistency_fail_on_missing):
+            audit_cmd.append("--fail-on-missing")
+        audit_result = subprocess.run(audit_cmd)
+        if audit_result.returncode != 0:
+            print("Ontology consistency audit preflight failed.", file=sys.stderr)
+            return int(audit_result.returncode) or 1
     
     # B1: Unconditional ban — fallback blueprints bypass BH-FDR and can never appear in evaluation.
     if args.strategy_blueprint_allow_fallback:
