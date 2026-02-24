@@ -32,7 +32,8 @@ def _git_commit(project_root: Path) -> str:
         return subprocess.check_output(
             ["git", "-C", str(project_root), "rev-parse", "HEAD"],
             text=True,
-        ).strip()
+            stderr=subprocess.DEVNULL,
+                ).strip()
     except Exception:
         return "unknown"
 

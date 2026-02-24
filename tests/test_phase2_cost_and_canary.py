@@ -94,10 +94,11 @@ class TestLabelShiftCanary:
 
     def test_shift_k_uses_pos_plus_horizon_plus_k(self):
         """
-        With shift_labels_k=K and horizon='5m' (1 bar), the forward return for an event
-        at feature bar P must use close[P + 1 + K] / close[P] - 1.
+        With shift_labels_k=K and horizon='5m' (1 bar), and default entry_lag_bars=1,
+        the forward return for an event at feature bar P must use
+        close[P + entry_lag_bars + 1 + K] / close[P + entry_lag_bars] - 1.
 
-        close[i] = i+1, so return at (P, K) = (P+2+K)/(P+1) - 1.
+        close[i] = i+1, so return at (P, K) = (P+3+K)/(P+2) - 1.
         """
         from pipelines.research.phase2_candidate_discovery import calculate_expectancy
 
@@ -116,14 +117,15 @@ class TestLabelShiftCanary:
         expected_returns = []
         for ts in event_ts:
             pos = int(np.searchsorted(feat_ts, ts, side="left"))
-            future_pos = pos + 1 + shift_k  # horizon_bars=1, shift_k=5
+            entry_pos = pos + 1  # entry_lag_bars=1 (default)
+            future_pos = entry_pos + 1 + shift_k  # horizon_bars=1, shift_k=5
             if 0 <= pos < len(close) and future_pos < len(close):
-                ret = close[future_pos] / close[pos] - 1.0
+                ret = close[future_pos] / close[entry_pos] - 1.0
                 expected_returns.append(ret)  # direction=+1 for continuation
         expected_mean = float(np.mean(expected_returns)) if expected_returns else 0.0
 
         assert abs(mean_k5 - expected_mean) < 1e-9, (
-            f"shift_labels_k=5 must use pos+horizon+5; got {mean_k5:.10f}, "
+            f"shift_labels_k=5 must use (pos+entry_lag)+horizon+5; got {mean_k5:.10f}, "
             f"expected {expected_mean:.10f}"
         )
 

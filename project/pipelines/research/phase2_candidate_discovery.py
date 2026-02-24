@@ -211,7 +211,7 @@ def calculate_expectancy(
 
     Args:
         shift_labels_k: If > 0, shift the forward label by an additional k bars
-            (future_pos = pos + horizon_bars + shift_labels_k).  This implements
+            (future_pos = pos + entry_lag_bars + horizon_bars + shift_labels_k).  This implements
             a *true* misalignment canary: deterministic, and tests specifically
             whether the pipeline is sensitive to label-offset errors.
 
