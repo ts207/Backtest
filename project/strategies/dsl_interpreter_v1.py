@@ -75,6 +75,7 @@ def _to_float(value: object, default: float = 0.0) -> float:
 
 
 def _build_blueprint(raw: Dict[str, object]) -> Blueprint:
+    validate_feature_references(raw)
     scope = raw.get("symbol_scope", {})
     entry = raw.get("entry", {})
     exit_spec = raw.get("exit", {})
@@ -494,6 +495,39 @@ def _entry_eligibility_mask(frame: pd.DataFrame, entry: EntrySpec, blueprint: Bl
     return (condition_mask & trigger_mask & confirmation_mask).fillna(False)
 
 
+def _validate_overlay_columns(frame: pd.DataFrame, overlays: List[OverlaySpec], blueprint_id: str) -> None:
+    cols = set(frame.columns)
+
+    def _has_numeric_values(column: str) -> bool:
+        if column not in cols:
+            return False
+        series = pd.to_numeric(frame[column], errors="coerce")
+        return bool(series.notna().any())
+
+    missing: Dict[str, List[str]] = {}
+    for overlay in overlays:
+        required: List[str] = []
+        if overlay.name == "liquidity_guard":
+            required = ["quote_volume"]
+        elif overlay.name == "spread_guard":
+            required = ["spread_bps"]
+        elif overlay.name == "funding_guard":
+            required = ["funding_rate_scaled"]
+        elif overlay.name == "cross_venue_guard":
+            required = ["spread_bps"]
+        elif overlay.name in {"risk_throttle", "session_guard"}:
+            required = []
+        else:
+            required = []
+        missing_cols = [col for col in required if not _has_numeric_values(col)]
+        if missing_cols:
+            missing[overlay.name] = sorted(set(missing_cols))
+
+    if missing:
+        detail = "; ".join(f"{name}: {', '.join(cols_)}" for name, cols_ in sorted(missing.items()))
+        raise ValueError(f"Blueprint `{blueprint_id}` missing required columns for overlays -> {detail}")
+
+
 def _event_direction_bias(event_type: str) -> int:
     normalized = str(event_type).strip().lower()
     if normalized in CONTRARIAN_BIAS_EVENTS:
@@ -613,6 +647,7 @@ class DslInterpreterV1:
         )
         merged = merged.sort_values("timestamp").reset_index(drop=True)
         frame = _build_signal_frame(merged)
+        _validate_overlay_columns(frame, blueprint.overlays, blueprint.id)
 
         symbol = str(params.get("strategy_symbol", "")).strip().upper()
         allowed_symbols = {str(s).strip().upper() for s in blueprint.symbol_scope.symbols}
@@ -725,7 +760,8 @@ class DslInterpreterV1:
                 if state == "flat":
                     if is_eligible:
                         state = "armed"
-                        arm_remaining = max(int(blueprint.entry.delay_bars), int(blueprint.entry.arm_bars))
+                        # Enforce at least one-bar decision lag: signals computed on bar t are tradable no earlier than t+1.
+                        arm_remaining = max(1, int(blueprint.entry.delay_bars), int(blueprint.entry.arm_bars))
                     else:
                         positions.append(0)
                         continue
