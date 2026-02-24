@@ -23,4 +23,4 @@ The structured collection of testable "if-then" behaviors that drive the researc
 
 ## Artifacts
 *   **`project/pipelines/research/generate_hypothesis_queue.py`**: Automated queue generator.
-*   **`data/lake/reports/research_backlog.csv`**: The master work queue for the research system.
+*   **`data/reports/research_backlog.csv`**: The master work queue for the research system.

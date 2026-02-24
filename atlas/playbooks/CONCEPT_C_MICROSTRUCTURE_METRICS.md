@@ -6,9 +6,9 @@ Quantitative measures of market liquidity, transaction costs, and trade toxicity
 ## Data Requirements
 | Dataset | Columns | Granularity | Min History |
 |---------|---------|-------------|-------------|
-| `perp_ohlcv_1m` | `close`, `volume`, `quote_volume` | 1m | 30 days |
+| `perp_ohlcv_5m` | `close`, `volume`, `quote_volume` | 5m | 30 days |
 | `tob_1s` | `bid_price`, `ask_price`, `bid_qty`, `ask_qty` | 1s | 7 days |
-| `basis_1m` | `basis_bps` | 1m | 7 days |
+| `basis_5m` | `basis_bps` | 5m | 7 days |
 
 ## Metrics
 *   **`roll_spread_bps`**: Estimating the effective spread using the serial covariance of price changes.
@@ -27,4 +27,4 @@ Quantitative measures of market liquidity, transaction costs, and trade toxicity
 ## Artifacts
 *   **`spec/features/microstructure.yaml`**: Feature definitions for Roll, VPIN, and Amihud.
 *   **`project/features/microstructure.py`**: Implementation of the metrics.
-*   **`data/lake/features/perp/{symbol}/1m/microstructure/`**: Parquet output tables.
+*   **`data/lake/features/perp/{symbol}/5m/microstructure/`**: Parquet output tables.

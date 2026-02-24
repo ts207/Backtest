@@ -6,9 +6,9 @@ The tendency of market prices to revert to a mean or "fair value" anchor after a
 ## Data Requirements
 | Dataset | Columns | Granularity | Min History |
 |---------|---------|-------------|-------------|
-| `perp_ohlcv_1m` | `close`, `volume` | 1m | 14 days |
+| `perp_ohlcv_5m` | `close`, `volume` | 5m | 14 days |
 | `tob_1s` | `bid_price`, `ask_price` | 1s | 7 days |
-| `basis_1m` | `basis_bps` | 1m | 7 days |
+| `basis_5m` | `basis_bps` | 5m | 7 days |
 
 ## Metrics
 *   **`basis_zscore`**: The current basis (perp-spot) deviation from its 24-hour rolling mean, normalized by standard deviation.

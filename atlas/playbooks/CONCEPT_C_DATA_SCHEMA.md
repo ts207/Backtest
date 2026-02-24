@@ -6,8 +6,8 @@ The minimal universal labeling schema required to evaluate all hypotheses from a
 ## Data Requirements
 | Dataset | Columns | Granularity | Min History |
 |---------|---------|-------------|-------------|
-| `cleaned_bars` | `open`, `high`, `low`, `close`, `volume` | 1m/15m | N/A |
-| `feature_vectors` | All PIT features | 1m/15m | N/A |
+| `cleaned_bars` | `open`, `high`, `low`, `close`, `volume` | 5m | N/A |
+| `feature_vectors` | All PIT features | 5m | N/A |
 | `label_vectors` | `ret_fwd`, `range_fwd`, `rv_fwd` | Multi-horizon | N/A |
 
 ## Metrics

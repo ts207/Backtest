@@ -6,7 +6,7 @@ The management of multiple strategy equity curves to achieve a target risk profi
 ## Data Requirements
 | Dataset | Columns | Granularity | Min History |
 |---------|---------|-------------|-------------|
-| `equity_curves.parquet` | `strategy_id`, `pnl` | 1m | 365 days |
+| `equity_curves.parquet` | `strategy_id`, `pnl` | 5m | 365 days |
 | `universe_snapshots.parquet` | `symbol`, `status` | Daily | N/A |
 
 ## Metrics
@@ -25,4 +25,4 @@ The management of multiple strategy equity curves to achieve a target risk profi
 ## Artifacts
 *   **`project/pipelines/report/capital_allocation.py`**: Allocation and sizing logic.
 *   **`project/pipelines/alpha_bundle/build_universe_snapshots.py`**: Historical membership logic.
-*   **`data/lake/reports/portfolio/daily_stats.json`**: Portfolio-level performance and risk metrics.
+*   **`data/reports/portfolio/daily_stats.json`**: Portfolio-level performance and risk metrics.

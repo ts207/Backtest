@@ -1,117 +1,92 @@
 # Getting Started
 
-This guide will walk you through setting up the Backtest platform and running your first automated strategy discovery pipeline.
+This guide covers the current, supported way to run the pipeline.
 
-## 📋 Prerequisites
+## Prerequisites
 
-- **Python 3.10+**
-- **pip** (Python package manager)
-- **Make** (optional, for shortcut commands)
+- Python 3.10+
+- `pip`
+- Optional: `make`
 
-## ⚙️ Installation
-
-1. **Clone the repository**:
-
-    ```bash
-    git clone <repository-url>
-    cd Backtest
-    ```
-
-2. **Create a virtual environment**:
-
-    ```bash
-    python -m venv .venv
-    # Windows:
-    .venv\Scripts\activate
-    # Linux/macOS:
-    source .venv/bin/activate
-    ```
-
-3. **Install dependencies**:
-
-    ```bash
-    pip install -r requirements.txt
-    pip install -r requirements-dev.txt
-    ```
-
-4. **Set Environment Variables**:
-    The platform needs to know where to store data. By default, it uses a `data/` folder in the root.
-
-    ```bash
-    # Windows (PowerShell):
-    $env:BACKTEST_DATA_ROOT = "$(pwd)\data"
-    # Linux/macOS:
-    export BACKTEST_DATA_ROOT=$(pwd)/data
-    ```
-
-## 🏃 Running Your First Discovery
-
-The platform uses a master orchestrator `project/pipelines/run_all.py` to manage complex research stages.
-
-### 1. Ingest and Clean Data
-
-Run the initial stage to fetch data for BTC and ETH:
+## Setup
 
 ```bash
-python project/pipelines/run_all.py 
-    --run_id my_first_run 
-    --symbols BTCUSDT,ETHUSDT 
-    --start 2024-01-01 
-    --end 2024-01-07
+git clone <repo-url>
+cd Backtest
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+export BACKTEST_DATA_ROOT=$(pwd)/data
 ```
 
-### 2. Run Full Discovery
-
-To detect "Liquidity Vacuum" events and validate them statistically:
+## First Run: Build Core Data
 
 ```bash
-python project/pipelines/run_all.py 
-    --run_id discovery_run 
-    --symbols BTCUSDT,ETHUSDT 
-    --start 2024-01-01 
-    --end 2024-01-07 
-    --run_hypothesis_generator 1 
-    --run_phase2_conditional 1 
-    --phase2_event_type liquidity_vacuum 
-    --run_bridge_eval_phase2 1 
-    --run_strategy_blueprint_compiler 1
+./.venv/bin/python project/pipelines/run_all.py \
+  --run_id first_run \
+  --symbols BTCUSDT \
+  --start 2026-01-01 \
+  --end 2026-01-31
 ```
 
-### 3. Run Atlas-Driven Discovery (Automated)
+This executes ingest -> cleaned bars -> features -> context -> market context by default.
 
-Instead of specifying event types manually, let the Knowledge Atlas drive the queue:
+## Run Discovery for One Event Family
 
 ```bash
-python project/pipelines/run_all.py \
-    --run_id atlas_run \
-    --symbols BTCUSDT,ETHUSDT,SOLUSDT \
-    --start 2024-01-01 \
-    --end 2024-01-07 \
-    --run_hypothesis_generator 1 \
-    --atlas_mode 1 \
-    --run_phase2_conditional 1
+./.venv/bin/python project/pipelines/run_all.py \
+  --run_id first_discovery \
+  --symbols BTCUSDT \
+  --start 2026-01-01 \
+  --end 2026-01-31 \
+  --run_hypothesis_generator 0 \
+  --run_phase2_conditional 1 \
+  --phase2_event_type liquidity_vacuum \
+  --run_bridge_eval_phase2 1
 ```
 
-### 4. Check the Results
+## Run Discovery for All Event Families
 
-After the run finishes, check the following locations:
+```bash
+make discover-edges RUN_ID=discover_all SYMBOLS=BTCUSDT,ETHUSDT START=2026-01-01 END=2026-01-31
+```
 
-- **Run Logs**: `data/runs/discovery_run/`
-- **Global Templates**: `atlas/template_index.md`
-- **Per-Run Plan**: `data/reports/hypothesis_generator/discovery_run/candidate_plan.jsonl`
-- **Discovered Edges**: `data/reports/phase2/discovery_run/LIQUIDATION_CASCADE/phase2_candidates.csv`
-- **Compiled Blueprints**: `data/reports/strategy_blueprints/discovery_run/blueprints.jsonl`
+## Optional: Backtest and Walkforward
 
-## ✅ Running Tests
+```bash
+./.venv/bin/python project/pipelines/run_all.py \
+  --run_id full_eval \
+  --symbols BTCUSDT,ETHUSDT \
+  --start 2026-01-01 \
+  --end 2026-01-31 \
+  --run_phase2_conditional 1 \
+  --phase2_event_type all \
+  --run_backtest 1 \
+  --run_walkforward_eval 1 \
+  --run_make_report 1
+```
 
-Ensure everything is working correctly by running the fast test suite:
+## Key Outputs
+
+- Registry events and flags:
+  - `data/events/<run_id>/events.parquet`
+  - `data/events/<run_id>/event_flags.parquet`
+- Phase2 candidates:
+  - `data/reports/phase2/<run_id>/<event_type>/phase2_candidates.csv`
+- Blueprints:
+  - `data/reports/strategy_blueprints/<run_id>/blueprints.jsonl`
+
+## Sanity Checks
 
 ```bash
 make test-fast
+make check-hygiene
 ```
 
-or directly with pytest:
+## Common Fail-Closed Stops
 
-```bash
-pytest -m "not slow"
-```
+- Funding coverage gaps in context/market-state stages.
+- Missing Phase1 events file for selected event family.
+- Non-executable blueprint condition/action in compile path.
+- Attempt to enable fallback blueprint compilation in protected flows.

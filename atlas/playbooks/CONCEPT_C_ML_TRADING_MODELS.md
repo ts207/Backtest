@@ -6,7 +6,7 @@ The application of supervised, unsupervised, and reinforcement learning models t
 ## Data Requirements
 | Dataset | Columns | Granularity | Min History |
 |---------|---------|-------------|-------------|
-| `feature_vectors` | All PIT features | 1m/15m | 365+ days |
+| `feature_vectors` | All PIT features | 5m | 365+ days |
 | `forward_labels` | `ret_fwd`, `mae`, `mfe` | Multi-horizon | 365+ days |
 
 ## Metrics
@@ -23,6 +23,6 @@ The application of supervised, unsupervised, and reinforcement learning models t
 | `T_ML_03` | Training Continuity | Models must be retrained using a rolling walk-forward window with no future data in the training set. |
 
 ## Artifacts
-*   **`project/pipelines/research/phase2_conditional_hypotheses.py`**: Implementation of random forest and linear meta-labelers.
+*   **`project/pipelines/research/phase2_candidate_discovery.py`**: Implementation of random forest and linear meta-labelers.
 *   **`project/strategies/adapters.py`**: Adapters for translating model outputs into strategy orders.
 *   **`data/lake/models/`**: Serialized model weights and training metadata.

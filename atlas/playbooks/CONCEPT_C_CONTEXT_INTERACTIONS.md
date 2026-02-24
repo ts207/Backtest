@@ -6,8 +6,8 @@ The study of edges that only manifest when multiple independent conditions align
 ## Data Requirements
 | Dataset | Columns | Granularity | Min History |
 |---------|---------|-------------|-------------|
-| `perp_ohlcv_1m` | All core | 1m | 180 days |
-| `event_flags` | All signal columns | 15m | 180 days |
+| `perp_ohlcv_5m` | All core | 5m | 180 days |
+| `event_flags` | All signal columns | 5m | 180 days |
 
 ## Metrics
 *   **`interaction_lift`**: The incremental expectancy of combining condition A and B compared to A alone.
@@ -22,5 +22,5 @@ The study of edges that only manifest when multiple independent conditions align
 | `T_INT_03` | Sample Sufficiency | Each interaction bucket (cell in the state matrix) must contain >= 30 samples. |
 
 ## Artifacts
-*   **`project/pipelines/research/phase2_conditional_hypotheses.py`**: Main engine for testing multi-factor interactions.
-*   **`data/lake/reports/interactions/lift_analysis.parquet`**: Results of conditional expectancy tests.
+*   **`project/pipelines/research/phase2_candidate_discovery.py`**: Main engine for testing multi-factor interactions.
+*   **`data/reports/interactions/lift_analysis.parquet`**: Results of conditional expectancy tests.

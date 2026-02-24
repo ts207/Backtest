@@ -23,6 +23,6 @@ The formal process of converting conditional returns into statistically valid ca
 | `T_VAL_03` | P-Hacking Guard | All parameter bounds must be pre-registered in the run manifest before validation. |
 
 ## Artifacts
-*   **`project/pipelines/research/phase2_conditional_hypotheses.py`**: The core validation pipeline script.
+*   **`project/pipelines/research/phase2_candidate_discovery.py`**: The core validation pipeline script.
 *   **`project/pipelines/research/evaluate_naive_entry.py`**: Baseline comparison for event significance.
-*   **`data/lake/reports/validation/candidate_ranking.csv`**: Ranked list of edges passing all validation gates.
+*   **`data/reports/validation/candidate_ranking.csv`**: Ranked list of edges passing all validation gates.

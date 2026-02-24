@@ -79,6 +79,24 @@ def _context_partition_complete(existing: pd.DataFrame, expected: pd.DataFrame) 
     return versions == {"market_context_v1"}
 
 
+def _canonical_funding_rate_scaled(features: pd.DataFrame, *, symbol: str) -> pd.Series:
+    if "funding_rate_scaled" not in features.columns:
+        raise ValueError(
+            f"features_v1 for {symbol} missing funding_rate_scaled; "
+            "market context requires canonical funding_rate_scaled input."
+        )
+    funding = pd.to_numeric(features["funding_rate_scaled"], errors="coerce")
+    if funding.isna().all():
+        raise ValueError(f"Funding series is fully null for {symbol}")
+    missing_pct = float(funding.isna().mean()) if len(funding) else 0.0
+    if missing_pct > 0.0:
+        raise ValueError(
+            f"Funding series contains gaps for {symbol}: missing_pct={missing_pct:.4f}; "
+            "rebuild upstream funding alignment before market context."
+        )
+    return funding.astype(float)
+
+
 def _build_market_context(symbol: str, features: pd.DataFrame) -> pd.DataFrame:
     out = features[["timestamp"]].copy()
     out["symbol"] = symbol
@@ -104,38 +122,8 @@ def _build_market_context(symbol: str, features: pd.DataFrame) -> pd.DataFrame:
             rv_pct = pd.Series(index=features.index, dtype=float)
     out["rv_pct_17280"] = rv_pct
 
-    # Carry State
-    # Try funding_rate first, then funding_rate_scaled
-    if "funding_rate" in features.columns:
-        fr = pd.to_numeric(features["funding_rate"], errors="coerce")
-    elif "funding_rate_scaled" in features.columns:
-        # Assuming scaled is rate * 1e9 or something? No, standard is usually rate * 10000? 
-        # Actually build_features_v1 usually outputs funding_rate_scaled (e.g. rate * 100).
-        # Let's assume funding_rate_scaled is close enough to use if raw missing?
-        # But wait, calculate_funding_rate_bps expects raw funding rate (e.g. 0.0001).
-        # If funding_rate_scaled is used, we need to know scale.
-        # Let's check build_features_v1.py to see what it outputs.
-        # It outputs `funding_rate_scaled`.
-        # Assuming we can recover it or just rely on funding_rate being present if I generated it.
-        # I generated `funding_rate` column in my synthetic data.
-        # `build_features_v1` passes columns through?
-        # `build_features_v1` merges funding.
-        
-        # Let's fallback to funding_rate_scaled if funding_rate missing, assuming it is bps?
-        fr = pd.to_numeric(features.get("funding_rate_scaled", 0.0), errors="coerce") / 10000.0 # Blind guess if scaled
-    else:
-        fr = pd.Series(0.0, index=features.index)
-
-    # In my synthetic data, I have 'funding_rate' column in funding parquet. 
-    # build_features_v1 joins it. 
-    # If build_features_v1 keeps 'funding_rate', good.
-    # If not, it might rename it.
-    
-    # For now, let's use what's available.
-    if "funding_rate" in features.columns:
-        fr = pd.to_numeric(features["funding_rate"], errors="coerce")
-        
-    out["funding_rate_bps"] = calculate_funding_rate_bps(fr)
+    funding_rate_scaled = _canonical_funding_rate_scaled(features, symbol=symbol)
+    out["funding_rate_bps"] = calculate_funding_rate_bps(funding_rate_scaled)
     out["carry_state_code"] = map_carry_state(out["funding_rate_bps"])
     
     # Map code back to string for legacy/readability
@@ -146,8 +134,7 @@ def _build_market_context(symbol: str, features: pd.DataFrame) -> pd.DataFrame:
     out["compression_ratio"] = (range_96 / range_med_2880.replace(0.0, np.nan)).astype(float)
     out["compression_state"] = (out["compression_ratio"] <= 0.8).fillna(False)
 
-    funding = pd.to_numeric(features.get("funding_rate_scaled"), errors="coerce").fillna(0.0)
-    out["funding_mean_32"] = funding.rolling(window=32, min_periods=8).mean()
+    out["funding_mean_32"] = out["funding_rate_bps"].rolling(window=32, min_periods=8).mean()
     q_lo = float(out["funding_mean_32"].quantile(0.33)) if out["funding_mean_32"].notna().any() else 0.0
     q_hi = float(out["funding_mean_32"].quantile(0.67)) if out["funding_mean_32"].notna().any() else 0.0
     out["funding_regime"] = "neutral"

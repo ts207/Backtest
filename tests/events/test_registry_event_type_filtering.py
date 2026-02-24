@@ -59,3 +59,7 @@ def test_normalize_phase1_events_without_event_type_column_keeps_rows():
     spec = EVENT_REGISTRY_SPECS["funding_extreme_onset"]
     normalized = normalize_phase1_events(events=events, spec=spec, run_id="r1")
     assert len(normalized) == len(events)
+
+
+def test_registry_includes_funding_acceleration_spec():
+    assert "funding_acceleration" in EVENT_REGISTRY_SPECS

@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.spec_utils import get_spec_hashes
+from events.registry import EVENT_REGISTRY_SPECS
 
 
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
@@ -136,6 +137,29 @@ def _print_artifact_summary(run_id: str) -> None:
     for label, path in artifact_paths:
         status = "found" if path.exists() else "missing"
         print(f"  - {label} ({status}): {path}")
+
+
+def _validate_phase2_event_chain() -> List[str]:
+    issues: List[str] = []
+    seen: set[str] = set()
+    research_root = PROJECT_ROOT / "pipelines" / "research"
+    for event_type, script_name, _ in PHASE2_EVENT_CHAIN:
+        event = str(event_type).strip()
+        script = str(script_name).strip()
+        if not event:
+            issues.append("Empty event_type entry in PHASE2_EVENT_CHAIN")
+            continue
+        if event in seen:
+            issues.append(f"Duplicate event_type in PHASE2_EVENT_CHAIN: {event}")
+        seen.add(event)
+
+        if event not in EVENT_REGISTRY_SPECS:
+            issues.append(f"Missing event spec/registry entry for phase2 event: {event}")
+
+        script_path = research_root / script
+        if not script_path.exists():
+            issues.append(f"Missing phase2 analyzer script for {event}: {script_path}")
+    return issues
 
 
 def _parse_symbols_csv(symbols_csv: str) -> List[str]:
@@ -379,6 +403,13 @@ def main() -> int:
     parser.add_argument("--mode", choices=["research", "production", "certification"], default="research")
 
     args = parser.parse_args()
+
+    chain_issues = _validate_phase2_event_chain()
+    if chain_issues:
+        print("Phase2 event chain validation failed:", file=sys.stderr)
+        for issue in chain_issues:
+            print(f"  - {issue}", file=sys.stderr)
+        return 1
     
     # B1: Unconditional ban — fallback blueprints bypass BH-FDR and can never appear in evaluation.
     if args.strategy_blueprint_allow_fallback:

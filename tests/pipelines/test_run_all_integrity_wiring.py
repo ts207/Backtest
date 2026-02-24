@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import json
 import sys
 from pathlib import Path
 
@@ -79,6 +81,8 @@ def test_run_all_bridge_stage_default_embargo_is_nonzero(monkeypatch, tmp_path):
             "0",
             "--run_phase2_conditional",
             "1",
+            "--phase2_event_type",
+            "all",
             "--run_bridge_eval_phase2",
             "1",
             "--run_strategy_blueprint_compiler",
@@ -138,6 +142,21 @@ def test_run_all_declared_subtype_families_are_not_noop():
     chain_map = {event: script for event, script, _ in run_all.PHASE2_EVENT_CHAIN}
     for event_type, expected_script in expected_scripts.items():
         assert chain_map.get(event_type) == expected_script
+
+
+def test_run_all_phase2_chain_has_registry_and_scripts():
+    assert run_all._validate_phase2_event_chain() == []
+
+
+def test_run_all_phase2_chain_validation_reports_missing_entries(monkeypatch):
+    monkeypatch.setattr(
+        run_all,
+        "PHASE2_EVENT_CHAIN",
+        [("unknown_event_type", "missing_script.py", [])],
+    )
+    issues = run_all._validate_phase2_event_chain()
+    assert any("Missing event spec/registry entry" in issue for issue in issues)
+    assert any("Missing phase2 analyzer script" in issue for issue in issues)
 
 
 def test_run_all_research_gate_profile_wiring(monkeypatch, tmp_path):
@@ -232,3 +251,215 @@ def test_run_all_production_gate_profile_wiring(monkeypatch, tmp_path):
     checklist_args = stage_map["generate_recommendations_checklist"]
     assert _arg_value(robust_args, "--gate_profile") == "promotion"
     assert _arg_value(checklist_args, "--gate_profile") == "promotion"
+
+
+def test_run_all_unconditionally_blocks_strategy_blueprint_fallback(monkeypatch, capsys):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-02",
+            "--strategy_blueprint_allow_fallback",
+            "1",
+        ],
+    )
+
+    rc = run_all.main()
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "INV_NO_FALLBACK_IN_MEASUREMENT" in captured.err
+
+
+def test_run_all_blocks_override_flags_in_production_mode(monkeypatch, capsys):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-02",
+            "--mode",
+            "production",
+            "--strategy_blueprint_allow_naive_entry_fail",
+            "1",
+        ],
+    )
+
+    rc = run_all.main()
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "strictly forbidden in production mode" in captured.err
+
+
+def test_run_all_keep_research_blocks_execution_stages(monkeypatch, tmp_path, capsys):
+    manifests: list[dict] = []
+
+    def fake_write_run_manifest(_run_id: str, payload: dict) -> None:
+        manifests.append(copy.deepcopy(payload))
+
+    def fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        if stage == "generate_recommendations_checklist":
+            checklist_path = tmp_path / "data" / "runs" / run_id / "research_checklist" / "checklist.json"
+            checklist_path.parent.mkdir(parents=True, exist_ok=True)
+            checklist_path.write_text(json.dumps({"decision": "KEEP_RESEARCH"}), encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path / "data")
+    monkeypatch.setattr(run_all, "_git_commit", lambda _project_root: "test-sha")
+    monkeypatch.setattr(run_all, "_run_stage", fake_run_stage)
+    monkeypatch.setattr(run_all, "_write_run_manifest", fake_write_run_manifest)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-02",
+            "--run_backtest",
+            "1",
+            "--auto_continue_on_keep_research",
+            "0",
+        ],
+    )
+
+    rc = run_all.main()
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "Checklist gate blocked execution because decision=KEEP_RESEARCH" in captured.err
+    assert manifests
+    final_manifest = manifests[-1]
+    assert final_manifest["status"] == "failed"
+    assert final_manifest["failed_stage"] == "checklist_gate"
+    assert final_manifest["execution_blocked_by_checklist"] is True
+
+
+def test_run_all_keep_research_auto_continue_guard_is_fail_closed(monkeypatch, tmp_path, capsys):
+    manifests: list[dict] = []
+
+    def fake_write_run_manifest(_run_id: str, payload: dict) -> None:
+        manifests.append(copy.deepcopy(payload))
+
+    def fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        if stage == "generate_recommendations_checklist":
+            checklist_path = tmp_path / "data" / "runs" / run_id / "research_checklist" / "checklist.json"
+            checklist_path.parent.mkdir(parents=True, exist_ok=True)
+            checklist_path.write_text(json.dumps({"decision": "KEEP_RESEARCH"}), encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path / "data")
+    monkeypatch.setattr(run_all, "_git_commit", lambda _project_root: "test-sha")
+    monkeypatch.setattr(run_all, "_run_stage", fake_run_stage)
+    monkeypatch.setattr(run_all, "_write_run_manifest", fake_write_run_manifest)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-02",
+            "--run_backtest",
+            "1",
+            "--auto_continue_on_keep_research",
+            "1",
+        ],
+    )
+
+    rc = run_all.main()
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "INV_NO_FALLBACK_IN_MEASUREMENT" in captured.err
+    assert manifests
+    final_manifest = manifests[-1]
+    assert final_manifest["status"] == "failed"
+    assert final_manifest["failed_stage"] == "checklist_gate"
+    assert "evaluation_guard_violation" in final_manifest
+
+
+def test_run_all_skips_event_stages_when_hypothesis_queue_empty(monkeypatch, tmp_path):
+    captured_stages: list[str] = []
+    manifests: list[dict] = []
+
+    def fake_write_run_manifest(_run_id: str, payload: dict) -> None:
+        manifests.append(copy.deepcopy(payload))
+
+    def fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        captured_stages.append(stage)
+        return True
+
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path / "data")
+    monkeypatch.setattr(run_all, "_git_commit", lambda _project_root: "test-sha")
+    monkeypatch.setattr(run_all, "_run_stage", fake_run_stage)
+    monkeypatch.setattr(run_all, "_write_run_manifest", fake_write_run_manifest)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-02",
+            "--skip_ingest_ohlcv",
+            "1",
+            "--skip_ingest_funding",
+            "1",
+            "--skip_ingest_spot_ohlcv",
+            "1",
+            "--run_hypothesis_generator",
+            "1",
+            "--run_phase2_conditional",
+            "1",
+            "--phase2_event_type",
+            "all",
+            "--run_bridge_eval_phase2",
+            "1",
+            "--run_strategy_blueprint_compiler",
+            "0",
+            "--run_strategy_builder",
+            "0",
+            "--run_recommendations_checklist",
+            "0",
+            "--run_blueprint_promotion",
+            "0",
+            "--run_make_report",
+            "0",
+        ],
+    )
+
+    rc = run_all.main()
+    assert rc == 0
+
+    skipped_prefixes = (
+        "phase2_conditional_hypotheses_",
+        "bridge_evaluate_phase2_",
+        "build_event_registry_",
+    )
+    assert not any(stage.startswith(skipped_prefixes) for stage in captured_stages)
+    assert manifests
+    final_manifest = manifests[-1]
+    timings = final_manifest.get("stage_timings_sec", {})
+    skipped_timing_keys = [k for k in timings.keys() if k.startswith(skipped_prefixes)]
+    assert skipped_timing_keys
+    assert all(float(timings[k]) == 0.0 for k in skipped_timing_keys)

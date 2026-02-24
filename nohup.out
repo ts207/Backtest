@@ -1,5 +1,0 @@
-usage: run_slice1_data_layer.py [-h] --run_id RUN_ID --symbols SYMBOLS --start
-                                START --end END [--force FORCE]
-run_slice1_data_layer.py: error: the following arguments are required: --symbols, --start, --end
-./.venv/bin/python: can't open file '/home/tstuv/backtest/Backtest/project/pipelines/ingest/run_slice1_data_layer.p': [Errno 2] No such file or directory
-./.venv/bin/python: can't open file '/home/tstuv/backtest/Backtest/project/pipelines/ingest/run_slice1_data_layer.p': [Errno 2] No such file or directory

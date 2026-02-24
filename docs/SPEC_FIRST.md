@@ -1,48 +1,37 @@
 # Spec-First Development
 
-In this project, **Specifications are the Source of Truth**. We avoid hardcoding trading logic in Python files. Instead, logic is defined in YAML files within the `spec/` directory and interpreted by the platform.
+Specs are the source of truth for research configuration and event registry wiring.
 
-## Why Spec-First?
-1.  **Reproducibility**: You can recreate any research result by providing the exact same Spec files.
-2.  **Auditability**: Compliance and risk teams can review trading logic in plain English/YAML without reading complex code.
-3.  **Speed**: Researchers can add new features or event types by editing YAML files, often without writing any new Python code.
+## Key Spec Areas
 
-## Key Spec Files
+- `spec/events/*.yaml`
+  - Defines `event_type`, `reports_dir`, `events_file`, `signal_column`.
+  - Used by registry loading and event flag construction.
 
-### 1. Multiplicity Families (`spec/multiplicity/families.yaml`)
-Defines the "Universe" of hypotheses to test for a specific event type.
-```yaml
-families:
-  liquidity_vacuum:
-    templates:
-      - mean_reversion
-      - continuation
-    horizons:
-      - 5m
-      - 15m
-      - 60m
-```
+- `spec/gates.yaml`
+  - Phase2 and downstream gating thresholds.
 
-### 2. Validation Gates (`spec/gates.yaml`)
-Defines the statistical thresholds a candidate must pass.
-```yaml
-gate_v1_phase2:
-  max_q_value: 0.05
-  min_after_cost_expectancy_bps: 0.1
-```
+- `spec/multiplicity/families.yaml`
+  - Per-family templates/horizons and search budgets.
 
-### 3. Feature Definitions (`spec/features/`)
-Each feature has a YAML definition documenting its mathematical intent and Point-in-Time constraints.
+- `project/schemas/feature_schema_v1.json`
+  - Required output columns for features/context datasets.
 
-## 🧠 Atlas-Driven Planning
-The platform now uses `research_backlog.csv` as the primary driver for candidate generation.
-1.  **Claims**: Claims are identified in the backlog (e.g., `CL_0093`).
-2.  **Templates**: The Global Planner converts claims into stable Candidate Templates.
-3.  **Feasibility**: The Plan Enumerator checks if the required Specs (`spec/events/*.yaml`) and datasets exist before including them in the run.
+## Implementation Rules
 
-## Adding a New Logic Component
-To add a new indicator or event detection rule:
-1.  **Update Backlog**: Add a new row to `research_backlog.csv` with the claim and mechanism.
-2.  **Generate Templates**: Run the global planner to see the new `spec_tasks.parquet` entry.
-3.  **Draft the Spec**: Create the YAML file (e.g., `spec/events/LIQUIDATION_CASCADE.yaml`).
-4.  **Execute**: Run the pipeline with `--atlas_mode 1`. The system will automatically pick up the new spec if it matches a claim in the plan.
+1. Add/modify event family in `spec/events` first.
+2. Ensure analyzer emits fields needed for normalization (`enter_ts` or anchor equivalent).
+3. Keep `PHASE2_EVENT_CHAIN` and registry specs consistent.
+4. Run tests that cover registry and phase2 integrity.
+
+## Adding a New Event Family
+
+1. Add `spec/events/<event_type>.yaml`.
+2. Implement or map Phase1 analyzer script in `project/pipelines/research/`.
+3. Add entry to `PHASE2_EVENT_CHAIN` in `run_all.py`.
+4. Verify registry output columns in `data/events/<run_id>/event_flags.parquet`.
+5. Run Phase2 for that event and check `phase2_candidates.csv`.
+
+## Why This Matters
+
+Spec-first avoids hidden hardcoded behavior and gives reproducible, auditable runs.

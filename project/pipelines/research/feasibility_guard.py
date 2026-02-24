@@ -118,6 +118,7 @@ class FeasibilityGuard:
             ]
             return any(c.exists() for c in candidates)
 
-        # Default: If we don't have a mapping rule, assume it might exist or is not a blocker
-        # (Alternatively, we could fail-closed here)
-        return True
+        # Unknown dataset IDs must fail closed so missing feasibility mappings do
+        # not silently pass and fail much later in the pipeline.
+        self.log.warning("Unknown dataset mapping in feasibility guard: dataset_id=%s symbol=%s", dataset_id, symbol)
+        return False

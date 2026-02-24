@@ -7,7 +7,7 @@ The technical implementation details for every event type in the registry. This 
 | Dataset | Columns | Granularity | Min History |
 |---------|---------|-------------|-------------|
 | `event_registry` | `trigger_logic`, `version` | N/A | N/A |
-| `feature_vectors` | All inputs for triggers | 1m/15m | N/A |
+| `feature_vectors` | All inputs for triggers | 5m | N/A |
 
 ## Metrics
 *   **`event_frequency_per_day`**: Average number of occurrences per symbol per day.

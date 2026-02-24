@@ -6,8 +6,8 @@ The degree to which market prices reflect all available information. Crypto mark
 ## Data Requirements
 | Dataset | Columns | Granularity | Min History |
 |---------|---------|-------------|-------------|
-| `perp_ohlcv_1m` | `close`, `volume` | 1m | 180 days |
-| `spot_ohlcv_1m` | `close` | 1m | 180 days |
+| `perp_ohlcv_5m` | `close`, `volume` | 5m | 180 days |
+| `spot_ohlcv_5m` | `close` | 5m | 180 days |
 
 ## Metrics
 *   **`variance_ratio`**: Test of the random walk hypothesis; comparing return variances at different sampling frequencies.
@@ -24,4 +24,4 @@ The degree to which market prices reflect all available information. Crypto mark
 
 ## Artifacts
 *   **`project/eval/efficiency_tests.py`**: Statistical tests for Hurst and Variance Ratios.
-*   **`data/lake/reports/market_health/efficiency_v1.parquet`**: Timeseries of efficiency metrics per symbol.
+*   **`data/reports/market_health/efficiency_v1.parquet`**: Timeseries of efficiency metrics per symbol.

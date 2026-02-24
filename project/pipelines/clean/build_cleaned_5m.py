@@ -144,6 +144,22 @@ def main() -> int:
 
             raw["timestamp"] = pd.to_datetime(raw["timestamp"], utc=True)
             raw = raw.sort_values("timestamp").drop_duplicates(subset=["timestamp"]).reset_index(drop=True)
+            inputs.append(
+                {
+                    "path": str(raw_dir),
+                    "rows": int(len(raw)),
+                    "start_ts": raw["timestamp"].min().isoformat(),
+                    "end_ts": raw["timestamp"].max().isoformat(),
+                    "provenance": {
+                        "vendor": "binance",
+                        "exchange": "binance",
+                        "schema_version": "raw_ohlcv_5m_v1",
+                        "schema_hash": schema_hash_from_columns(raw.columns.tolist()),
+                        "extraction_start": raw["timestamp"].min().isoformat(),
+                        "extraction_end": raw["timestamp"].max().isoformat(),
+                    },
+                }
+            )
 
             start_ts = raw["timestamp"].min()
             end_ts = raw["timestamp"].max()
@@ -162,6 +178,22 @@ def main() -> int:
 
             if market == "perp" and not funding.empty:
                 funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
+                inputs.append(
+                    {
+                        "path": str(funding_dir),
+                        "rows": int(len(funding)),
+                        "start_ts": funding["timestamp"].min().isoformat(),
+                        "end_ts": funding["timestamp"].max().isoformat(),
+                        "provenance": {
+                            "vendor": "binance",
+                            "exchange": "binance",
+                            "schema_version": "raw_funding_v1",
+                            "schema_hash": schema_hash_from_columns(funding.columns.tolist()),
+                            "extraction_start": funding["timestamp"].min().isoformat(),
+                            "extraction_end": funding["timestamp"].max().isoformat(),
+                        },
+                    }
+                )
                 explicit_scale = None
                 if str(args.funding_scale).strip().lower() != "auto":
                     explicit_scale = float(FUNDING_SCALE_NAME_TO_MULTIPLIER[str(args.funding_scale).strip().lower()])
@@ -240,6 +272,7 @@ def main() -> int:
                 "funding_scale_mode": str(args.funding_scale),
             }
 
+        validate_input_provenance(inputs)
         finalize_manifest(manifest, "success", stats=stats)
         return 0
     except Exception as exc:

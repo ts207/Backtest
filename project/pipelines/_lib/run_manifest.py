@@ -165,7 +165,7 @@ def start_manifest(
     outputs: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     project_root = _project_root()
-    return {
+    manifest = {
         "run_id": run_id,
         "stage": stage_name,
         "started_at": _utc_now_iso(),
@@ -180,6 +180,7 @@ def start_manifest(
         "error": None,
         "stats": None,
     }
+    return enrich_manifest_with_env(manifest)
 
 
 def finalize_manifest(

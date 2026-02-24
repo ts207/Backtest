@@ -22,6 +22,9 @@ def test_start_manifest_includes_git_and_spec_hashes():
     assert "git_commit" in manifest
     assert "spec_hashes" in manifest
     assert isinstance(manifest["spec_hashes"], dict)
+    assert "python_version" in manifest
+    assert "platform" in manifest
+    assert "env_snapshot" in manifest
 
 
 def test_finalize_manifest_hashes_input_parquets(monkeypatch, tmp_path):

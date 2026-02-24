@@ -6,8 +6,8 @@ Market behavior and liquidity dynamics stratified by global trading sessions (As
 ## Data Requirements
 | Dataset | Columns | Granularity | Min History |
 |---------|---------|-------------|-------------|
-| `perp_ohlcv_1m` | `high`, `low`, `close`, `volume` | 1m | 60 days |
-| `tob_1m_agg` | `spread_bps_mean`, `bid_depth_usd_mean` | 1m | 30 days |
+| `perp_ohlcv_5m` | `high`, `low`, `close`, `volume` | 5m | 60 days |
+| `tob_5m_agg` | `spread_bps_mean`, `bid_depth_usd_mean` | 5m | 30 days |
 
 ## Metrics
 *   **`session_range_pct`**: The high-low range of a session (e.g., Asia) as a percentile of the last 60 sessions of the same type.
@@ -25,4 +25,4 @@ Market behavior and liquidity dynamics stratified by global trading sessions (As
 ## Artifacts
 *   **`spec/features/session_features.yaml`**: Definitions for session ranges and transition flags.
 *   **`project/features/context.py`**: Implementation of session hour and transition logic.
-*   **`data/lake/reports/session_stats.parquet`**: Daily session-by-session performance and liquidity metrics.
+*   **`data/reports/session_stats.parquet`**: Daily session-by-session performance and liquidity metrics.

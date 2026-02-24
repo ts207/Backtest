@@ -34,6 +34,10 @@ from pipelines._lib.io_utils import (
 )
 
 
+def _default_horizons_bars_csv() -> str:
+    return ",".join(str(int(x)) for x in DEFAULT_EVENT_HORIZON_BARS)
+
+
 def _load_bars(run_id: str, symbol: str, timeframe: str = "5m") -> pd.DataFrame:
     candidates = [
         run_scoped_lake_path(DATA_ROOT, run_id, "cleaned", "perp", symbol, f"bars_{timeframe}"),
@@ -324,8 +328,11 @@ def main():
     parser.add_argument("--event_type", required=True)
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--timeframe", default="5m")
-    parser.add_argument("--horizons_bars", default="1,3,12",
-                        help="Forward horizons in bars for label join-rate check (default: 1,3,12 = 5m/15m/60m)")
+    parser.add_argument(
+        "--horizons_bars",
+        default=_default_horizons_bars_csv(),
+        help="Forward horizons in bars for label join-rate check (default: derived from timeframe constants)",
+    )
     args = parser.parse_args()
 
     horizons_bars = [int(x.strip()) for x in args.horizons_bars.split(",") if x.strip()]

@@ -6,8 +6,8 @@ Structural constraints and relationships that should approximately hold in a fun
 ## Data Requirements
 | Dataset | Columns | Granularity | Min History |
 |---------|---------|-------------|-------------|
-| `perp_ohlcv_1m` | `close` | 1m | 30 days |
-| `spot_ohlcv_1m` | `close` | 1m | 30 days |
+| `perp_ohlcv_5m` | `close` | 5m | 30 days |
+| `spot_ohlcv_5m` | `close` | 5m | 30 days |
 | `um_funding_rates`| `funding_rate` | 8h | 30 days |
 
 ## Metrics
@@ -24,4 +24,4 @@ Structural constraints and relationships that should approximately hold in a fun
 
 ## Artifacts
 *   **`project/engine/execution_model.py`**: Implementation of arbitrage and parity bounds.
-*   **`data/lake/reports/invariants/parity_violations.parquet`**: Timeseries of identified invariant breaks.
+*   **`data/reports/invariants/parity_violations.parquet`**: Timeseries of identified invariant breaks.

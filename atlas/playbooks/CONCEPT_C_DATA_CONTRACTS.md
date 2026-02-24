@@ -6,9 +6,9 @@ The formal specification of venue-specific mechanics and data schemas. Data cont
 ## Data Requirements
 | Dataset | Columns | Granularity | Min History |
 |---------|---------|-------------|-------------|
-| `perp_ohlcv_1m` | All core | 1m | N/A |
+| `perp_ohlcv_5m` | All core | 5m | N/A |
 | `um_funding_rates`| `funding_rate`, `funding_time` | 8h | N/A |
-| `mark_price_1m` | `mark_price` | 1m | N/A |
+| `mark_price_5m` | `mark_price` | 5m | N/A |
 
 ## Metrics
 *   **`schema_conformance_rate`**: Percentage of ingested rows matching the target schema (type and nullability).

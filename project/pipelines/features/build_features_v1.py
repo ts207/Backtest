@@ -26,6 +26,10 @@ from pipelines._lib.run_manifest import (
 )
 from pipelines._lib.validation import ensure_utc_timestamp, validate_columns
 
+FUNDING_MAX_STALENESS = pd.Timedelta("8h")
+OI_MAX_STALENESS = pd.Timedelta("2h")
+LIQ_MAX_STALENESS = pd.Timedelta("30min")
+
 
 def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
     if df.empty:
@@ -35,6 +39,10 @@ def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
         "start_ts": df["timestamp"].min().isoformat(),
         "end_ts": df["timestamp"].max().isoformat(),
     }
+
+
+def _revision_lag_minutes(revision_lag_bars: int) -> int:
+    return int(revision_lag_bars) * 5
 
 
 def _rolling_percentile(series: pd.Series, window: int) -> pd.Series:
@@ -123,6 +131,7 @@ def _merge_optional_oi_liquidation(
                 oi_series.sort_values("timestamp"),
                 on="timestamp",
                 direction="backward",
+                tolerance=OI_MAX_STALENESS,
             )
             if len(out) != expected_rows:
                 raise ValueError(
@@ -166,6 +175,7 @@ def _merge_optional_oi_liquidation(
             liq_payload.sort_values("timestamp"),
             on="timestamp",
             direction="backward",
+            tolerance=LIQ_MAX_STALENESS,
         )
         if len(out) != expected_rows:
             raise ValueError(
@@ -181,6 +191,35 @@ def _merge_optional_oi_liquidation(
     out["liquidation_notional"] = pd.to_numeric(out["liquidation_notional"], errors="coerce").fillna(0.0)
     out["liquidation_count"] = pd.to_numeric(out["liquidation_count"], errors="coerce").fillna(0.0)
     return out
+
+
+def _merge_funding_rates(bars: pd.DataFrame, funding: pd.DataFrame, symbol: str) -> pd.DataFrame:
+    out = bars.copy()
+    if out["timestamp"].duplicated(keep=False).any():
+        raise ValueError(f"Bar timestamps must be unique for {symbol}")
+
+    funding_rates = funding[["timestamp", "funding_rate_scaled"]].copy()
+    funding_rates["timestamp"] = pd.to_datetime(funding_rates["timestamp"], utc=True, errors="coerce")
+    funding_rates["funding_rate_scaled"] = pd.to_numeric(funding_rates["funding_rate_scaled"], errors="coerce")
+    funding_rates = funding_rates.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+
+    if funding_rates["timestamp"].duplicated(keep=False).any():
+        raise ValueError(f"Funding timestamps must be unique for {symbol}")
+
+    expected_rows = int(len(out))
+    merged = pd.merge_asof(
+        out.sort_values("timestamp"),
+        funding_rates.sort_values("timestamp"),
+        on="timestamp",
+        direction="backward",
+        tolerance=FUNDING_MAX_STALENESS,
+    )
+    if len(merged) != expected_rows:
+        raise ValueError(
+            f"Cardinality mismatch after funding merge for {symbol}: "
+            f"expected {expected_rows}, got {len(merged)}"
+        )
+    return merged
 
 
 def _rolling_zscore(series: pd.Series, window: int, min_periods: int = 24) -> pd.Series:
@@ -214,6 +253,7 @@ def _add_basis_features(frame: pd.DataFrame, symbol: str, run_id: str, market: s
         out["basis_zscore"] = 0.0
         out["cross_exchange_spread_z"] = 0.0
         out["spread_zscore"] = 0.0
+        out["basis_spot_coverage"] = 0.0
         return out
 
     spot = _load_spot_close_reference(symbol=symbol, run_id=run_id)
@@ -231,6 +271,7 @@ def _add_basis_features(frame: pd.DataFrame, symbol: str, run_id: str, market: s
         out['basis_spot_coverage'] = coverage
     else:
         out["spot_close"] = np.nan
+        out["basis_spot_coverage"] = 0.0
 
     perp_close = pd.to_numeric(out["close"], errors="coerce")
     spot_close = pd.to_numeric(out["spot_close"], errors="coerce")
@@ -239,7 +280,9 @@ def _add_basis_features(frame: pd.DataFrame, symbol: str, run_id: str, market: s
     basis_z = _rolling_zscore(pd.to_numeric(out["basis_bps"], errors="coerce"), window=96)
     out["basis_zscore"] = basis_z.where(out["basis_bps"].notna(), np.nan)
     out["cross_exchange_spread_z"] = out["basis_zscore"]
-    out["spread_zscore"] = out["basis_zscore"]
+    spread_bps = pd.to_numeric(out.get("spread_bps", pd.Series(np.nan, index=out.index)), errors="coerce")
+    spread_z = _rolling_zscore(spread_bps, window=96)
+    out["spread_zscore"] = spread_z.where(spread_bps.notna(), np.nan)
     out = out.drop(columns=["spot_close"], errors="ignore")
     return out
 
@@ -367,7 +410,7 @@ def main() -> int:
                         f"Funding schema for {symbol} missing rate column; expected funding_rate_scaled or funding_rate."
                     )
                 funding_rates = funding[["timestamp", rate_col]].rename(columns={rate_col: "funding_rate_scaled"})
-                bars = bars.merge(funding_rates, on="timestamp", how="left")
+                bars = _merge_funding_rates(bars, funding_rates, symbol=symbol)
             else:
                 bars["funding_rate_scaled"] = 0.0
 
@@ -376,7 +419,7 @@ def main() -> int:
             bars = _merge_optional_oi_liquidation(bars, symbol=symbol, market=market, run_id=run_id)
             bars = _add_basis_features(bars, symbol=symbol, run_id=run_id, market=market)
             bars["revision_lag_bars"] = int(args.revision_lag_bars)
-            bars["revision_lag_minutes"] = int(args.revision_lag_bars) * 15
+            bars["revision_lag_minutes"] = _revision_lag_minutes(int(args.revision_lag_bars))
 
             features = bars[[
                 "timestamp",

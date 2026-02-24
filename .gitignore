@@ -52,3 +52,9 @@ gha-creds-*.json
 /show_candidates.py
 /check_diagnostics.py
 /run_condition_certification.py
+/debug.log
+/debug*.log
+/debug*.txt
+/diag_out.txt
+/ingest_run.log
+/nohup.out

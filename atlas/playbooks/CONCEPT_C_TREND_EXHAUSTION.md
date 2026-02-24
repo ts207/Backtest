@@ -6,7 +6,7 @@ The statistical identification of "mature" trends that are likely to reverse or 
 ## Data Requirements
 | Dataset | Columns | Granularity | Min History |
 |---------|---------|-------------|-------------|
-| `perp_ohlcv_15m` | `close`, `volume` | 15m | 120 days |
+| `perp_ohlcv_5m` | `close`, `volume` | 5m | 120 days |
 | `um_open_interest_hist` | `sum_open_interest` | 5m | 60 days |
 
 ## Metrics
@@ -25,4 +25,4 @@ The statistical identification of "mature" trends that are likely to reverse or 
 ## Artifacts
 *   **`spec/features/trend_exhaustion.yaml`**: Features for trend age, streaks, and OI deltas.
 *   **`project/features/funding_persistence.py`**: Logic for identifying trend persistence vs exhaustion.
-*   **`data/lake/reports/trend_maturity_stats.csv`**: Correlation between trend age and future returns.
+*   **`data/reports/trend_maturity_stats.csv`**: Correlation between trend age and future returns.

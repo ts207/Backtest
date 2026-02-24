@@ -7,7 +7,7 @@ The simulation of a candidate edge's performance across long-horizon historical 
 | Dataset | Columns | Granularity | Min History |
 |---------|---------|-------------|-------------|
 | `blueprints.jsonl` | `conditions`, `action` | Strategy-level | N/A |
-| `cleaned_1m` | All OHLCV | 1m | 2+ years |
+| `cleaned_5m` | All OHLCV | 5m | 2+ years |
 
 ## Metrics
 *   **`backtest_sharpe`**: Annualized reward-to-risk ratio of the strategy's equity curve.
@@ -25,4 +25,4 @@ The simulation of a candidate edge's performance across long-horizon historical 
 ## Artifacts
 *   **`project/pipelines/backtest/backtest_strategies.py`**: The core strategy execution engine.
 *   **`project/strategies/vol_compression_v1.py`**: A template implementation of a backtestable strategy.
-*   **`data/lake/reports/backtest/equity_curves.parquet`**: Timeseries of returns per strategy.
+*   **`data/reports/backtest/equity_curves.parquet`**: Timeseries of returns per strategy.

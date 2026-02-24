@@ -29,6 +29,7 @@ from pipelines._lib.execution_costs import resolve_execution_costs
 from pipelines._lib.spec_loader import load_global_defaults
 from pipelines._lib.timeframe_constants import HORIZON_BARS_BY_TIMEFRAME
 from events.registry import EVENT_REGISTRY_SPECS
+from events.registry import load_registry_events
 from pipelines._lib.spec_utils import get_spec_hashes
 from pipelines.research.analyze_conditional_expectancy import (
     _bh_adjust,
@@ -79,6 +80,42 @@ _TEMPLATE_DIRECTION: Dict[str, int] = {
 def _make_family_id(symbol: str, event_type: str, rule: str, horizon: str, cond_label: str) -> str:
     """BH family key: stratified by symbol so FDR is controlled per-symbol (F-3 fix)."""
     return f"{symbol}_{event_type}_{rule}_{horizon}_{cond_label}"
+
+
+def _resolved_sample_size(joined_event_count: int, symbol_event_count: int) -> int:
+    """Sample size for a candidate must reflect joined observations, not symbol totals."""
+    try:
+        joined = int(joined_event_count)
+    except (TypeError, ValueError):
+        joined = 0
+    try:
+        symbol_total = int(symbol_event_count)
+    except (TypeError, ValueError):
+        symbol_total = 0
+    return max(0, min(joined, symbol_total if symbol_total > 0 else joined))
+
+
+def _apply_multiplicity_controls(raw_df: pd.DataFrame, max_q: float) -> pd.DataFrame:
+    """Apply BH correction per-family, then a global BH over family-adjusted q-values."""
+    if raw_df.empty:
+        out = raw_df.copy()
+        out["q_value_family"] = pd.Series(dtype=float)
+        out["is_discovery_family"] = pd.Series(dtype=bool)
+        out["q_value"] = pd.Series(dtype=float)
+        out["is_discovery"] = pd.Series(dtype=bool)
+        return out
+
+    family_frames: List[pd.DataFrame] = []
+    for _, family_df in raw_df.groupby("family_id"):
+        fam = family_df.copy()
+        fam["q_value_family"] = _bh_adjust(fam["p_value"])
+        fam["is_discovery_family"] = fam["q_value_family"] <= float(max_q)
+        family_frames.append(fam)
+
+    out = pd.concat(family_frames, ignore_index=True)
+    out["q_value"] = _bh_adjust(out["q_value_family"])
+    out["is_discovery"] = out["q_value"] <= float(max_q)
+    return out
 
 
 def _load_gates_spec() -> Dict[str, Any]:
@@ -140,7 +177,7 @@ def _join_events_to_features(
     a backward merge (most-recent feature bar at or before the event timestamp).
     Returns a merged DataFrame with feature rows for each event.
     """
-    ts_col = "timestamp" if "timestamp" in events_df.columns else "enter_ts"
+    ts_col = "enter_ts" if "enter_ts" in events_df.columns else "timestamp"
     if ts_col not in events_df.columns:
         return pd.DataFrame()
 
@@ -166,6 +203,7 @@ def calculate_expectancy(
     rule: str,
     horizon: str,
     shift_labels_k: int = 0,
+    entry_lag_bars: int = 1,
     min_samples: int = 30,
 ) -> Tuple[float, float, float, bool]:
     """
@@ -185,6 +223,9 @@ def calculate_expectancy(
     """
     if sym_events.empty or features_df.empty:
         return 0.0, 1.0, 0.0, False
+
+    if int(entry_lag_bars) < 1:
+        raise ValueError("entry_lag_bars must be >= 1 to prevent same-bar entry leakage")
 
     horizon_bars = _horizon_to_bars(horizon)
     direction = _TEMPLATE_DIRECTION.get(rule, 1)
@@ -207,10 +248,17 @@ def calculate_expectancy(
         ts = row["timestamp"]
         # Find position of this feature row in features_df
         pos = int(feat_ts_idx.searchsorted(ts, side="left"))
-        future_pos = pos + horizon_bars + shift_labels_k
-        if pos < 0 or pos >= len(feat_close) or future_pos >= len(feat_close):
+        entry_pos = pos + int(entry_lag_bars)
+        future_pos = entry_pos + horizon_bars + shift_labels_k
+        if (
+            pos < 0
+            or pos >= len(feat_close)
+            or entry_pos < 0
+            or entry_pos >= len(feat_close)
+            or future_pos >= len(feat_close)
+        ):
             continue
-        close_t0 = feat_close[pos]
+        close_t0 = feat_close[entry_pos]
         close_fwd = feat_close[future_pos]
         if close_t0 == 0 or pd.isna(close_t0) or pd.isna(close_fwd):
             continue
@@ -364,6 +412,8 @@ def _make_parser() -> argparse.ArgumentParser:
                         help="Path to execution cost config (fees.yaml).")
     parser.add_argument("--shift_labels_k", type=int, default=0,
                         help="If > 0, shift labels by k bars (true misalignment canary).")
+    parser.add_argument("--entry_lag_bars", type=int, default=1,
+                        help="Entry lag in bars after event timestamp. Must be >= 1 (default: 1).")
     parser.add_argument("--candidate_plan", default=None,
                         help="Path to Atlas candidate plan (jsonl). If provided, drives discovery.")
     parser.add_argument("--atlas_mode", type=int, default=0,
@@ -382,6 +432,8 @@ def main():
 
     # Use standard manifest helpers
     manifest = start_manifest("phase2_conditional_hypotheses", args.run_id, vars(args), [], [])
+    if int(args.entry_lag_bars) < 1:
+        raise ValueError("entry_lag_bars must be >= 1 to prevent same-bar entry leakage")
 
     # 1. Lock in Invariants (Spec-Binding)
     spec_hashes = get_spec_hashes(PROJECT_ROOT)
@@ -423,10 +475,17 @@ def main():
         log.error("Events file not found: %s", events_path)
         sys.exit(1)
 
-    try:
-        events_df = pd.read_csv(events_path)
-    except pd.errors.EmptyDataError:
-        events_df = pd.DataFrame()
+    events_df = load_registry_events(
+        data_root=DATA_ROOT,
+        run_id=args.run_id,
+        event_type=args.event_type,
+        symbols=symbols,
+    )
+    if events_df.empty:
+        try:
+            events_df = pd.read_csv(events_path)
+        except pd.errors.EmptyDataError:
+            events_df = pd.DataFrame()
 
     # Load and merge market_state to support conditioning
     if not events_df.empty and "symbol" in events_df.columns:
@@ -542,6 +601,7 @@ def main():
             effect, pval, n_joined, stability_pass = calculate_expectancy(
                 bucket_events, features_df, rule, horizon,
                 shift_labels_k=args.shift_labels_k,
+                entry_lag_bars=args.entry_lag_bars,
                 min_samples=min_samples,
             )
             
@@ -582,7 +642,7 @@ def main():
                 "stressed_after_cost_expectancy_per_trade": after_cost_conservative,
                 "cost_ratio": cost / effect if effect != 0 else 1.0,
                 "p_value": pval,
-                "sample_size": len(sym_events),
+                "sample_size": _resolved_sample_size(n_joined, len(sym_events)),
                 "n_events": int(n_joined),
                 "sign": 1 if effect > 0 else -1,
                 "gate_economic": econ_pass,
@@ -629,6 +689,7 @@ def main():
                     effect, pval, n_joined, stability_pass = calculate_expectancy(
                         sym_all_events, features_df, rule, horizon,
                         shift_labels_k=args.shift_labels_k,
+                        entry_lag_bars=args.entry_lag_bars,
                         min_samples=args.min_samples,
                     )
                     
@@ -678,7 +739,7 @@ def main():
                             "stressed_after_cost_expectancy_per_trade": aft_cost_conservative,
                             "cost_ratio": cost / eff if eff != 0 else 1.0,
                             "p_value": pv,
-                            "sample_size": len(sym_all_events),
+                            "sample_size": _resolved_sample_size(n, len(sym_all_events)),
                             "n_events": int(n),
                             "sign": 1 if eff > 0 else -1,
                             "gate_economic": ec_pass,
@@ -729,6 +790,7 @@ def main():
                             eff_b, pv_b, n_b, stab_b = calculate_expectancy(
                                 bucket_events, features_df, rule, horizon,
                                 shift_labels_k=args.shift_labels_k,
+                                entry_lag_bars=args.entry_lag_bars,
                                 min_samples=effective_min_samples,
                             )
                             _add_res(eff_b, pv_b, n_b, stab_b, f"{col}_{val}")
@@ -743,20 +805,11 @@ def main():
 
     raw_df = pd.DataFrame(results)
 
-    # 4. Multiplicity Control (BH-FDR per family)
-    fdr_results = []
-    for family_id, family_df in raw_df.groupby("family_id"):
-        family_df = family_df.copy()
-        family_df["q_value"] = _bh_adjust(family_df["p_value"])
-        # is_discovery = True means the null was rejected at FDR level max_q.
-        family_df["is_discovery"] = family_df["q_value"] <= max_q
-        fdr_results.append(family_df)
+    # 4. Multiplicity Control: family BH + global BH over family-adjusted q-values.
+    fdr_df = _apply_multiplicity_controls(raw_df=raw_df, max_q=max_q)
 
-    fdr_df = pd.concat(fdr_results, ignore_index=True)
-
-    # After BH-FDR: write the definitive is_discovery (overrides the row-level False placeholder).
-    # Then refresh promotion_track and compile_eligible_phase2_fallback from it.
-    fdr_df["is_discovery"] = fdr_df["q_value"] <= max_q
+    # After multiplicity control: refresh promotion_track and
+    # compile_eligible_phase2_fallback from final discovery status.
 
     # Invariant: Phase 2 Final Pass REQUIRES discovery (multiplicity pass)
     fdr_df["gate_phase2_final"] = fdr_df["gate_phase2_final"] & fdr_df["is_discovery"]
@@ -802,6 +855,7 @@ def main():
         "thresholds": {
             "max_q_value": max_q,
             "min_after_cost_expectancy_bps": gates.get("min_after_cost_expectancy_bps", 0.1),
+            "entry_lag_bars": int(args.entry_lag_bars),
         },
         "summary": {
             "total_tested": int(len(fdr_df)),

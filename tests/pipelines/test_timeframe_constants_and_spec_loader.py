@@ -16,6 +16,7 @@ from pipelines._lib.timeframe_constants import (
     HORIZON_BARS_BY_TIMEFRAME,
 )
 from pipelines.research import phase2_candidate_discovery
+from pipelines.research import validate_event_quality
 
 
 def test_runner_uses_canonical_bars_per_year_map():
@@ -30,6 +31,10 @@ def test_horizon_lookup_uses_canonical_mapping():
 
 def test_default_event_horizon_grid_is_stable():
     assert DEFAULT_EVENT_HORIZON_BARS == [1, 3, 12]
+
+
+def test_validate_event_quality_default_horizons_uses_canonical_constant():
+    assert validate_event_quality._default_horizons_bars_csv() == ",".join(str(x) for x in DEFAULT_EVENT_HORIZON_BARS)
 
 
 def test_spec_loader_precedence_explicit_over_env_over_default(tmp_path, monkeypatch):

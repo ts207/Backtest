@@ -6,8 +6,8 @@ The cyclical alternation between market states: `compression → expansion → e
 ## Data Requirements
 | Dataset | Columns | Granularity | Min History |
 |---------|---------|-------------|-------------|
-| `perp_ohlcv_1m` | `high`, `low`, `close` | 1m | 90 days |
-| `perp_ohlcv_15m`| `high`, `low`, `close` | 15m | 90 days |
+| `perp_ohlcv_5m` | `high`, `low`, `close` | 5m | 90 days |
+| `features_v1` | `rv_96`, `rv_pct_17280` | 5m | 90 days |
 
 ## Metrics
 *   **`realized_vol_bps`**: Standard deviation of log returns over a window, expressed in basis points.
@@ -25,4 +25,4 @@ The cyclical alternation between market states: `compression → expansion → e
 ## Artifacts
 *   **`spec/features/volatility.yaml`**: Feature specs for ATR percentiles and realized vol.
 *   **`project/features/vol_shock_relaxation.py`**: Implementation of volatility regime filters.
-*   **`data/lake/features/perp/{symbol}/15m/vol_regimes/`**: Output tables for volatility states.
+*   **`data/lake/features/perp/{symbol}/5m/vol_regimes/`**: Output tables for volatility states.

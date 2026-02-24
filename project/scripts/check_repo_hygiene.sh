@@ -23,6 +23,12 @@ blocked_patterns=(
   '^data/reports/.+'
   '^data/runs/.+'
   '^data/lake/(cleaned|features|runs)/.+'
+  '^debug\.log$'
+  '^debug.*\.log$'
+  '^debug.*\.txt$'
+  '^diag_out\.txt$'
+  '^ingest_run\.log$'
+  '^nohup\.out$'
 )
 for pattern in "${blocked_patterns[@]}"; do
   if rg -n "$pattern" "$present_tracked" >/tmp/hygiene_blocked.txt; then

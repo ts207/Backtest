@@ -31,6 +31,8 @@ from pipelines._lib.run_manifest import (
     validate_input_provenance,
 )
 
+FUNDING_MAX_STALENESS = pd.Timedelta("8h")
+
 
 def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
     if df.empty:
@@ -51,6 +53,62 @@ def _dedupe_timestamp_rows(df: pd.DataFrame, label: str) -> tuple[pd.DataFrame, 
         logging.warning("Dropping %s duplicate timestamp rows for %s (keeping last).", dupes, label)
         out = out.drop_duplicates(subset=["timestamp"], keep="last")
     return out.reset_index(drop=True), dupes
+
+
+def _align_funding_to_bars(bars: pd.DataFrame, funding: pd.DataFrame, *, symbol: str) -> pd.DataFrame:
+    required = {"timestamp", "funding_rate_scaled"}
+    missing = required - set(funding.columns)
+    if missing:
+        raise ValueError(f"Funding data missing required columns for {symbol}: {sorted(missing)}")
+    if bars["timestamp"].duplicated(keep=False).any():
+        raise ValueError(f"Bar timestamps must be unique for funding alignment ({symbol})")
+
+    funding_rates = funding[["timestamp", "funding_rate_scaled"]].copy()
+    funding_rates["timestamp"] = pd.to_datetime(funding_rates["timestamp"], utc=True, errors="coerce")
+    funding_rates["funding_rate_scaled"] = pd.to_numeric(funding_rates["funding_rate_scaled"], errors="coerce")
+    funding_rates = funding_rates.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+    if funding_rates["timestamp"].duplicated(keep=False).any():
+        raise ValueError(f"Funding timestamps must be unique for {symbol}")
+
+    expected_rows = int(len(bars))
+    aligned = pd.merge_asof(
+        bars.sort_values("timestamp"),
+        funding_rates.sort_values("timestamp"),
+        on="timestamp",
+        direction="backward",
+        tolerance=FUNDING_MAX_STALENESS,
+    )
+    if len(aligned) != expected_rows:
+        raise ValueError(
+            f"Cardinality mismatch after funding alignment for {symbol}: "
+            f"expected {expected_rows}, got {len(aligned)}"
+        )
+    return aligned
+
+
+def _assert_complete_funding_series(frame: pd.DataFrame, *, symbol: str) -> pd.Series:
+    if "funding_rate_scaled" not in frame.columns:
+        raise ValueError(f"Missing funding_rate_scaled for {symbol}")
+    funding = pd.to_numeric(frame["funding_rate_scaled"], errors="coerce")
+    if funding.isna().all():
+        raise ValueError(f"Unable to align funding_rate_scaled for {symbol}")
+
+    missing_pct = float(funding.isna().mean()) if len(funding) else 0.0
+    if missing_pct > 0.0:
+        raise ValueError(
+            f"Funding alignment gaps for {symbol}: missing_pct={missing_pct:.4f}; "
+            "keep funding gaps explicit and rebuild with complete funding coverage."
+        )
+
+    if "funding_missing" in frame.columns:
+        funding_missing = frame["funding_missing"].fillna(True).astype(bool)
+        flagged_missing_pct = float(funding_missing.mean()) if len(funding_missing) else 0.0
+        if flagged_missing_pct > 0.0:
+            raise ValueError(
+                f"Funding coverage gaps flagged for {symbol}: funding_missing_pct={flagged_missing_pct:.4f}; "
+                "rebuild cleaned funding inputs before context generation."
+            )
+    return funding.astype(float)
 
 
 def main() -> int:
@@ -130,6 +188,8 @@ def main() -> int:
             if bars.empty:
                 raise ValueError(f"No bars in requested range for {symbol}")
 
+            funding_dupes = 0
+            funding_input_path = str(bars_dir) if bars_dir else ""
             if "funding_rate_scaled" not in bars.columns:
                 funding_candidates = [
                     run_scoped_lake_path(
@@ -146,21 +206,20 @@ def main() -> int:
                 funding = read_parquet(list_parquet_files(funding_dir)) if funding_dir else pd.DataFrame()
                 if funding.empty:
                     raise ValueError(f"Missing funding_rate_scaled for {symbol} at timeframe={args.timeframe}")
-                funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
-                funding = (
-                    funding[["timestamp", "funding_rate_scaled"]]
-                    .dropna(subset=["timestamp"])
-                )
+                funding_input_path = str(funding_dir) if funding_dir else ""
+                funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True, errors="coerce")
+                funding = funding.dropna(subset=["timestamp"])
+                if "funding_rate_scaled" not in funding.columns:
+                    raise ValueError(
+                        f"Funding schema for {symbol} missing funding_rate_scaled at timeframe={args.timeframe}"
+                    )
+                funding = funding[["timestamp", "funding_rate_scaled"]].copy()
                 funding, funding_dupes = _dedupe_timestamp_rows(
                     funding, label=f"funding:{symbol}:{args.timeframe}"
                 )
-                bars = bars.merge(funding, on="timestamp", how="left", validate="one_to_one")
-                bars["funding_rate_scaled"] = pd.to_numeric(bars["funding_rate_scaled"], errors="coerce")
-                if bars["funding_rate_scaled"].isna().all():
-                    raise ValueError(f"Unable to align funding_rate_scaled for {symbol}")
-                bars["funding_rate_scaled"] = bars["funding_rate_scaled"].ffill().fillna(0.0)
-            else:
-                funding_dupes = 0
+                bars = _align_funding_to_bars(bars, funding, symbol=symbol)
+
+            bars["funding_rate_scaled"] = _assert_complete_funding_series(bars, symbol=symbol)
 
             inputs.append(
                 {
@@ -181,7 +240,7 @@ def main() -> int:
                 if not funding_non_null.empty:
                     inputs.append(
                         {
-                            "path": str(bars_dir),
+                            "path": funding_input_path,
                             **_collect_stats(funding_non_null),
                             "provenance": {
                                 "vendor": "binance",

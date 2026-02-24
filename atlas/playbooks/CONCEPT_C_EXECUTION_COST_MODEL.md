@@ -7,7 +7,7 @@ A deterministic, calibration-ready model of transaction costs including explicit
 | Dataset | Columns | Granularity | Min History |
 |---------|---------|-------------|-------------|
 | `tob_1s` | `bid_price`, `ask_price`, `bid_qty`, `ask_qty` | 1s | 7 days |
-| `perp_ohlcv_1m` | `quote_volume`, `volume` | 1m | 30 days |
+| `perp_ohlcv_5m` | `quote_volume`, `volume` | 5m | 30 days |
 
 ## Metrics
 *   **`half_spread_bps`**: Cost of crossing the spread for a small order.
@@ -25,4 +25,4 @@ A deterministic, calibration-ready model of transaction costs including explicit
 ## Artifacts
 *   **`project/engine/execution_model.py`**: Implementation of sqrt impact and slippage models.
 *   **`spec/cost_model.yaml`**: Versioned parameters for fees and impact coefficients.
-*   **`data/lake/reports/execution/cost_attribution.parquet`**: Detailed breakdown of costs per simulated trade.
+*   **`data/reports/execution/cost_attribution.parquet`**: Detailed breakdown of costs per simulated trade.

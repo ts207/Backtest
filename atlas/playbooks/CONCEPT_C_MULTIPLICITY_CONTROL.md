@@ -22,4 +22,4 @@ The statistical correction layer required to prevent false discoveries when test
 
 ## Artifacts
 *   **`project/eval/multiplicity.py`**: Implementation of FDR, Deflated Sharpe, and Reality Check.
-*   **`data/lake/reports/validation/multiplicity_report.json`**: Adjustment results for every batch of research trials.
+*   **`data/reports/validation/multiplicity_report.json`**: Adjustment results for every batch of research trials.

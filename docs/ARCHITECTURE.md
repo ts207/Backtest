@@ -1,78 +1,53 @@
 # Architecture Guide
 
-The Backtest platform is built as a **Subprocess-driven Orchestrator**. The primary entry point is `project/pipelines/run_all.py`, which coordinates a series of independent Python stages.
+Backtest is a subprocess-orchestrated pipeline. `project/pipelines/run_all.py` builds an ordered stage list and executes each stage as an independent script.
 
-## 🗺️ Data Flow Map
+## Stage Graph
 
-```mermaid
-graph TD
-    A[Research Backlog] --> B1[Stage 1: Template Generator]
-    B1 --> B2[Stage 2: Plan Enumerator]
-    B2 --> F
-    A1[Exchange Raw Data] --> B[Ingest Stage]
-    B --> C[Clean Stage]
-    C --> D[Feature Stage]
-    D --> E[Phase 1: Event Detection]
-    E --> F[Phase 2: Hypothesis Discovery]
-    F --> G[Bridge: Economic Validation]
-    G --> H[Blueprint Compiler]
-    H --> I[Walkforward Evaluation]
-    I --> J[Final Strategy Report]
-```
+1. Ingest (`pipelines/ingest/*`)
+2. Clean (`pipelines/clean/build_cleaned_5m.py`)
+3. Features (`pipelines/features/build_features_v1.py`)
+4. Context (`build_context_features.py`, `build_market_context.py`, `build_universe_snapshots.py`)
+5. Phase1 analyzers (`pipelines/research/analyze_*.py`)
+6. Registry (`pipelines/research/build_event_registry.py`)
+7. Phase2 discovery (`pipelines/research/phase2_candidate_discovery.py`)
+8. Bridge (`bridge_evaluate_phase2.py`)
+9. Candidate export / blueprint compile / strategy builder
+10. Optional backtest, walkforward, promotion, report
 
-## 🏗️ Core Components
+## Data Contracts
 
-### 1. The Orchestrator (`run_all.py`)
+### Data root
 
-Manages dependencies between stages. Each stage is an independent Python script that reads inputs from the `data/lake` and writes artifacts to `data/reports`.
+All artifacts are rooted at `BACKTEST_DATA_ROOT` (default: `./data`).
 
-### 2. Atlas-Driven Planning
+### Registry contract
 
-The research queue is now deterministic and driven by the Knowledge Atlas:
+`build_event_registry.py` canonicalizes Phase1 rows into:
+- `events.parquet`: normalized event table (`enter_ts`, `exit_ts`, `event_id`, `signal_column`)
+- `event_flags.parquet`: symbol/time grid with:
+  - impulse flags: `*_event`
+  - active-window flags: `*_active`
 
-- **Global Planner (`generate_candidate_templates.py`)**: Translates claims from the backlog into stable templates. It also outputs a `spec_tasks.parquet` to track missing specifications.
-- **Run Enumerator (`generate_candidate_plan.py`)**: Expands templates across symbols and applies strict budgets. It produces a hashable `candidate_plan.jsonl` and a **Feasibility Report**.
+### Phase2 timing contract
 
-### 3. Execution Timeframe
+`phase2_candidate_discovery.py`:
+- consumes registry events first,
+- uses `enter_ts` for alignment when available,
+- enforces `entry_lag_bars >= 1`.
 
-All backtest stages accept `--timeframe` (default `5m`); `run_all.py` accepts `--backtest_timeframe`. The engine maps this to `BARS_PER_YEAR` for correct Sharpe annualization. **All data lake paths use `5m`** — do not pass `15m` unless you have 15m OHLCV data ingested separately.
+## Integrity Controls
 
-### 4. The Data Lake (`data/lake/`)
+- PIT-safe backward joins with explicit tolerances.
+- Funding coverage fail-closed in context/market-state.
+- Family-level then global BH-FDR in Phase2.
+- Cost/tradability gates before promotion.
+- Run/stage manifests with config and provenance metadata.
 
-Organized by market type, symbol, and timeframe.
+## Main Runtime Paths
 
-- `raw/`: Unmodified OHLCV, funding, and OI data.
-- `cleaned/`: Normalized data with gaps filled and UTC timestamps aligned.
-- `features/`: High-level PIT indicators (e.g., volatility z-scores, Amihud ratio).
-
-### 5. The Spec System (`spec/`)
-
-This is the "Source of Truth" for the entire platform. If logic isn't in a Spec, it isn't used in production.
-
-- `concepts/`: High-level trading ideas.
-- `features/`: Mathematical definitions of indicators.
-- `events/`: Detection thresholds for market regimes.
-- `gates.yaml`: Hard thresholds for pass/fail criteria (e.g., `min_ess`, `max_q_value`).
-
-### 6. The Execution Engine (`project/engine/`)
-
-A high-performance event-driven runner.
-
-- **P&L Calculator**: Tracks position-weighted returns, including funding and borrow costs.
-- **Risk Allocator**: Enforces gross leverage and symbol-level risk budgets.
-- **Fills Model**: Simulates market-impact-adjusted execution.
-
-### 7. Strategy DSL (`project/strategy_dsl/`)
-
-Translates discovered edges into executable code.
-
-- **Schema**: Strictly typed dataclasses for Blueprints.
-- **Policies**: Event-specific defaults for entry/exit behavior.
-- **Interpreter**: Executes the logic nodes defined in a blueprint against a feature stream.
-
-## 🛡️ Invariants and Enforcement
-
-The platform enforces safety at every stage:
-
-- **Cost Config Digest**: A unique hash of the fee/slippage settings. Every blueprint is "bound" to a specific cost digest to prevent validating a strategy under cheaper costs than it was discovered with.
-- **Certification Baseline**: The `golden/` directory contains artifacts from a known-good "Certification Batch". Tests automatically compare current runs against this baseline to detect regressions.
+- Stage manifests: `data/runs/<run_id>/*.json`
+- Registry artifacts: `data/events/<run_id>/`
+- Phase2 artifacts: `data/reports/phase2/<run_id>/<event_type>/`
+- Bridge artifacts: `data/reports/bridge_eval/<run_id>/<event_type>/`
+- Blueprints: `data/reports/strategy_blueprints/<run_id>/`

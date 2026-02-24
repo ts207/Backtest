@@ -6,8 +6,8 @@ The physical limits on how much capital can be deployed into an edge before tran
 ## Data Requirements
 | Dataset | Columns | Granularity | Min History |
 |---------|---------|-------------|-------------|
-| `perp_ohlcv_1m` | `volume`, `quote_volume` | 1m | 90 days |
-| `tob_1m_agg` | `bid_depth_usd_mean`, `ask_depth_usd_mean` | 1m | 30 days |
+| `perp_ohlcv_5m` | `volume`, `quote_volume` | 5m | 90 days |
+| `tob_5m_agg` | `bid_depth_usd_mean`, `ask_depth_usd_mean` | 5m | 30 days |
 
 ## Metrics
 *   **`max_notional_per_trade`**: Maximum trade size allowed given a 5% participation rate cap of recent ADV.
@@ -24,4 +24,4 @@ The physical limits on how much capital can be deployed into an edge before tran
 
 ## Artifacts
 *   **`project/eval/capacity.py`**: Sensitivity analysis for capital scaling vs returns.
-*   **`data/lake/reports/capacity/scaling_limits.json`**: Maximum recommended capital per edge family.
+*   **`data/reports/capacity/scaling_limits.json`**: Maximum recommended capital per edge family.
