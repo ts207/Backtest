@@ -619,6 +619,8 @@ def main() -> int:
                 "phase2_quality_components",
                 "compile_eligible_phase2_fallback",
                 "promotion_track",
+                "discovery_start",
+                "discovery_end",
             ],
         )
         if not df.empty:

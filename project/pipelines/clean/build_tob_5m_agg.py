@@ -76,6 +76,7 @@ def main() -> int:
                 data["bid_depth_usd"] = data["bid_price"] * data["bid_qty"]
                 data["ask_depth_usd"] = data["ask_price"] * data["ask_qty"]
                 data["imbalance"] = data["bid_qty"] / (data["bid_qty"] + data["ask_qty"])
+                data["valid_snapshot"] = data["mid_price"].notna().astype(float)
 
                 resampler = data.resample("5min", on="timestamp")
                 agg = resampler.agg({
@@ -83,10 +84,17 @@ def main() -> int:
                     "bid_depth_usd": "mean",
                     "ask_depth_usd": "mean",
                     "imbalance": "mean",
-                    "mid_price": "last"
+                    "mid_price": "last",
+                    "valid_snapshot": "mean"
                 })
                 
-                agg.columns = [f"{col[0]}_{col[1]}" if isinstance(col, tuple) else col for col in agg.columns]
+                # Flatten MultiIndex columns
+                agg.columns = [
+                    f"{col[0]}_{col[1]}" if isinstance(col, tuple) and col[1] else col[0] 
+                    for col in agg.columns
+                ]
+                if "valid_snapshot_mean" in agg.columns:
+                    agg = agg.rename(columns={"valid_snapshot_mean": "tob_coverage"})
                 agg = agg.reset_index()
                 agg["symbol"] = symbol
 

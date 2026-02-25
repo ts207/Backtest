@@ -158,42 +158,35 @@ def build_walk_forward_split_labels(
     train_frac: float = 0.6,
     validation_frac: float = 0.2,
 ) -> pd.Series:
-    """Assign deterministic time-ordered walk-forward labels (train/validation/test)."""
+    """Assign deterministic time-ordered walk-forward labels (train/validation/test) using global timestamp cutoffs."""
     if df.empty:
         return pd.Series(dtype="object", index=df.index)
 
     out = pd.Series("", index=df.index, dtype="object")
-
-    def _assign_group(group: pd.DataFrame) -> None:
-        ordered = group.sort_values(time_col).index.to_list()
-        n = len(ordered)
-        if n == 0:
-            return
-        train_end = max(1, int(np.floor(n * train_frac)))
-        val_end = max(train_end + 1, int(np.floor(n * (train_frac + validation_frac))))
-        train_end = min(train_end, n - 1) if n > 1 else 1
-        val_end = min(max(val_end, train_end), n - 1) if n > 2 else train_end
-
-        for pos, idx in enumerate(ordered):
-            if pos < train_end:
-                out.at[idx] = "train"
-            elif pos < val_end:
-                out.at[idx] = "validation"
-            else:
-                out.at[idx] = "test"
-
-        if n == 1:
-            out.at[ordered[0]] = "test"
-        elif n == 2:
-            out.at[ordered[0]] = "train"
-            out.at[ordered[1]] = "test"
-
-    if symbol_col in df.columns:
-        for _, g in df.groupby(symbol_col, dropna=False):
-            _assign_group(g)
-    else:
-        _assign_group(df)
-
+    
+    # Compute global timestamp boundaries across all symbols
+    ts = pd.to_datetime(df[time_col], utc=True, errors="coerce")
+    min_ts = ts.min()
+    max_ts = ts.max()
+    
+    if pd.isna(min_ts) or pd.isna(max_ts):
+        return out
+        
+    duration = max_ts - min_ts
+    train_end = min_ts + duration * float(train_frac)
+    val_end = min_ts + duration * float(train_frac + validation_frac)
+    
+    # Add proportional embargo around boundaries (max 7 days, or 5% of duration)
+    embargo = min(pd.Timedelta(days=7), duration * 0.05) if duration.total_seconds() > 0 else pd.Timedelta(0)
+    
+    train_mask = ts < train_end
+    val_mask = (ts >= train_end + embargo) & (ts < val_end)
+    test_mask = ts >= val_end + embargo
+    
+    out.loc[train_mask] = "train"
+    out.loc[val_mask] = "validation"
+    out.loc[test_mask] = "test"
+    
     return out
 
 

@@ -99,6 +99,7 @@ PRIMARY_OUTPUT_COLUMNS = [
     "time_decay_tau_up_days", "time_decay_tau_down_days", "time_decay_directional_ratio", "time_decay_directional_up_share",
     "lambda_family", "lambda_event", "lambda_state",
     "lambda_family_status", "lambda_event_status", "lambda_state_status",
+    "discovery_start", "discovery_end",
 ]
 
 # Rule template → directional multiplier applied to forward returns.
@@ -2900,6 +2901,18 @@ def main():
         return
 
     raw_df = pd.DataFrame(results)
+
+    discovery_start_iso = ""
+    discovery_end_iso = ""
+    if not events_df.empty and "enter_ts" in events_df.columns and "split_label" in events_df.columns:
+        discovery_mask = events_df["split_label"].isin(["train", "validation"])
+        disc_events = events_df[discovery_mask]
+        if not disc_events.empty:
+            discovery_start_iso = str(disc_events["enter_ts"].min().isoformat())
+            discovery_end_iso = str(disc_events["enter_ts"].max().isoformat())
+    raw_df["discovery_start"] = discovery_start_iso
+    raw_df["discovery_end"] = discovery_end_iso
+
     prev_lambda_maps, prev_lambda_source = _load_previous_lambda_maps(
         data_root=DATA_ROOT,
         event_type=str(args.event_type),

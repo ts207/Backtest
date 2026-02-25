@@ -8,8 +8,9 @@ import pandas as pd
 def compute_returns(close: pd.Series) -> pd.Series:
     """
     Compute simple returns from close prices.
+    Uses fill_method=None to ensure gaps resulting in NaN returns are propagated and not smoothed.
     """
-    return close.pct_change()
+    return close.pct_change(fill_method=None)
 
 
 def compute_pnl_components(

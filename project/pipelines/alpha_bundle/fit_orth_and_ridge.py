@@ -162,12 +162,35 @@ def main() -> int:
         grid = [float(x.strip()) for x in args.lambda_grid.split(",") if x.strip()]
         splits = time_block_splits(len(df), args.cv_blocks)
         best_lam = None
-        best_ic = -1e18
+        # Precompute split-isolated data
+        split_data = []
+        for tr, va in splits:
+            X_tr = X[tr]
+            X_va = X[va]
+            mean_tr = X_tr.mean(axis=0)
+            std_tr = X_tr.std(axis=0, ddof=1)
+            Xz_tr = (X_tr - mean_tr) / (std_tr + 1e-12)
+            Xz_va = (X_va - mean_tr) / (std_tr + 1e-12)
+
+            if args.orth_method == "residualization":
+                Xo_tr, resid_betas_tr = sequential_residualize(Xz_tr)
+                Xo_va = Xz_va.copy()
+                for j in range(1, X.shape[1]):
+                    if resid_betas_tr[j] is not None:
+                        b = np.array(resid_betas_tr[j])
+                        Xo_va[:, j] = Xo_va[:, j] - Xo_va[:, :j] @ b
+                X_used_tr = Xo_tr
+                X_used_va = Xo_va
+            else:
+                X_used_tr = Xz_tr
+                X_used_va = Xz_va
+            split_data.append((tr, va, X_used_tr, X_used_va))
+
         for lam in grid:
             ics = []
-            for tr, va in splits:
-                beta_tr, intercept_tr = ridge_fit(X_used[tr], y[tr], lam)
-                pred = intercept_tr + X_used[va] @ beta_tr
+            for tr, va, X_used_tr, X_used_va in split_data:
+                beta_tr, intercept_tr = ridge_fit(X_used_tr, y[tr], lam)
+                pred = intercept_tr + X_used_va @ beta_tr
                 ics.append(corr_ic(pred, y[va]))
             mean_ic = float(np.mean(ics)) if ics else 0.0
             if mean_ic > best_ic:

@@ -1,0 +1,164 @@
+Ontology Consistency Audit
+==========================
+Implemented events: 11/11 active specs, chain=11
+Planned backlog events: 42
+State registry: total=53 materialized=10 not_materialized=43
+
+Missing phase2 chain entries: []
+Chain entries with missing specs: []
+Missing analyzer per event: {}
+Multi-type analyzers missing event_type: {}
+Declared implemented missing in registry: []
+State registry not materialized: ['ARBITRAGE_CROWDING_STATE', 'BASIS_ELEVATED_STATE', 'BREAKOUT_HOLD_STATE', 'CHOP_STATE', 'CLOSE_WINDOW_STATE', 'CONVERGENCE_WINDOW_STATE', 'CORRELATION_BROKEN_STATE', 'DEPTH_RECOVERY_STATE', 'DESYNC_PERSISTENCE_STATE', 'DISTRIBUTION_ACCUMULATION_STATE', 'EXHAUSTION_STATE', 'FAILURE_STATE', 'FUNDING_NORMALIZATION_STATE', 'HIGH_FRICTION_STATE', 'ILLIQUID_EXECUTION_STATE', 'LIQUIDITY_ABSENCE_STATE', 'LOW_FRICTION_STATE', 'MEAN_REVERSION_WINDOW_STATE', 'NEW_REGIME_STABILIZATION_STATE', 'OPEN_WINDOW_STATE', 'OVERSHOOT_STATE', 'POST_ABSORPTION_STATE', 'POST_BREAKOUT_RETEST_STATE', 'POST_CLIMAX_STATE', 'POST_EXPANSION_STATE', 'POST_EXTREME_CARRY_STATE', 'POST_FORCED_FLOW_STATE', 'POST_FUNDING_WINDOW_STATE', 'POST_LIQUIDATION_STATE', 'POST_NEWS_AFTERSHOCK_STATE', 'POST_SWEEP_STATE', 'PRE_BREAKOUT_TENSION_STATE', 'PRE_NEWS_STATE', 'PULLBACK_STATE', 'RELAXATION_STATE', 'REPAIR_WINDOW_STATE', 'REVERSION_IN_PROGRESS_STATE', 'RISK_OFF_STATE', 'RISK_ON_STATE', 'SQUEEZE_RISK_STATE', 'STRETCHED_STATE', 'TRANSITION_TURBULENCE_STATE', 'TRENDING_STATE']
+
+No fail-closed contract issues detected.
+Planned stages: 21
+[1/21] Starting stage: build_cleaned_5m (pipeline_elapsed=0.0s)
+[1/21] Finished stage: build_cleaned_5m (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[2/21] Starting stage: build_features_v1 (pipeline_elapsed=0.0s)
+[2/21] Finished stage: build_features_v1 (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[3/21] Starting stage: build_universe_snapshots (pipeline_elapsed=0.0s)
+[3/21] Finished stage: build_universe_snapshots (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[4/21] Starting stage: build_context_features (pipeline_elapsed=0.0s)
+[4/21] Finished stage: build_context_features (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[5/21] Starting stage: build_market_context (pipeline_elapsed=0.0s)
+[5/21] Finished stage: build_market_context (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[6/21] Starting stage: generate_candidate_templates (pipeline_elapsed=0.0s)
+[6/21] Finished stage: generate_candidate_templates (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[7/21] Starting stage: generate_candidate_plan (pipeline_elapsed=0.0s)
+[7/21] Finished stage: generate_candidate_plan (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[8/21] Starting stage: analyze_liquidity_vacuum (pipeline_elapsed=0.0s)
+[8/21] Finished stage: analyze_liquidity_vacuum (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[9/21] Starting stage: build_event_registry (pipeline_elapsed=0.0s)
+[9/21] Finished stage: build_event_registry (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[10/21] Starting stage: phase2_conditional_hypotheses (pipeline_elapsed=0.0s)
+[10/21] Finished stage: phase2_conditional_hypotheses (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[11/21] Starting stage: bridge_evaluate_phase2 (pipeline_elapsed=0.0s)
+[11/21] Finished stage: bridge_evaluate_phase2 (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[12/21] Starting stage: summarize_discovery_quality (pipeline_elapsed=0.0s)
+[12/21] Finished stage: summarize_discovery_quality (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[13/21] Starting stage: evaluate_naive_entry (pipeline_elapsed=0.0s)
+[13/21] Finished stage: evaluate_naive_entry (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[14/21] Starting stage: promote_candidates (pipeline_elapsed=0.0s)
+[14/21] Finished stage: promote_candidates (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[15/21] Starting stage: update_edge_registry (pipeline_elapsed=0.0s)
+[15/21] Finished stage: update_edge_registry (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[16/21] Starting stage: generate_recommendations_checklist (pipeline_elapsed=0.0s)
+[16/21] Finished stage: generate_recommendations_checklist (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[17/21] Starting stage: compile_strategy_blueprints (pipeline_elapsed=0.0s)
+[17/21] Finished stage: compile_strategy_blueprints (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[18/21] Starting stage: build_strategy_candidates (pipeline_elapsed=0.0s)
+[18/21] Finished stage: build_strategy_candidates (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[19/21] Starting stage: backtest_strategies (pipeline_elapsed=0.0s)
+[19/21] Finished stage: backtest_strategies (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[20/21] Starting stage: promote_blueprints (pipeline_elapsed=0.0s)
+[20/21] Finished stage: promote_blueprints (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+[21/21] Starting stage: make_report (pipeline_elapsed=0.0s)
+[21/21] Finished stage: make_report (0.0s) | pipeline_elapsed=0.0s | eta~0.0s
+Stage timing summary (slowest first):
+  - generate_recommendations_checklist: 0.0s
+  - build_cleaned_5m: 0.0s
+  - compile_strategy_blueprints: 0.0s
+  - build_market_context: 0.0s
+  - build_features_v1: 0.0s
+  - generate_candidate_templates: 0.0s
+  - build_universe_snapshots: 0.0s
+  - update_edge_registry: 0.0s
+  - build_context_features: 0.0s
+  - backtest_strategies: 0.0s
+  - summarize_discovery_quality: 0.0s
+  - analyze_liquidity_vacuum: 0.0s
+  - build_strategy_candidates: 0.0s
+  - promote_blueprints: 0.0s
+  - generate_candidate_plan: 0.0s
+  - build_event_registry: 0.0s
+  - evaluate_naive_entry: 0.0s
+  - promote_candidates: 0.0s
+  - make_report: 0.0s
+  - phase2_conditional_hypotheses: 0.0s
+  - bridge_evaluate_phase2: 0.0s
+Pipeline run completed: smoke_test_run
+Artifact summary:
+  - BACKTEST_DATA_ROOT: /tmp/pytest-of-tstuv/pytest-659/test_run_all_synthetic_e2e_smo0/data
+  - runs (found): /tmp/pytest-of-tstuv/pytest-659/test_run_all_synthetic_e2e_smo0/data/runs/smoke_test_run
+  - phase2 (missing): /tmp/pytest-of-tstuv/pytest-659/test_run_all_synthetic_e2e_smo0/data/reports/phase2/smoke_test_run
+  - phase2_quality_summary (missing): /tmp/pytest-of-tstuv/pytest-659/test_run_all_synthetic_e2e_smo0/data/reports/phase2/smoke_test_run/discovery_quality_summary.json
+  - bridge_eval (missing): /tmp/pytest-of-tstuv/pytest-659/test_run_all_synthetic_e2e_smo0/data/reports/bridge_eval/smoke_test_run
+  - edge_candidates (missing): /tmp/pytest-of-tstuv/pytest-659/test_run_all_synthetic_e2e_smo0/data/reports/edge_candidates/smoke_test_run/edge_candidates_normalized.csv
+  - promotions (missing): /tmp/pytest-of-tstuv/pytest-659/test_run_all_synthetic_e2e_smo0/data/reports/promotions/smoke_test_run/promotion_report.json
+  - edge_registry (missing): /tmp/pytest-of-tstuv/pytest-659/test_run_all_synthetic_e2e_smo0/data/runs/smoke_test_run/research/edge_registry.parquet
+  - strategy_builder (missing): /tmp/pytest-of-tstuv/pytest-659/test_run_all_synthetic_e2e_smo0/data/reports/strategy_builder/smoke_test_run
+  - report (missing): /tmp/pytest-of-tstuv/pytest-659/test_run_all_synthetic_e2e_smo0/data/reports/vol_compression_expansion_v1/smoke_test_run/summary.md
+
+EXECUTED: ['build_cleaned_5m', 'build_features_v1', 'build_universe_snapshots', 'build_context_features', 'build_market_context', 'generate_candidate_templates', 'generate_candidate_plan', 'analyze_liquidity_vacuum', 'build_event_registry', 'phase2_conditional_hypotheses', 'bridge_evaluate_phase2', 'summarize_discovery_quality', 'evaluate_naive_entry', 'promote_candidates', 'update_edge_registry', 'generate_recommendations_checklist', 'compile_strategy_blueprints', 'build_strategy_candidates', 'backtest_strategies', 'promote_blueprints', 'make_report']
+F
+=================================== FAILURES ===================================
+_______________________ test_run_all_synthetic_e2e_smoke _______________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x766683829820>
+tmp_path = PosixPath('/tmp/pytest-of-tstuv/pytest-659/test_run_all_synthetic_e2e_smo0')
+
+    def test_run_all_synthetic_e2e_smoke(monkeypatch, tmp_path):
+        """
+        Synthetic end-to-end smoke test that runs the orchestrator (run_all.py)
+        with a complete set of stages enabled. It mocks _run_stage to simulate
+        successful completion of all stages, thus verifying stage gating and
+        manifest invariants across the full pipeline lifecycle.
+        """
+        executed_stages = []
+    
+        def fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+            executed_stages.append(stage)
+            # If the stage generates something that later stages need to exist (like a manifest or checklist)
+            # we can mock its existence here.
+            if stage == "generate_recommendations_checklist":
+                checklist_path = tmp_path / "data" / "runs" / run_id / "research_checklist" / "checklist.json"
+                checklist_path.parent.mkdir(parents=True, exist_ok=True)
+                checklist_path.write_text(json.dumps({"decision": "APPROVE"}), encoding="utf-8")
+            elif stage == "phase1_validate_spec":
+                pass
+            return True
+    
+        monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path / "data")
+        monkeypatch.setattr(run_all, "_git_commit", lambda _project_root: "mock-sha")
+        monkeypatch.setattr(run_all, "_run_stage", fake_run_stage)
+    
+        # We provide a comprehensive set of arguments to enable all major paths
+        test_args = [
+            "run_all.py",
+            "--run_id", "smoke_test_run",
+            "--symbols", "BTCUSDT",
+            "--start", "2024-01-01",
+            "--end", "2024-01-02",
+            "--run_hypothesis_generator", "1",
+            "--run_phase2_conditional", "1",
+            "--phase2_event_type", "LIQUIDITY_VACUUM",
+            "--run_bridge_eval_phase2", "1",
+            "--run_strategy_blueprint_compiler", "1",
+            "--run_strategy_builder", "1",
+            "--run_recommendations_checklist", "1",
+            "--run_candidate_promotion", "1",
+            "--run_blueprint_promotion", "1",
+            "--run_backtest", "1",
+            "--run_make_report", "1",
+            "--skip_ingest_ohlcv", "1",
+            "--skip_ingest_funding", "1",
+            "--skip_ingest_spot_ohlcv", "1",
+        ]
+        monkeypatch.setattr(sys, "argv", test_args)
+    
+        rc = run_all.main()
+    
+        # Assert successful orchestration
+        assert rc == 0
+    
+        # Verify that the expected stages were called in roughly correct order
+        print("\nEXECUTED:", executed_stages)
+        assert "generate_candidate_plan" in executed_stages
+>       assert "build_event_registry_LIQUIDITY_VACUUM" in executed_stages
+E       AssertionError: assert 'build_event_registry_LIQUIDITY_VACUUM' in ['build_cleaned_5m', 'build_features_v1', 'build_universe_snapshots', 'build_context_features', 'build_market_context', 'generate_candidate_templates', ...]
+
+tests/pipelines/test_run_all_smoke.py:65: AssertionError
+=========================== short test summary info ============================
+FAILED tests/pipelines/test_run_all_smoke.py::test_run_all_synthetic_e2e_smoke
+1 failed in 0.91s

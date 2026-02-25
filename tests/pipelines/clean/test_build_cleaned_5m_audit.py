@@ -30,14 +30,15 @@ def test_align_funding_basic():
         "funding_rate_scaled": [0.0001]
     })
     
-    # 8 hours = 480 minutes. 480 / 5 = 96 bars.
-    # 0.0001 / 96 = 1.0416666666666667e-06
+    # 8 hours = 480 minutes. 480 / 5 = 96 bars. No longer divided for realized.
     
     aligned, missing_pct = _align_funding(bars, funding)
     
     assert missing_pct == 0.0
     assert len(aligned) == 3
-    assert aligned["funding_rate_scaled"].iloc[0] == pytest.approx(0.0001 / 96)
+    assert aligned["funding_rate_feature"].iloc[0] == pytest.approx(0.0001)
+    assert aligned["funding_rate_realized"].iloc[0] == pytest.approx(0.0001)
+    assert aligned["funding_rate_realized"].iloc[1] == pytest.approx(0.0)
     assert aligned["funding_event_ts"].iloc[0] == pd.Timestamp("2026-01-01 00:00:00", tz=timezone.utc)
 
 def test_align_funding_missing():
@@ -48,7 +49,7 @@ def test_align_funding_missing():
     
     aligned, missing_pct = _align_funding(bars, funding)
     assert missing_pct == 1.0
-    assert np.isnan(aligned["funding_rate_scaled"].iloc[0])
+    assert np.isnan(aligned["funding_rate_feature"].iloc[0])
 
 def test_full_index_generation_residue():
     # 5m bar builder should use a 5m exclusive end residue.
@@ -84,5 +85,5 @@ def test_align_funding_marks_stale_rows_missing():
     aligned, missing_pct = _align_funding(bars, funding)
     assert missing_pct == 1.0
     assert aligned["funding_missing"].all()
-    assert aligned["funding_rate_scaled"].isna().all()
+    assert aligned["funding_rate_feature"].isna().all()
     assert FUNDING_MAX_STALENESS == pd.Timedelta("8h")

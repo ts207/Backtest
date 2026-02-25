@@ -1057,6 +1057,8 @@ def _build_blueprint(
             min_events_threshold=int(min_events),
             cost_config_digest=cost_config_digest,
             promotion_track=str(merged.get("promotion_track", "fallback_only")),
+            discovery_start=str(merged.get("discovery_start", "")),
+            discovery_end=str(merged.get("discovery_end", "")),
             ontology_spec_hash=str(ontology_spec_hash_value),
             canonical_event_type=canonical_event_type,
             canonical_family=canonical_family,

@@ -396,7 +396,7 @@ def main() -> int:
                     }
                 )
 
-            if market == "perp" and "funding_rate_scaled" in bars.columns:
+            if market == "perp" and "funding_rate_feature" in bars.columns:
                 pass
             elif market == "perp" and not funding.empty:
                 funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
@@ -409,13 +409,16 @@ def main() -> int:
                     raise ValueError(
                         f"Funding schema for {symbol} missing rate column; expected funding_rate_scaled or funding_rate."
                     )
-                funding_rates = funding[["timestamp", rate_col]].rename(columns={rate_col: "funding_rate_scaled"})
+                funding_rates = funding[["timestamp", rate_col]].rename(columns={rate_col: "funding_rate_feature"})
                 bars = _merge_funding_rates(bars, funding_rates, symbol=symbol)
+                # Since we are re-merging older format funding here, let's just make realized 0 or mimic it
+                bars["funding_rate_realized"] = 0.0 # Simplify backfill
             else:
-                bars["funding_rate_scaled"] = 0.0
+                bars["funding_rate_feature"] = 0.0
+                bars["funding_rate_realized"] = 0.0
 
             # Backward-compatible alias for any code still reading funding_rate.
-            bars["funding_rate"] = bars["funding_rate_scaled"]
+            bars["funding_rate"] = bars["funding_rate_feature"]
             bars = _merge_optional_oi_liquidation(bars, symbol=symbol, market=market, run_id=run_id)
             bars = _add_basis_features(bars, symbol=symbol, run_id=run_id, market=market)
             bars["revision_lag_bars"] = int(args.revision_lag_bars)
@@ -427,7 +430,8 @@ def main() -> int:
                 "high",
                 "low",
                 "close",
-                "funding_rate_scaled",
+                "funding_rate_feature",
+                "funding_rate_realized",
                 "funding_rate",
                 "oi_notional",
                 "oi_delta_1h",
@@ -441,12 +445,12 @@ def main() -> int:
                 "revision_lag_minutes",
             ]].copy()
             features["logret_1"] = np.log(features["close"]).diff()
-            features["rv_96"] = features["logret_1"].rolling(window=96, min_periods=96).std()
+            features["rv_96"] = features["logret_1"].rolling(window=96, min_periods=72).std()
             features["rv_pct_17280"] = _rolling_percentile(features["rv_96"], window=17280)
-            features["high_96"] = features["high"].rolling(window=96, min_periods=96).max()
-            features["low_96"] = features["low"].rolling(window=96, min_periods=96).min()
+            features["high_96"] = features["high"].rolling(window=96, min_periods=72).max()
+            features["low_96"] = features["low"].rolling(window=96, min_periods=72).min()
             features["range_96"] = features["high_96"] - features["low_96"]
-            features["range_med_2880"] = features["range_96"].rolling(window=2880, min_periods=2880).median()
+            features["range_med_2880"] = features["range_96"].rolling(window=2880, min_periods=2160).median()
 
             features["year"] = features["timestamp"].dt.year
             features["month"] = features["timestamp"].dt.month

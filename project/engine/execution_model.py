@@ -41,15 +41,19 @@ def estimate_transaction_cost_bps(
     if float(liq_scale.max()) > 0:
         liq_scale = liq_scale / float(liq_scale.max())
 
-    impact = turnover * np.sqrt(turnover.clip(lower=0.0))
-    if float(impact.max()) > 0:
-        impact = impact / float(impact.max())
+    available_vol = quote_vol.replace(0.0, np.nan).fillna(1e6).clip(lower=1.0)
+    participation_rate = (turnover / available_vol).clip(lower=0.0)
+    
+    impact_sqrt = np.sqrt(participation_rate)
+    
+    max_part = max(1e-4, float(config.get("max_participation_rate", 0.10)))
+    participation_penalty = np.exp(np.clip((participation_rate - max_part) / max_part, 0.0, 5.0)) - 1.0
 
     dynamic = (
         (spread_weight * spread)
         + (volatility_weight * vol_bps)
         + (liquidity_weight * (liq_scale * 10.0))
-        + (impact_weight * (impact * 10.0))
+        + (impact_weight * (impact_sqrt * 10.0 + participation_penalty * 50.0))
     )
     cost_bps = (base_fee_bps + base_slippage_bps + dynamic).clip(lower=0.0, upper=max(0.0, cap_bps))
     return cost_bps.astype(float)

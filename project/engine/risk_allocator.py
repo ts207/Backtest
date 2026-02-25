@@ -13,6 +13,8 @@ class RiskLimits:
     max_symbol_gross: float = 1.0
     max_strategy_gross: float = 1.0
     max_new_exposure_per_bar: float = 1.0
+    target_annual_vol: float | None = None
+    max_drawdown_limit: float | None = None
 
 
 def _as_float_series(series: pd.Series) -> pd.Series:
@@ -23,6 +25,7 @@ def allocate_position_scales(
     raw_positions_by_strategy: Dict[str, pd.Series],
     requested_scale_by_strategy: Dict[str, pd.Series],
     limits: RiskLimits,
+    portfolio_pnl_series: pd.Series | None = None,
 ) -> Tuple[Dict[str, pd.Series], Dict[str, float]]:
     """
     Deterministically allocate per-bar scales under strategy/symbol/portfolio caps.
@@ -68,6 +71,27 @@ def allocate_position_scales(
     symbol_ratio_series = pd.Series(symbol_ratio, index=aligned_index).replace([np.inf, -np.inf], np.nan).fillna(1.0).clip(lower=0.0, upper=1.0)
     for key in ordered:
         allocated[key] = allocated[key] * symbol_ratio_series
+
+    vol_scale_series = pd.Series(1.0, index=aligned_index)
+    if limits.target_annual_vol is not None and portfolio_pnl_series is not None:
+        pnl = portfolio_pnl_series.reindex(aligned_index).fillna(0.0)
+        roll_std = pnl.rolling(window=5760, min_periods=288).std()
+        ann_vol = roll_std * np.sqrt(105120)
+        vol_scale = (limits.target_annual_vol / ann_vol.replace(0.0, np.nan)).replace([np.inf, -np.inf], np.nan).fillna(1.0)
+        vol_scale_series = vol_scale.clip(lower=0.0, upper=2.0)
+
+    dd_scale_series = pd.Series(1.0, index=aligned_index)
+    if limits.max_drawdown_limit is not None and portfolio_pnl_series is not None:
+        pnl = portfolio_pnl_series.reindex(aligned_index).fillna(0.0)
+        equity = (1.0 + pnl).cumprod()
+        peak = equity.cummax().replace(0.0, np.nan)
+        drawdown = ((peak - equity) / peak).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        dd_factor = (limits.max_drawdown_limit - drawdown) / limits.max_drawdown_limit
+        dd_scale_series = dd_factor.clip(lower=0.0, upper=1.0)
+
+    dynamic_overlay_series = (vol_scale_series * dd_scale_series).fillna(1.0)
+    for key in ordered:
+        allocated[key] = allocated[key] * dynamic_overlay_series
 
     portfolio_cap = float(max(0.0, limits.max_portfolio_gross))
     portfolio_gross = sum(s.abs() for s in allocated.values())

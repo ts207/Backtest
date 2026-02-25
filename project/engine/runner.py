@@ -370,7 +370,7 @@ def _strategy_returns(
     # --- END FIX ---
 
     funding_series = (
-        pd.to_numeric(features_indexed.get("funding_rate_scaled", pd.Series(0.0, index=ret.index)).reindex(ret.index), errors="coerce")
+        pd.to_numeric(features_indexed.get("funding_rate_realized", pd.Series(0.0, index=ret.index)).reindex(ret.index), errors="coerce")
         .fillna(0.0)
         .astype(float)
     )
@@ -512,16 +512,30 @@ def _apply_allocator_to_strategy_frames(
         return strategy_frames, {"requested_gross": 0.0, "allocated_gross": 0.0, "clipped_fraction": 0.0}
 
     alloc_cfg = dict(params.get("risk_allocator", {})) if isinstance(params.get("risk_allocator", {}), dict) else {}
+    target_vol_val = alloc_cfg.get("target_annual_vol")
+    max_dd_val = alloc_cfg.get("max_drawdown_limit")
     limits = RiskLimits(
         max_portfolio_gross=float(alloc_cfg.get("max_portfolio_gross", 1.0)),
         max_symbol_gross=float(alloc_cfg.get("max_symbol_gross", 1.0)),
         max_strategy_gross=float(alloc_cfg.get("max_strategy_gross", 1.0)),
         max_new_exposure_per_bar=float(alloc_cfg.get("max_new_exposure_per_bar", 1.0)),
+        target_annual_vol=float(target_vol_val) if target_vol_val is not None else None,
+        max_drawdown_limit=float(max_dd_val) if max_dd_val is not None else None,
     )
     if any(v <= 0.0 for v in [limits.max_portfolio_gross, limits.max_symbol_gross, limits.max_strategy_gross, limits.max_new_exposure_per_bar]):
         return strategy_frames, {"requested_gross": 0.0, "allocated_gross": 0.0, "clipped_fraction": 0.0}
 
     out = {k: v.copy() for k, v in strategy_frames.items()}
+    global_pnl_series: pd.Series | None = None
+    if limits.target_annual_vol is not None or limits.max_drawdown_limit is not None:
+        unscaled_portfolio = _aggregate_portfolio(out)
+        if not unscaled_portfolio.empty and "timestamp" in unscaled_portfolio.columns:
+            unscaled_portfolio = unscaled_portfolio.sort_values("timestamp")
+            idx = pd.DatetimeIndex(pd.to_datetime(unscaled_portfolio["timestamp"], utc=True))
+            global_pnl_series = pd.Series(
+                pd.to_numeric(unscaled_portfolio["portfolio_pnl"], errors="coerce").fillna(0.0).values, 
+                index=idx, dtype=float
+            )
     symbols = sorted(
         {
             str(sym)
@@ -550,6 +564,7 @@ def _apply_allocator_to_strategy_frames(
             raw_positions_by_strategy=pos_by_strategy,
             requested_scale_by_strategy=req_scale_by_strategy,
             limits=limits,
+            portfolio_pnl_series=global_pnl_series,
         )
         agg_diag["requested_gross"] += float(diag.get("requested_gross", 0.0))
         agg_diag["allocated_gross"] += float(diag.get("allocated_gross", 0.0))
@@ -847,6 +862,58 @@ def run_engine(
         params=params,
         params_by_strategy=params_by_strategy,
     )
+
+    kill_cfg = dict(params.get("kill_switches", {})) if isinstance(params.get("kill_switches"), dict) else {}
+    if kill_cfg:
+        temp_portfolio = _aggregate_portfolio(strategy_frames)
+        if not temp_portfolio.empty and "portfolio_pnl" in temp_portfolio.columns:
+            try:
+                from engine.kill_switches import evaluate_kill_switches
+            except ImportError:
+                evaluate_kill_switches = None
+                
+            if evaluate_kill_switches:
+                combined_cost = pd.Series(dtype=float)
+                for df in strategy_frames.values():
+                    if "dynamic_cost_bps" in df.columns:
+                        cost = df.groupby("timestamp")["dynamic_cost_bps"].mean()
+                        if combined_cost.empty:
+                            combined_cost = cost
+                        else:
+                            combined_cost = pd.concat([combined_cost, cost], axis=1).mean(axis=1)
+                
+                pnl_series = pd.Series(
+                    temp_portfolio["portfolio_pnl"].values, 
+                    index=pd.DatetimeIndex(pd.to_datetime(temp_portfolio["timestamp"], utc=True)), 
+                    dtype=float
+                )
+                
+                ks_state = evaluate_kill_switches(
+                    portfolio_pnl_series=pnl_series,
+                    slippage_bps_series=combined_cost,
+                    config=kill_cfg,
+                )
+                
+                if ks_state.is_triggered and ks_state.trigger_timestamp is not None:
+                    LOGGER.warning("Kill switch triggered at %s: %s", ks_state.trigger_timestamp, ks_state.trigger_reason)
+                    metrics.setdefault("diagnostics", {})["kill_switch"] = {
+                        "triggered": True,
+                        "reason": str(ks_state.trigger_reason),
+                        "timestamp": ks_state.trigger_timestamp.isoformat(),
+                    }
+                    for strategy_name, frame in strategy_frames.items():
+                        if not frame.empty and "timestamp" in frame.columns:
+                            ts_col = pd.to_datetime(frame["timestamp"], utc=True)
+                            after_trigger = ts_col > ks_state.trigger_timestamp
+                            frame.loc[after_trigger, "pos"] = 0.0
+                            if "allocated_position_scale" in frame.columns:
+                                frame.loc[after_trigger, "allocated_position_scale"] = 0.0
+                            if "requested_position_scale" in frame.columns:
+                                frame.loc[after_trigger, "requested_position_scale"] = 0.0
+                            for col in ["pnl", "gross_pnl", "trading_cost", "funding_pnl", "borrow_cost", "ret"]:
+                                if col in frame.columns:
+                                    frame.loc[after_trigger, col] = 0.0
+                            strategy_frames[strategy_name] = frame
     for strategy_name, frame in strategy_frames.items():
         out_path = engine_dir / f"strategy_returns_{strategy_name}.csv"
         frame.to_csv(out_path, index=False)

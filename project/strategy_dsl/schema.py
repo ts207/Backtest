@@ -203,6 +203,8 @@ class LineageSpec:
     state_id: str = ""
     template_verb: str = ""
     operator_version: str = ""
+    discovery_start: str = ""
+    discovery_end: str = ""
     constraints: Dict[str, Any] = field(default_factory=dict)
 
     def validate(self) -> None:

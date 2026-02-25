@@ -80,7 +80,8 @@ def main() -> int:
                     grid,
                     data,
                     on="timestamp",
-                    direction="backward"
+                    direction="backward",
+                    tolerance=pd.Timedelta("5s")
                 )
                 
                 first_ts = data["timestamp"].min()

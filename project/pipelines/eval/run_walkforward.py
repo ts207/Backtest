@@ -128,7 +128,7 @@ def _expected_blueprint_strategy_ids(
     top_k: int,
     cli_symbols: List[str],
     embargo_days: int | None = None,
-) -> List[str]:
+) -> tuple[List[str], pd.Timestamp | None]:
     raw_rows = _load_blueprints_raw(blueprints_path)
     # B1: Hard fail if ANY blueprint has promotion_track != 'standard'.
     # Fallback blueprints bypass BH-FDR and are banned from evaluation. [INV_NO_FALLBACK_IN_MEASUREMENT]
@@ -180,11 +180,21 @@ def _expected_blueprint_strategy_ids(
             "No blueprint strategies selected for walkforward. "
             f"path={blueprints_path}, event_type={event_type}, top_k={int(top_k)}"
         )
+    max_discovery_end: pd.Timestamp | None = None
     if embargo_days is not None:
         required_embargo = int(embargo_days)
         for row in selected_rows:
             bp_id = str(row.get("id", "<unknown>")).strip() or "<unknown>"
             lineage = row.get("lineage", {})
+            if isinstance(lineage, dict):
+                disc_end_str = str(lineage.get("discovery_end", ""))
+                if disc_end_str:
+                    try:
+                        ts = pd.to_datetime(disc_end_str, utc=True)
+                        if max_discovery_end is None or ts > max_discovery_end:
+                            max_discovery_end = ts
+                    except Exception:
+                        pass
             raw_embargo = lineage.get("bridge_embargo_days_used") if isinstance(lineage, dict) else None
             if raw_embargo in (None, ""):
                 raise ValueError(
@@ -206,7 +216,7 @@ def _expected_blueprint_strategy_ids(
                     f"blueprint {bp_id} has lineage.bridge_embargo_days_used={lineage_embargo} "
                     f"but walk-forward --embargo_days={required_embargo}. Values must match."
                 )
-    return out
+    return out, max_discovery_end
 
 
 def _annualized_sharpe(pnl_series: pd.Series) -> float:
@@ -385,6 +395,14 @@ def _strategy_metrics_from_frame(frame: pd.DataFrame) -> Dict[str, object]:
     stressed_net_pnl = float(stressed_ts.sum())
     ending_equity = float(equity.iloc[-1]) if not equity.empty else INITIAL_EQUITY
 
+    try:
+        from pipelines.eval.robustness import block_bootstrap_pnl, simulate_parameter_perturbation
+        robust_boot = block_bootstrap_pnl(pnl_ts)
+        robust_pert = simulate_parameter_perturbation(pnl_ts)
+    except ImportError:
+        robust_boot = {}
+        robust_pert = {}
+
     return {
         "total_trades": int(entries),
         "net_pnl": net_pnl,
@@ -396,6 +414,8 @@ def _strategy_metrics_from_frame(frame: pd.DataFrame) -> Dict[str, object]:
             "has_trades": bool(entries > 0),
             "stressed_non_negative": bool(stressed_net_pnl >= 0.0),
         },
+        **robust_boot,
+        **robust_pert,
     }
 
 
@@ -866,10 +886,11 @@ def main() -> int:
             )
 
         expected_strategy_ids: List[str] | None
+        max_discovery_end: pd.Timestamp | None = None
         if strategy_mode:
             expected_strategy_ids = [s.strip() for s in str(args.strategies).split(",") if s.strip()]
         else:
-            expected_strategy_ids = _expected_blueprint_strategy_ids(
+            expected_strategy_ids, max_discovery_end = _expected_blueprint_strategy_ids(
                 blueprints_path=Path(str(args.blueprints_path)),
                 event_type=str(args.blueprints_filter_event_type),
                 top_k=int(args.blueprints_top_k),
@@ -879,6 +900,15 @@ def main() -> int:
 
         split_rows: List[Dict[str, object]] = []
         for split in windows:
+            if max_discovery_end is not None and split.label in {"test", "oos1", "oos2", "oos3"}:
+                if pd.to_datetime(split.start, utc=True) <= max_discovery_end:
+                    raise ValueError(
+                        f"EVALUATION GUARD [INV_OOS_OVERLAPS_DISCOVERY]: "
+                        f"OOS split '{split.label}' starts at {split.start} which overlaps with "
+                        f"blueprint discovery window ending at {max_discovery_end}. "
+                        "Backtest aborted to prevent selection bias leakage."
+                    )
+
             split_run_id = f"{args.run_id}__wf_{split.label}"
             cmd = _build_backtest_cmd(
                 split_run_id=split_run_id,

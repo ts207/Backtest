@@ -78,7 +78,7 @@ def test_expected_blueprints_accept_matching_bridge_embargo_lineage(tmp_path):
         ],
     )
 
-    out = _expected_blueprint_strategy_ids(
+    out, _ = _expected_blueprint_strategy_ids(
         blueprints_path=path,
         event_type="all",
         top_k=10,

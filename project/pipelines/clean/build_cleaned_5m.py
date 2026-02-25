@@ -94,7 +94,8 @@ def _align_funding(bars: pd.DataFrame, funding: pd.DataFrame) -> Tuple[pd.DataFr
     if funding.empty:
         aligned = bars[["timestamp"]].copy()
         aligned["funding_event_ts"] = pd.NaT
-        aligned["funding_rate_scaled"] = np.nan
+        aligned["funding_rate_feature"] = np.nan
+        aligned["funding_rate_realized"] = 0.0
         aligned["funding_missing"] = True
         return aligned, 1.0
 
@@ -116,13 +117,16 @@ def _align_funding(bars: pd.DataFrame, funding: pd.DataFrame) -> Tuple[pd.DataFr
         tolerance=FUNDING_MAX_STALENESS,
     )
     if "funding_rate_scaled" in merged.columns:
-        bars_per_event = int((FUNDING_EVENT_HOURS * 60) / 5)
-        merged["funding_rate_event_scaled"] = merged["funding_rate_scaled"]
-        merged["funding_rate_scaled"] = merged["funding_rate_scaled"] / bars_per_event
+        # Keep the full rate as the "feature"
+        merged["funding_rate_feature"] = merged["funding_rate_scaled"]
+        
+        # Realized cashflow applies ONLY exactly on the funding timestamp
+        is_exact = merged["timestamp"] == merged["funding_event_ts"]
+        merged["funding_rate_realized"] = np.where(is_exact, merged["funding_rate_scaled"], 0.0)
     
-    merged["funding_missing"] = merged["funding_rate_scaled"].isna()
+    merged["funding_missing"] = merged["funding_rate_feature"].isna()
     missing_pct = float(merged["funding_missing"].mean()) if len(merged) else 0.0
-    return merged[["timestamp", "funding_event_ts", "funding_rate_scaled", "funding_missing"]], missing_pct
+    return merged[["timestamp", "funding_event_ts", "funding_rate_feature", "funding_rate_realized", "funding_missing"]], missing_pct
 
 
 def main() -> int:
@@ -226,9 +230,8 @@ def main() -> int:
             bars["gap_len"] = _gap_lengths(bars["is_gap"])
             bars["symbol"] = symbol
             
-            # Forward fill prices for gaps
+            # Do NOT forward fill prices for gaps to prevent optimistic stability bias
             price_cols = ["open", "high", "low", "close"]
-            bars[price_cols] = bars[price_cols].ffill()
             
             # Zero fill volume for gaps
             vol_cols = [c for c in gap_cols if c not in price_cols]
@@ -288,13 +291,14 @@ def main() -> int:
                     )
                 aligned_funding, _ = _align_funding(bars, funding)
                 bars = bars.merge(
-                    aligned_funding[["timestamp", "funding_event_ts", "funding_rate_scaled", "funding_missing"]],
+                    aligned_funding[["timestamp", "funding_event_ts", "funding_rate_feature", "funding_rate_realized", "funding_missing"]],
                     on="timestamp",
                     how="left",
                 )
                 bars["funding_missing"] = bars["funding_missing"].fillna(True).astype(bool)
             else:
-                bars["funding_rate_scaled"] = np.nan
+                bars["funding_rate_feature"] = np.nan
+                bars["funding_rate_realized"] = 0.0
                 bars["funding_missing"] = True
 
             cleaned_dir = DATA_ROOT / "lake" / "cleaned" / market / symbol / "bars_5m"

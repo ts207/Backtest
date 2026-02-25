@@ -5,15 +5,15 @@ from pandera.typing import DataFrame, Series
 class Cleaned5mBarsSchema(pa.SchemaModel):
     symbol: Series[str] = pa.Field(coerce=True)
     timestamp: Series[pd.DatetimeTZDtype] = pa.Field(dtype_kwargs={"unit": "ns", "tz": "UTC"})
-    open: Series[float] = pa.Field(ge=0.0)
-    high: Series[float] = pa.Field(ge=0.0)
-    low: Series[float] = pa.Field(ge=0.0)
-    close: Series[float] = pa.Field(ge=0.0)
+    open: Series[float] = pa.Field(ge=0.0, nullable=True)
+    high: Series[float] = pa.Field(ge=0.0, nullable=True)
+    low: Series[float] = pa.Field(ge=0.0, nullable=True)
+    close: Series[float] = pa.Field(ge=0.0, nullable=True)
     volume: Series[float] = pa.Field(ge=0.0)
 
     @pa.dataframe_check
     def check_high_low(cls, df: DataFrame) -> Series[bool]:
-        return df["high"] >= df["low"]
+        return df["high"].isna() | (df["high"] >= df["low"])
 
     class Config:
         strict = False  # Allow other columns like quote_volume or taker_buy_volume
