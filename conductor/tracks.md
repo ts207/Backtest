@@ -17,5 +17,5 @@ Current active tracks should be recorded here as concise status items.
 
 ---
 
-- [ ] **Track: Implement Amihud and Kyle's Lambda microstructure metrics**
+- [x] **Track: Implement Amihud and Kyle's Lambda microstructure metrics**
 *Link: [./tracks/amihud_kyle_20260225/](./tracks/amihud_kyle_20260225/)*

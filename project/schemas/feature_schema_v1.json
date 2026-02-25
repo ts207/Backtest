@@ -28,7 +28,9 @@
         "range_96",
         "range_med_2880",
         "ms_vpin_24",
-        "ms_roll_24"
+        "ms_roll_24",
+        "ms_amihud_24",
+        "ms_kyle_24"
       ]
     },
     "context_funding_persistence_v1": {

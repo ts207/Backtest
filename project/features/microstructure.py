@@ -27,6 +27,54 @@ def calculate_amihud_illiquidity(returns: pd.Series, dollar_volume: pd.Series, w
     illiq = returns.abs() / (dollar_volume + 1e-9)
     return illiq.rolling(window).mean()
 
+def calculate_amihud(close: pd.Series, volume: pd.Series, window: int = 24) -> pd.Series:
+    """
+    Amihud Illiquidity = avg(|return| / dollar_volume)
+    """
+    log_ret = np.log(close / close.shift(1))
+    dollar_vol = close * volume
+    illiq = log_ret.abs() / (dollar_vol.replace(0.0, np.nan))
+    return illiq.rolling(window).mean()
+
+def calculate_kyle_lambda(close: pd.Series, buy_vol: pd.Series, sell_vol: pd.Series, window: int = 24) -> pd.Series:
+    """
+    Kyle's Lambda: price change = lambda * net_order_flow
+    Uses rolling regression.
+    """
+    price_change = close.diff()
+    net_flow = buy_vol - sell_vol
+    
+    def rolling_ols(y: np.ndarray, x: np.ndarray) -> float:
+        if len(y) < 2: return np.nan
+        # Simple OLS: beta = cov(x,y) / var(x)
+        cov = np.cov(x, y)[0, 1]
+        var = np.var(x)
+        if var == 0: return 0.0
+        return float(cov / var)
+
+    # Use a more efficient approach if possible, but for Phase 1 this is fine.
+    # Note: we need to align price_change and net_flow.
+    df = pd.DataFrame({"y": price_change, "x": net_flow}).dropna()
+    if df.empty:
+        return pd.Series(np.nan, index=close.index)
+        
+    res = []
+    # To keep it simple and correct, we'll use a manual loop or apply on indices
+    # However, pandas rolling apply only takes one series.
+    # We can use a trick: rolling on a combined index or just implement the math with rolling means/covs.
+    
+    # lambda = [E(XY) - E(X)E(Y)] / [E(X^2) - (E(X))^2]
+    exy = (df["x"] * df["y"]).rolling(window).mean()
+    ex = df["x"].rolling(window).mean()
+    ey = df["y"].rolling(window).mean()
+    ex2 = (df["x"]**2).rolling(window).mean()
+    
+    num = exy - (ex * ey)
+    denom = ex2 - (ex**2)
+    
+    lambdas = num / denom.replace(0.0, np.nan)
+    return lambdas.reindex(close.index)
+
 def calculate_vpin(volume: pd.Series, buy_volume: pd.Series, window: int = 50) -> pd.Series:
     """
     VPIN using rolling volume windows.

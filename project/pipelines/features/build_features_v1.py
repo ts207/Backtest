@@ -25,7 +25,7 @@ from pipelines._lib.run_manifest import (
     validate_input_provenance,
 )
 from pipelines._lib.validation import ensure_utc_timestamp, validate_columns
-from features.microstructure import calculate_vpin, calculate_roll
+from features.microstructure import calculate_vpin, calculate_roll, calculate_amihud, calculate_kyle_lambda
 
 FUNDING_MAX_STALENESS = pd.Timedelta("8h")
 OI_MAX_STALENESS = pd.Timedelta("2h")
@@ -460,6 +460,13 @@ def main() -> int:
             
             features["ms_vpin_24"] = calculate_vpin(vol_raw, buy_vol_proxy, window=24)
             features["ms_roll_24"] = calculate_roll(features["close"], window=24)
+            features["ms_amihud_24"] = calculate_amihud(features["close"], vol_raw, window=24)
+            features["ms_kyle_24"] = calculate_kyle_lambda(
+                features["close"], 
+                buy_vol_proxy, 
+                vol_raw - buy_vol_proxy, 
+                window=24
+            )
 
             features["rv_96"] = features["logret_1"].rolling(window=96, min_periods=72).std()
             features["rv_pct_17280"] = _rolling_percentile(features["rv_96"], window=17280)
