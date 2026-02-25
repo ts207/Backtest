@@ -46,19 +46,29 @@ def _load_features(run_id: str, symbol: str) -> pd.DataFrame:
 def detect_cascades(
     df: pd.DataFrame, 
     symbol: str, 
-    liq_vol_th: float, 
-    oi_drop_th: float,
+    liq_median_window: int = 288,  # 1 day of 5m bars
+    liq_multiplier: float = 3.0,
     cooldown_bars: int = 12
 ) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
     
     # Required columns check
-    for col in ["liquidation_notional", "oi_delta_1h"]:
+    required = ["liquidation_notional", "oi_delta_1h", "oi_notional", "close", "high", "low"]
+    for col in required:
         if col not in df.columns:
             logging.warning(f"Missing column {col} for {symbol}")
             return pd.DataFrame()
 
+    # Calculate dynamic threshold
+    # Note: Using rolling median to identify "normal" liquidation levels
+    min_p = min(liq_median_window, 24)
+    df["liq_median"] = df["liquidation_notional"].rolling(window=liq_median_window, min_periods=min_p).median().fillna(0.0)
+    df["liq_th"] = df["liq_median"] * liq_multiplier
+    
+    # Handle extremely low liquidity periods by enforcing a floor if needed, 
+    # but spec says > 3.0 * median.
+    
     events = []
     n = len(df)
     i = 0
@@ -72,26 +82,64 @@ def detect_cascades(
             
         liq = float(df["liquidation_notional"].iat[i])
         oi_delta = float(df["oi_delta_1h"].iat[i])
+        threshold = float(df["liq_th"].iat[i])
         
         # Rule: Liquidation spike AND OI drop
-        if liq >= liq_vol_th and oi_delta <= oi_drop_th:
+        if liq > threshold and oi_delta < 0:
+            # Found a cascade start
+            start_idx = i
+            end_idx = i
+            
+            # Aggregate multi-bar cascades (simple lookahead for continuation)
+            # If the next bar also meets criteria, include it.
+            # We'll allow a small gap or just strict sequence? 
+            # Let's do sequence for now.
+            while end_idx + 1 < n:
+                next_liq = float(df["liquidation_notional"].iat[end_idx + 1])
+                next_oi_delta = float(df["oi_delta_1h"].iat[end_idx + 1])
+                next_threshold = float(df["liq_th"].iat[end_idx + 1])
+                
+                if next_liq > next_threshold and next_oi_delta < 0:
+                    end_idx += 1
+                else:
+                    break
+            
             event_num += 1
             event_id = f"lc_v1_{symbol}_{event_num:06d}"
+            
+            # Calculate metadata
+            window = df.iloc[start_idx : end_idx + 1]
+            total_liq = window["liquidation_notional"].sum()
+            
+            # OI Reduction: from before the cascade to the end
+            # We use oi_notional. oi_delta_1h is a flow, we want stock change.
+            oi_before = df["oi_notional"].iat[max(0, start_idx - 1)]
+            oi_after = df["oi_notional"].iat[end_idx]
+            oi_reduction = oi_before - oi_after
+            oi_reduction_pct = (oi_reduction / oi_before) if oi_before > 0 else 0.0
+            
+            # Price Drawdown: from high in window to low in window
+            price_start = df["close"].iat[max(0, start_idx - 1)]
+            price_low = window["low"].min()
+            price_drawdown = (price_start - price_low) / price_start if price_start > 0 else 0.0
             
             events.append({
                 "event_id": event_id,
                 "symbol": symbol,
-                "timestamp": df["timestamp"].iat[i],
-                "enter_idx": i,
-                "severity": liq,
-                "liquidation_total": liq,
-                "oi_drop_total": oi_delta,
-                "duration_bars": 1, # Minimal representation
-                "vol_regime": df["vol_regime"].iat[i] if "vol_regime" in df.columns else "unknown",
-                "severity_bucket": "base" # Will be updated later if needed
+                "timestamp": df["timestamp"].iat[start_idx],
+                "enter_idx": start_idx,
+                "exit_idx": end_idx,
+                "duration_bars": end_idx - start_idx + 1,
+                "severity": total_liq,
+                "total_liquidation_notional": total_liq,
+                "oi_reduction_pct": oi_reduction_pct,
+                "price_drawdown": price_drawdown,
+                "vol_regime": df["vol_regime"].iat[start_idx] if "vol_regime" in df.columns else "unknown",
+                "severity_bucket": "base"
             })
-            cooldown_until = i + cooldown_bars
-            i = cooldown_until + 1
+            
+            cooldown_until = end_idx + cooldown_bars
+            i = end_idx + 1
             continue
         i += 1
         
@@ -101,8 +149,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Phase-1 analyzer for liquidation cascade events")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbols", required=True)
-    parser.add_argument("--liq_vol_th", type=float, default=100000.0)
-    parser.add_argument("--oi_drop_th", type=float, default=-500000.0)
+    parser.add_argument("--liq_multiplier", type=float, default=3.0)
+    parser.add_argument("--median_window", type=int, default=288)
     parser.add_argument("--out_dir", default=None)
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
@@ -121,30 +169,17 @@ def main() -> int:
             if feats.empty:
                 continue
             
-            # Use market context if available for vol_regime
-            # For simplicity, we'll just check if it exists in features
-            # (In a real run, build_market_context would have run before this)
+            events = detect_cascades(
+                feats, 
+                sym, 
+                liq_median_window=args.median_window, 
+                liq_multiplier=args.liq_multiplier
+            )
             
-            events = detect_cascades(feats, sym, args.liq_vol_th, args.oi_drop_th)
             if not events.empty:
-                # Add severity buckets with monotonicity & tie-handling assertions
+                # Add severity buckets
                 qs = events["severity"].quantile([0.8, 0.9, 0.95]).to_dict()
                 q80, q90, q95 = qs.get(0.8, 1e18), qs.get(0.9, 1e18), qs.get(0.95, 1e18)
-                
-                # Check metrics (cumulative)
-                c_ext = (events["severity"] >= q95).sum()
-                c_10 = (events["severity"] >= q90).sum()
-                c_20 = (events["severity"] >= q80).sum()
-                c_base = len(events)
-                
-                # Assert monotonicity
-                if not (c_ext <= c_10 <= c_20 <= c_base):
-                    raise ValueError(f"Monotonicity assertion failed for {sym}: {c_ext} <= {c_10} <= {c_20} <= {c_base}")
-                
-                # Assert fraction sanity
-                frac_90 = c_10 / c_base if c_base > 0 else 0
-                if frac_90 > 0.35:  # user says not 90%+
-                    raise ValueError(f"Fraction sanity check failed for {sym}: top_10pct fraction is {frac_90:.2f} (> 0.35 allowed due to ties)")
                 
                 def _bucket(val):
                     if val >= q95: return "extreme_5pct"

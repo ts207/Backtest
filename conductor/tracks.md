@@ -17,5 +17,5 @@ Current active tracks should be recorded here as concise status items.
 
 ---
 
-- [ ] **Track: Implement Liquidation Cascade event analyzer**
+- [x] **Track: Implement Liquidation Cascade event analyzer**
 *Link: [./tracks/liquidation_cascade_20260225/](./tracks/liquidation_cascade_20260225/)*
