@@ -38,6 +38,12 @@ def _safe_int(value: object, default: int = 0) -> int:
 
 
 def _load_manual_candidate(spec_path: Path, backtest_run_id: str) -> pd.DataFrame:
+    """
+    Load a manual strategy specification and its associated backtest trades.
+    
+    Transforms the backtest results into a virtual candidate frame suitable
+    for statistical evaluation and promotion gating.
+    """
     import yaml
     from pipelines.research.analyze_conditional_expectancy import build_walk_forward_split_labels
     from pipelines.research.phase2_statistical_gates import gate_regime_stability
