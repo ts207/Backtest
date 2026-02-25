@@ -1,0 +1,4 @@
+event_type: VOL_RELAXATION_START
+reports_dir: volatility_transition
+events_file: volatility_transition_events.csv
+signal_column: vol_relaxation_start_event

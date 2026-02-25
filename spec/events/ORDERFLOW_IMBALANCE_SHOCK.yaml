@@ -1,0 +1,4 @@
+event_type: ORDERFLOW_IMBALANCE_SHOCK
+reports_dir: liquidity_dislocation
+events_file: liquidity_dislocation_events.csv
+signal_column: orderflow_imbalance_shock_event

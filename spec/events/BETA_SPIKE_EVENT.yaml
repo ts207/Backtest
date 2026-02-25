@@ -1,0 +1,4 @@
+event_type: BETA_SPIKE_EVENT
+reports_dir: regime_transition
+events_file: regime_transition_events.csv
+signal_column: beta_spike_event

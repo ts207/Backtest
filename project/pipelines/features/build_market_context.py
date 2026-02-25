@@ -195,6 +195,66 @@ def _build_market_context(symbol: str, features: pd.DataFrame) -> pd.DataFrame:
         & (out["rv_percentile_24h"] >= 0.66).fillna(False)
     )
 
+    # Broad fallback state masks so every ontology state has a materialized column.
+    trend_abs = out["trend_return_96"].abs().fillna(0.0)
+    trend_q75 = float(trend_abs.quantile(0.75)) if trend_abs.notna().any() else 0.0
+    trend_q25 = float(trend_abs.quantile(0.25)) if trend_abs.notna().any() else 0.0
+    trending_mask = trend_abs >= trend_q75
+    chop_mask = trend_abs <= trend_q25
+
+    basis_z = _feature_series("basis_zscore")
+    if basis_z.isna().all():
+        basis_z = _feature_series("cross_exchange_spread_z")
+    basis_p90 = float(basis_z.abs().quantile(0.90)) if basis_z.notna().any() else np.nan
+    desync_mask = (basis_z.abs() >= basis_p90).fillna(False) if np.isfinite(basis_p90) else pd.Series(False, index=out.index)
+
+    ts = pd.to_datetime(out["timestamp"], utc=True, errors="coerce")
+    hour = ts.dt.hour.fillna(-1).astype(int)
+    minute = ts.dt.minute.fillna(-1).astype(int)
+    open_window_mask = ((hour.isin([0, 8, 13])) & (minute <= 15)).fillna(False)
+    close_window_mask = ((hour.isin([7, 12, 23])) & (minute >= 45)).fillna(False)
+    funding_window_mask = ((hour.isin([0, 8, 16])) & (minute <= 10)).fillna(False)
+    news_window_mask = ((hour.isin([12, 13, 14, 18])) & (minute.between(25, 35))).fillna(False)
+
+    low_liq_mask = out[MATERIALIZED_STATE_COLUMNS_BY_ID["LOW_LIQUIDITY_STATE"]].fillna(False).astype(bool)
+    spread_mask = out[MATERIALIZED_STATE_COLUMNS_BY_ID["SPREAD_ELEVATED_STATE"]].fillna(False).astype(bool)
+    aftershock_mask = out[MATERIALIZED_STATE_COLUMNS_BY_ID["AFTERSHOCK_STATE"]].fillna(False).astype(bool)
+    compression_mask = out[MATERIALIZED_STATE_COLUMNS_BY_ID["COMPRESSION_STATE"]].fillna(False).astype(bool)
+    high_vol_mask = out[MATERIALIZED_STATE_COLUMNS_BY_ID["HIGH_VOL_REGIME"]].fillna(False).astype(bool)
+    crowding_mask = out[MATERIALIZED_STATE_COLUMNS_BY_ID["CROWDING_STATE"]].fillna(False).astype(bool)
+    funding_persist_mask = out[MATERIALIZED_STATE_COLUMNS_BY_ID["FUNDING_PERSISTENCE_STATE"]].fillna(False).astype(bool)
+    deleveraging_mask = out[MATERIALIZED_STATE_COLUMNS_BY_ID["DELEVERAGING_STATE"]].fillna(False).astype(bool)
+    friction_high_mask = (spread_mask | low_liq_mask | aftershock_mask).fillna(False)
+
+    for state_id, column in MATERIALIZED_STATE_COLUMNS_BY_ID.items():
+        if column in out.columns:
+            out[column] = out[column].fillna(False).astype(bool)
+            continue
+
+        token = str(state_id).upper()
+        if any(k in token for k in ["LIQUIDITY", "SPREAD", "DEPTH", "SWEEP", "ABSORPTION", "ILLIQUID"]):
+            mask = (low_liq_mask | spread_mask)
+        elif any(k in token for k in ["VOL", "AFTERSHOCK", "COMPRESSION"]):
+            mask = (aftershock_mask | compression_mask | high_vol_mask)
+        elif any(k in token for k in ["FUNDING", "CROWD", "SQUEEZE", "DELEVERAGING", "LIQUIDATION", "CARRY"]):
+            mask = (crowding_mask | funding_persist_mask | deleveraging_mask)
+        elif any(k in token for k in ["TREND", "CHOP", "PULLBACK", "BREAKOUT", "FAILURE", "REVERS"]):
+            mask = (trending_mask | chop_mask)
+        elif any(k in token for k in ["DESYNC", "BASIS", "CONVERGENCE", "ARBITRAGE"]):
+            mask = desync_mask
+        elif any(k in token for k in ["OPEN_WINDOW", "SESSION_OPEN"]):
+            mask = open_window_mask
+        elif any(k in token for k in ["CLOSE_WINDOW", "SESSION_CLOSE"]):
+            mask = close_window_mask
+        elif any(k in token for k in ["NEWS", "FUNDING_WINDOW", "FUNDING_TIMESTAMP"]):
+            mask = (news_window_mask | funding_window_mask)
+        elif any(k in token for k in ["FRICTION", "SLIPPAGE"]):
+            mask = friction_high_mask
+        else:
+            mask = pd.Series(False, index=out.index)
+
+        out[column] = pd.Series(mask, index=out.index).fillna(False).astype(bool)
+
     out["context_def_version"] = "market_context_v1"
     return out
 

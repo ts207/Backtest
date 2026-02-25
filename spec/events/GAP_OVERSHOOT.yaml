@@ -1,0 +1,4 @@
+event_type: GAP_OVERSHOOT
+reports_dir: statistical_dislocation
+events_file: statistical_dislocation_events.csv
+signal_column: gap_overshoot_event

@@ -1,0 +1,4 @@
+event_type: BAND_BREAK
+reports_dir: statistical_dislocation
+events_file: statistical_dislocation_events.csv
+signal_column: band_break_event

@@ -1,0 +1,4 @@
+event_type: VOL_SPIKE
+reports_dir: volatility_transition
+events_file: volatility_transition_events.csv
+signal_column: vol_spike_event

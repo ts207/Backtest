@@ -1,0 +1,4 @@
+event_type: INDEX_COMPONENT_DIVERGENCE
+reports_dir: information_desync
+events_file: information_desync_events.csv
+signal_column: index_component_divergence_event

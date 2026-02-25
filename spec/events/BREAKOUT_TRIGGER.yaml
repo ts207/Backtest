@@ -1,0 +1,4 @@
+event_type: BREAKOUT_TRIGGER
+reports_dir: volatility_transition
+events_file: volatility_transition_events.csv
+signal_column: breakout_trigger_event

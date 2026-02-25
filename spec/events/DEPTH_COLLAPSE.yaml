@@ -1,0 +1,4 @@
+event_type: DEPTH_COLLAPSE
+reports_dir: liquidity_dislocation
+events_file: liquidity_dislocation_events.csv
+signal_column: depth_collapse_event
