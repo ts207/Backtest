@@ -16,7 +16,7 @@ SAMPLE_ROWS = [
 
 def _build_family_id(row: dict) -> str:
     """Reproduce the family_id construction from phase2_candidate_discovery.py."""
-    from pipelines.research.phase2_candidate_discovery import _make_family_id
+    from project.pipelines.research.phase2_candidate_discovery import _make_family_id
     return _make_family_id(row["symbol"], row["event_type"], row["rule_template"],
                            row["horizon"], row["conditioning"])
 

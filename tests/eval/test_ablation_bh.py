@@ -63,7 +63,7 @@ class TestAblationBH:
         assert bool(noise.iloc[0]["is_lift_discovery"]) is False
 
     def test_bh_uses_alpha_010_threshold(self):
-        """lift_q_value <= 0.10 iff is_lift_discovery is True."""
+        """lift_q_value ≤ 0.10 iff is_lift_discovery is True."""
         group = _make_group([
             {"candidate_id": "c1", "condition_key": "all",           "expectancy": 0.001, "n_events": 200, "p_value": 1.0},
             {"candidate_id": "c2", "condition_key": "cond_a",        "expectancy": 0.005, "n_events": 100, "p_value": 0.02},
