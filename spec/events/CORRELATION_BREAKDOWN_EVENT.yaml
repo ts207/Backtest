@@ -1,0 +1,4 @@
+event_type: CORRELATION_BREAKDOWN_EVENT
+reports_dir: regime_transition
+events_file: regime_transition_events.csv
+signal_column: correlation_breakdown_event

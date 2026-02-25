@@ -1,0 +1,4 @@
+event_type: RANGE_BREAKOUT
+reports_dir: trend_structure
+events_file: trend_structure_events.csv
+signal_column: range_breakout_event

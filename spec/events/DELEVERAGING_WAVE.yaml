@@ -1,0 +1,4 @@
+event_type: DELEVERAGING_WAVE
+reports_dir: positioning_extremes
+events_file: positioning_extremes_events.csv
+signal_column: deleveraging_wave_event

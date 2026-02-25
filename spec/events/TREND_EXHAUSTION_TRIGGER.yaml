@@ -1,0 +1,4 @@
+event_type: TREND_EXHAUSTION_TRIGGER
+reports_dir: forced_flow_and_exhaustion
+events_file: forced_flow_and_exhaustion_events.csv
+signal_column: trend_exhaustion_trigger_event

@@ -1,0 +1,4 @@
+event_type: OVERSHOOT_AFTER_SHOCK
+reports_dir: statistical_dislocation
+events_file: statistical_dislocation_events.csv
+signal_column: overshoot_after_shock_event

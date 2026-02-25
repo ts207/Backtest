@@ -1,0 +1,4 @@
+event_type: PULLBACK_PIVOT
+reports_dir: trend_structure
+events_file: trend_structure_events.csv
+signal_column: pullback_pivot_event

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Dict, List
 
+from events.registry import EVENT_REGISTRY_SPECS
+
 
 DEFAULT_POLICY = {
     "direction": "conditional",
@@ -106,8 +108,24 @@ EVENT_POLICIES: Dict[str, Dict[str, object]] = {
 
 
 def event_policy(event_type: str) -> Dict[str, object]:
-    key = str(event_type).strip().lower()
-    return EVENT_POLICIES.get(key, DEFAULT_POLICY)
+    raw = str(event_type).strip()
+    if not raw:
+        return DEFAULT_POLICY
+
+    key = raw.lower()
+    explicit = EVENT_POLICIES.get(key)
+    if explicit is not None:
+        return explicit
+
+    # Keep policies explicit for all registry-backed event types even when a
+    # bespoke strategy policy has not been authored yet.
+    spec = EVENT_REGISTRY_SPECS.get(raw.upper())
+    if spec is None:
+        return DEFAULT_POLICY
+    return {
+        **DEFAULT_POLICY,
+        "triggers": [str(spec.signal_column)],
+    }
 
 
 def overlay_defaults(names: List[str], robustness_score: float) -> List[dict]:

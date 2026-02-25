@@ -1,72 +1,639 @@
 families:
-  VOL_SHOCK:
-    canonical_family: VOLATILITY_TRANSITION
-    templates: [mean_reversion, continuation, trend_continuation]
-    horizons: [60m]
-    max_candidates_per_run: 500
-
   LIQUIDITY_VACUUM:
     canonical_family: LIQUIDITY_DISLOCATION
-    templates: [mean_reversion, stop_run_repair, overshoot_repair, continuation, only_if_liquidity, slippage_aware_filter]
-    conditioning_cols: []
-    horizons: [15m]
+    templates:
+    - mean_reversion
+    - stop_run_repair
+    - overshoot_repair
+    - continuation
+    - only_if_liquidity
+    - slippage_aware_filter
+    horizons:
+    - 15m
     max_candidates_per_run: 1000
-
-  FORCED_FLOW_EXHAUSTION:
-    canonical_family: FORCED_FLOW_AND_EXHAUSTION
-    templates: [mean_reversion, exhaustion_reversal, momentum_fade, range_reversion, only_if_trend, drawdown_filter]
-    horizons: [60m]
-    max_candidates_per_run: 500
-
-  CROSS_VENUE_DESYNC:
-    canonical_family: INFORMATION_DESYNC
-    templates: [desync_repair, convergence, basis_repair, lead_lag_follow, divergence_continuation]
-    horizons: [5m, 15m, 60m]
+    conditioning_cols: []
+  DEPTH_COLLAPSE:
+    canonical_family: LIQUIDITY_DISLOCATION
+    templates:
+    - mean_reversion
+    - continuation
+    - stop_run_repair
+    - overshoot_repair
+    - only_if_liquidity
+    - slippage_aware_filter
+    horizons:
+    - 15m
     max_candidates_per_run: 600
-
+  SPREAD_BLOWOUT:
+    canonical_family: LIQUIDITY_DISLOCATION
+    templates:
+    - mean_reversion
+    - continuation
+    - stop_run_repair
+    - overshoot_repair
+    - only_if_liquidity
+    - slippage_aware_filter
+    horizons:
+    - 15m
+    max_candidates_per_run: 600
+  ORDERFLOW_IMBALANCE_SHOCK:
+    canonical_family: LIQUIDITY_DISLOCATION
+    templates:
+    - mean_reversion
+    - continuation
+    - stop_run_repair
+    - overshoot_repair
+    - only_if_liquidity
+    - slippage_aware_filter
+    horizons:
+    - 15m
+    max_candidates_per_run: 600
+  SWEEP_STOPRUN:
+    canonical_family: LIQUIDITY_DISLOCATION
+    templates:
+    - mean_reversion
+    - continuation
+    - stop_run_repair
+    - overshoot_repair
+    - only_if_liquidity
+    - slippage_aware_filter
+    horizons:
+    - 15m
+    max_candidates_per_run: 600
+  ABSORPTION_EVENT:
+    canonical_family: LIQUIDITY_DISLOCATION
+    templates:
+    - mean_reversion
+    - continuation
+    - stop_run_repair
+    - overshoot_repair
+    - only_if_liquidity
+    - slippage_aware_filter
+    horizons:
+    - 15m
+    max_candidates_per_run: 600
+  LIQUIDITY_GAP_PRINT:
+    canonical_family: LIQUIDITY_DISLOCATION
+    templates:
+    - mean_reversion
+    - continuation
+    - stop_run_repair
+    - overshoot_repair
+    - only_if_liquidity
+    - slippage_aware_filter
+    horizons:
+    - 15m
+    max_candidates_per_run: 600
+  VOL_SHOCK:
+    canonical_family: VOLATILITY_TRANSITION
+    templates:
+    - mean_reversion
+    - continuation
+    - trend_continuation
+    horizons:
+    - 60m
+    max_candidates_per_run: 500
+  VOL_SPIKE:
+    canonical_family: VOLATILITY_TRANSITION
+    templates:
+    - mean_reversion
+    - continuation
+    - trend_continuation
+    - volatility_expansion_follow
+    - pullback_entry
+    - only_if_regime
+    horizons:
+    - 60m
+    max_candidates_per_run: 500
+  VOL_RELAXATION_START:
+    canonical_family: VOLATILITY_TRANSITION
+    templates:
+    - mean_reversion
+    - continuation
+    - trend_continuation
+    - volatility_expansion_follow
+    - pullback_entry
+    - only_if_regime
+    horizons:
+    - 60m
+    max_candidates_per_run: 500
+  VOL_CLUSTER_SHIFT:
+    canonical_family: VOLATILITY_TRANSITION
+    templates:
+    - mean_reversion
+    - continuation
+    - trend_continuation
+    - volatility_expansion_follow
+    - pullback_entry
+    - only_if_regime
+    horizons:
+    - 60m
+    max_candidates_per_run: 500
+  RANGE_COMPRESSION_END:
+    canonical_family: VOLATILITY_TRANSITION
+    templates:
+    - mean_reversion
+    - continuation
+    - trend_continuation
+    - volatility_expansion_follow
+    - pullback_entry
+    - only_if_regime
+    horizons:
+    - 60m
+    max_candidates_per_run: 500
+  BREAKOUT_TRIGGER:
+    canonical_family: VOLATILITY_TRANSITION
+    templates:
+    - mean_reversion
+    - continuation
+    - trend_continuation
+    - volatility_expansion_follow
+    - pullback_entry
+    - only_if_regime
+    horizons:
+    - 60m
+    max_candidates_per_run: 500
   FUNDING_EXTREME_ONSET:
     canonical_family: POSITIONING_EXTREMES
-    templates: [reversal_or_squeeze, mean_reversion, continuation, exhaustion_reversal, convexity_capture, only_if_funding, only_if_oi, tail_risk_avoid]
-    horizons: [5m, 60m]
+    templates:
+    - reversal_or_squeeze
+    - mean_reversion
+    - continuation
+    - exhaustion_reversal
+    - convexity_capture
+    - only_if_funding
+    - only_if_oi
+    - tail_risk_avoid
+    horizons:
+    - 5m
+    - 60m
     max_candidates_per_run: 500
-
+  FUNDING_FLIP:
+    canonical_family: POSITIONING_EXTREMES
+    templates:
+    - reversal_or_squeeze
+    - mean_reversion
+    - continuation
+    - exhaustion_reversal
+    - convexity_capture
+    - only_if_funding
+    - only_if_oi
+    - tail_risk_avoid
+    horizons:
+    - 5m
+    - 60m
+    max_candidates_per_run: 500
   FUNDING_PERSISTENCE_TRIGGER:
     canonical_family: POSITIONING_EXTREMES
-    templates: [reversal_or_squeeze, mean_reversion, continuation, exhaustion_reversal, convexity_capture, only_if_funding, only_if_oi, tail_risk_avoid]
-    horizons: [5m, 60m]
+    templates:
+    - reversal_or_squeeze
+    - mean_reversion
+    - continuation
+    - exhaustion_reversal
+    - convexity_capture
+    - only_if_funding
+    - only_if_oi
+    - tail_risk_avoid
+    horizons:
+    - 5m
+    - 60m
     max_candidates_per_run: 500
-
   FUNDING_NORMALIZATION_TRIGGER:
     canonical_family: POSITIONING_EXTREMES
-    templates: [reversal_or_squeeze, mean_reversion, continuation, exhaustion_reversal, convexity_capture, only_if_funding, only_if_oi, tail_risk_avoid]
-    horizons: [60m]
+    templates:
+    - reversal_or_squeeze
+    - mean_reversion
+    - continuation
+    - exhaustion_reversal
+    - convexity_capture
+    - only_if_funding
+    - only_if_oi
+    - tail_risk_avoid
+    horizons:
+    - 60m
     max_candidates_per_run: 500
-
   OI_SPIKE_POSITIVE:
     canonical_family: POSITIONING_EXTREMES
-    templates: [reversal_or_squeeze, mean_reversion, continuation, exhaustion_reversal, convexity_capture, only_if_funding, only_if_oi, tail_risk_avoid]
-    horizons: [60m]
+    templates:
+    - reversal_or_squeeze
+    - mean_reversion
+    - continuation
+    - exhaustion_reversal
+    - convexity_capture
+    - only_if_funding
+    - only_if_oi
+    - tail_risk_avoid
+    horizons:
+    - 60m
     max_candidates_per_run: 250
-
   OI_SPIKE_NEGATIVE:
     canonical_family: POSITIONING_EXTREMES
-    templates: [reversal_or_squeeze, mean_reversion, continuation, exhaustion_reversal, convexity_capture, only_if_funding, only_if_oi, tail_risk_avoid]
-    horizons: [5m, 60m]
+    templates:
+    - reversal_or_squeeze
+    - mean_reversion
+    - continuation
+    - exhaustion_reversal
+    - convexity_capture
+    - only_if_funding
+    - only_if_oi
+    - tail_risk_avoid
+    horizons:
+    - 5m
+    - 60m
     max_candidates_per_run: 250
-
   OI_FLUSH:
     canonical_family: POSITIONING_EXTREMES
-    templates: [reversal_or_squeeze, mean_reversion, continuation, exhaustion_reversal, convexity_capture, only_if_funding, only_if_oi, tail_risk_avoid]
-    horizons: [5m, 60m]
+    templates:
+    - reversal_or_squeeze
+    - mean_reversion
+    - continuation
+    - exhaustion_reversal
+    - convexity_capture
+    - only_if_funding
+    - only_if_oi
+    - tail_risk_avoid
+    horizons:
+    - 5m
+    - 60m
     max_candidates_per_run: 500
-
   LIQUIDATION_CASCADE:
     canonical_family: POSITIONING_EXTREMES
-    templates: [reversal_or_squeeze, mean_reversion, continuation, exhaustion_reversal, convexity_capture, only_if_funding, only_if_oi, tail_risk_avoid]
-    conditioning_cols: []
-    horizons: [5m]
+    templates:
+    - reversal_or_squeeze
+    - mean_reversion
+    - continuation
+    - exhaustion_reversal
+    - convexity_capture
+    - only_if_funding
+    - only_if_oi
+    - tail_risk_avoid
+    horizons:
+    - 5m
     max_candidates_per_run: 300
-
+    conditioning_cols: []
+  DELEVERAGING_WAVE:
+    canonical_family: POSITIONING_EXTREMES
+    templates:
+    - reversal_or_squeeze
+    - mean_reversion
+    - continuation
+    - exhaustion_reversal
+    - convexity_capture
+    - only_if_funding
+    - only_if_oi
+    - tail_risk_avoid
+    horizons:
+    - 5m
+    - 60m
+    max_candidates_per_run: 500
+  FORCED_FLOW_EXHAUSTION:
+    canonical_family: FORCED_FLOW_AND_EXHAUSTION
+    templates:
+    - mean_reversion
+    - exhaustion_reversal
+    - momentum_fade
+    - range_reversion
+    - only_if_trend
+    - drawdown_filter
+    horizons:
+    - 60m
+    max_candidates_per_run: 500
+  TREND_EXHAUSTION_TRIGGER:
+    canonical_family: FORCED_FLOW_AND_EXHAUSTION
+    templates:
+    - mean_reversion
+    - exhaustion_reversal
+    - momentum_fade
+    - range_reversion
+    - only_if_trend
+    - drawdown_filter
+    horizons:
+    - 60m
+    max_candidates_per_run: 500
+  MOMENTUM_DIVERGENCE_TRIGGER:
+    canonical_family: FORCED_FLOW_AND_EXHAUSTION
+    templates:
+    - mean_reversion
+    - exhaustion_reversal
+    - momentum_fade
+    - range_reversion
+    - only_if_trend
+    - drawdown_filter
+    horizons:
+    - 60m
+    max_candidates_per_run: 500
+  CLIMAX_VOLUME_BAR:
+    canonical_family: FORCED_FLOW_AND_EXHAUSTION
+    templates:
+    - mean_reversion
+    - exhaustion_reversal
+    - momentum_fade
+    - range_reversion
+    - only_if_trend
+    - drawdown_filter
+    horizons:
+    - 60m
+    max_candidates_per_run: 500
+  FAILED_CONTINUATION:
+    canonical_family: FORCED_FLOW_AND_EXHAUSTION
+    templates:
+    - mean_reversion
+    - exhaustion_reversal
+    - momentum_fade
+    - range_reversion
+    - only_if_trend
+    - drawdown_filter
+    horizons:
+    - 60m
+    max_candidates_per_run: 500
+  RANGE_BREAKOUT:
+    canonical_family: TREND_STRUCTURE
+    templates:
+    - breakout_followthrough
+    - false_breakout_reversal
+    - pullback_entry
+    - trend_continuation
+    - continuation
+    - only_if_trend
+    horizons:
+    - 15m
+    - 60m
+    max_candidates_per_run: 450
+  FALSE_BREAKOUT:
+    canonical_family: TREND_STRUCTURE
+    templates:
+    - breakout_followthrough
+    - false_breakout_reversal
+    - pullback_entry
+    - trend_continuation
+    - continuation
+    - only_if_trend
+    horizons:
+    - 15m
+    - 60m
+    max_candidates_per_run: 450
+  TREND_ACCELERATION:
+    canonical_family: TREND_STRUCTURE
+    templates:
+    - breakout_followthrough
+    - false_breakout_reversal
+    - pullback_entry
+    - trend_continuation
+    - continuation
+    - only_if_trend
+    horizons:
+    - 15m
+    - 60m
+    max_candidates_per_run: 450
+  TREND_DECELERATION:
+    canonical_family: TREND_STRUCTURE
+    templates:
+    - breakout_followthrough
+    - false_breakout_reversal
+    - pullback_entry
+    - trend_continuation
+    - continuation
+    - only_if_trend
+    horizons:
+    - 15m
+    - 60m
+    max_candidates_per_run: 450
+  PULLBACK_PIVOT:
+    canonical_family: TREND_STRUCTURE
+    templates:
+    - breakout_followthrough
+    - false_breakout_reversal
+    - pullback_entry
+    - trend_continuation
+    - continuation
+    - only_if_trend
+    horizons:
+    - 15m
+    - 60m
+    max_candidates_per_run: 450
+  SUPPORT_RESISTANCE_BREAK:
+    canonical_family: TREND_STRUCTURE
+    templates:
+    - breakout_followthrough
+    - false_breakout_reversal
+    - pullback_entry
+    - trend_continuation
+    - continuation
+    - only_if_trend
+    horizons:
+    - 15m
+    - 60m
+    max_candidates_per_run: 450
+  ZSCORE_STRETCH:
+    canonical_family: STATISTICAL_DISLOCATION
+    templates:
+    - mean_reversion
+    - overshoot_repair
+    - tail_risk_avoid
+    horizons:
+    - 15m
+    - 60m
+    max_candidates_per_run: 350
+  BAND_BREAK:
+    canonical_family: STATISTICAL_DISLOCATION
+    templates:
+    - mean_reversion
+    - overshoot_repair
+    - tail_risk_avoid
+    horizons:
+    - 15m
+    - 60m
+    max_candidates_per_run: 350
+  OVERSHOOT_AFTER_SHOCK:
+    canonical_family: STATISTICAL_DISLOCATION
+    templates:
+    - mean_reversion
+    - overshoot_repair
+    - tail_risk_avoid
+    horizons:
+    - 15m
+    - 60m
+    max_candidates_per_run: 350
+  GAP_OVERSHOOT:
+    canonical_family: STATISTICAL_DISLOCATION
+    templates:
+    - mean_reversion
+    - overshoot_repair
+    - tail_risk_avoid
+    horizons:
+    - 15m
+    - 60m
+    max_candidates_per_run: 350
+  VOL_REGIME_SHIFT_EVENT:
+    canonical_family: REGIME_TRANSITION
+    templates:
+    - only_if_regime
+    - continuation
+    - mean_reversion
+    - drawdown_filter
+    - tail_risk_avoid
+    horizons:
+    - 60m
+    max_candidates_per_run: 350
+  TREND_TO_CHOP_SHIFT:
+    canonical_family: REGIME_TRANSITION
+    templates:
+    - only_if_regime
+    - continuation
+    - mean_reversion
+    - drawdown_filter
+    - tail_risk_avoid
+    horizons:
+    - 60m
+    max_candidates_per_run: 350
+  CHOP_TO_TREND_SHIFT:
+    canonical_family: REGIME_TRANSITION
+    templates:
+    - only_if_regime
+    - continuation
+    - mean_reversion
+    - drawdown_filter
+    - tail_risk_avoid
+    horizons:
+    - 60m
+    max_candidates_per_run: 350
+  CORRELATION_BREAKDOWN_EVENT:
+    canonical_family: REGIME_TRANSITION
+    templates:
+    - only_if_regime
+    - continuation
+    - mean_reversion
+    - drawdown_filter
+    - tail_risk_avoid
+    horizons:
+    - 60m
+    max_candidates_per_run: 350
+  BETA_SPIKE_EVENT:
+    canonical_family: REGIME_TRANSITION
+    templates:
+    - only_if_regime
+    - continuation
+    - mean_reversion
+    - drawdown_filter
+    - tail_risk_avoid
+    horizons:
+    - 60m
+    max_candidates_per_run: 350
+  CROSS_VENUE_DESYNC:
+    canonical_family: INFORMATION_DESYNC
+    templates:
+    - desync_repair
+    - convergence
+    - basis_repair
+    - lead_lag_follow
+    - divergence_continuation
+    horizons:
+    - 5m
+    - 15m
+    - 60m
+    max_candidates_per_run: 600
+  INDEX_COMPONENT_DIVERGENCE:
+    canonical_family: INFORMATION_DESYNC
+    templates:
+    - desync_repair
+    - convergence
+    - basis_repair
+    - lead_lag_follow
+    - divergence_continuation
+    horizons:
+    - 5m
+    - 15m
+    - 60m
+    max_candidates_per_run: 500
+  SPOT_PERP_BASIS_SHOCK:
+    canonical_family: INFORMATION_DESYNC
+    templates:
+    - desync_repair
+    - convergence
+    - basis_repair
+    - lead_lag_follow
+    - divergence_continuation
+    horizons:
+    - 5m
+    - 15m
+    - 60m
+    max_candidates_per_run: 500
+  LEAD_LAG_BREAK:
+    canonical_family: INFORMATION_DESYNC
+    templates:
+    - desync_repair
+    - convergence
+    - basis_repair
+    - lead_lag_follow
+    - divergence_continuation
+    horizons:
+    - 5m
+    - 15m
+    - 60m
+    max_candidates_per_run: 500
+  SESSION_OPEN_EVENT:
+    canonical_family: TEMPORAL_STRUCTURE
+    templates:
+    - mean_reversion
+    - continuation
+    horizons:
+    - 5m
+    - 15m
+    max_candidates_per_run: 300
+  SESSION_CLOSE_EVENT:
+    canonical_family: TEMPORAL_STRUCTURE
+    templates:
+    - mean_reversion
+    - continuation
+    horizons:
+    - 5m
+    - 15m
+    max_candidates_per_run: 300
+  FUNDING_TIMESTAMP_EVENT:
+    canonical_family: TEMPORAL_STRUCTURE
+    templates:
+    - mean_reversion
+    - continuation
+    horizons:
+    - 5m
+    - 15m
+    max_candidates_per_run: 300
+  SCHEDULED_NEWS_WINDOW_EVENT:
+    canonical_family: TEMPORAL_STRUCTURE
+    templates:
+    - mean_reversion
+    - continuation
+    horizons:
+    - 5m
+    - 15m
+    max_candidates_per_run: 300
+  SPREAD_REGIME_WIDENING_EVENT:
+    canonical_family: EXECUTION_FRICTION
+    templates:
+    - slippage_aware_filter
+    - tail_risk_avoid
+    horizons:
+    - 5m
+    - 15m
+    max_candidates_per_run: 300
+  SLIPPAGE_SPIKE_EVENT:
+    canonical_family: EXECUTION_FRICTION
+    templates:
+    - slippage_aware_filter
+    - tail_risk_avoid
+    horizons:
+    - 5m
+    - 15m
+    max_candidates_per_run: 300
+  FEE_REGIME_CHANGE_EVENT:
+    canonical_family: EXECUTION_FRICTION
+    templates:
+    - slippage_aware_filter
+    - tail_risk_avoid
+    horizons:
+    - 5m
+    - 15m
+    max_candidates_per_run: 300
 budget:
   global_max_candidates: 10000
   global_max_families: 10

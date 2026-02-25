@@ -1,0 +1,4 @@
+event_type: TREND_TO_CHOP_SHIFT
+reports_dir: regime_transition
+events_file: regime_transition_events.csv
+signal_column: trend_to_chop_shift_event
