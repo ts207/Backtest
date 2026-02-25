@@ -17,5 +17,5 @@ Current active tracks should be recorded here as concise status items.
 
 ---
 
-- [ ] **Track: Implement Funding and Basis Dislocation analyzers**
+- [x] **Track: Implement Funding and Basis Dislocation analyzers**
 *Link: [./tracks/positioning_dislocations_20260225/](./tracks/positioning_dislocations_20260225/)*

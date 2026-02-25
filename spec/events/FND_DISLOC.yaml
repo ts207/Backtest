@@ -1,0 +1,4 @@
+event_type: "FND_DISLOC"
+reports_dir: "funding_dislocation"
+events_file: "funding_dislocation_events.csv"
+signal_column: "funding_dislocation_event"

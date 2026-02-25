@@ -86,6 +86,8 @@ PHASE2_EVENT_CHAIN: List[Tuple[str, str, List[str]]] = [
     ('SLIPPAGE_SPIKE_EVENT', 'analyze_execution_friction_events.py', ['--event_type', 'SLIPPAGE_SPIKE_EVENT', '--timeframe', '5m']),
     ('FEE_REGIME_CHANGE_EVENT', 'analyze_execution_friction_events.py', ['--event_type', 'FEE_REGIME_CHANGE_EVENT', '--timeframe', '5m']),
     ('COPULA_PAIRS_TRADING', 'analyze_copula_pairs.py', ['--pairs', 'BTCUSDT:ETHUSDT']),
+    ('FND_DISLOC', 'analyze_funding_dislocation.py', ['--timeframe', '5m']),
+    ('BASIS_DISLOC', 'analyze_basis_dislocation.py', ['--timeframe', '5m']),
 ]
 _STRICT_RECOMMENDATIONS_CHECKLIST = False
 _CURRENT_PIPELINE_SESSION_ID: Optional[str] = None
