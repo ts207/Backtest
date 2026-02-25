@@ -46,10 +46,11 @@ def _load_event_specs() -> Dict[str, EventRegistrySpec]:
             continue
         if bool(data.get("deprecated", False)) or not bool(data.get("active", True)):
             continue
+        if data.get("kind") == "canonical_event_registry":
+            continue
         missing = required - set(data.keys())
         if missing:
-            _log.debug("Skipping %s — missing registry fields: %s", yaml_file.name, missing)
-            continue
+            raise ValueError(f"Malformed spec {yaml_file.name} — missing registry fields: {missing}")
         spec = EventRegistrySpec(
             event_type=data["event_type"],
             reports_dir=data["reports_dir"],
