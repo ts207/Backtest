@@ -53,7 +53,7 @@ def test_main_writes_rows_for_requested_event_type(monkeypatch, tmp_path):
         aec,
         "EVENT_REGISTRY_SPECS",
         {
-            "VOL_SPIKE": SimpleNamespace(
+            "CUSTOM_TEST_EVENT": SimpleNamespace(
                 reports_dir="volatility_transition",
                 events_file="volatility_transition_events.csv",
             )
@@ -70,7 +70,7 @@ def test_main_writes_rows_for_requested_event_type(monkeypatch, tmp_path):
             "--symbols",
             "BTCUSDT",
             "--event_type",
-            "VOL_SPIKE",
+            "CUSTOM_TEST_EVENT",
             "--out_dir",
             str(tmp_path / "out"),
         ],
@@ -81,4 +81,24 @@ def test_main_writes_rows_for_requested_event_type(monkeypatch, tmp_path):
     assert out_csv.exists()
     out = pd.read_csv(out_csv)
     if not out.empty:
-        assert set(out["event_type"].astype(str).unique()) == {"VOL_SPIKE"}
+        assert set(out["event_type"].astype(str).unique()) == {"CUSTOM_TEST_EVENT"}
+
+
+def test_main_rejects_migrated_family_event_types(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "analyze_canonical_events.py",
+            "--run_id",
+            "r_test",
+            "--symbols",
+            "BTCUSDT",
+            "--event_type",
+            "RANGE_BREAKOUT",
+            "--out_dir",
+            str(tmp_path / "out"),
+        ],
+    )
+    rc = aec.main()
+    assert rc == 1

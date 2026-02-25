@@ -17,6 +17,51 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from events.registry import EVENT_REGISTRY_SPECS
 from pipelines._lib.io_utils import choose_partition_dir, ensure_dir, list_parquet_files, read_parquet, run_scoped_lake_path
 
+REJECTED_EVENT_TYPES = {
+    "RANGE_BREAKOUT",
+    "FALSE_BREAKOUT",
+    "TREND_ACCELERATION",
+    "TREND_DECELERATION",
+    "PULLBACK_PIVOT",
+    "SUPPORT_RESISTANCE_BREAK",
+    "VOL_REGIME_SHIFT_EVENT",
+    "TREND_TO_CHOP_SHIFT",
+    "CHOP_TO_TREND_SHIFT",
+    "CORRELATION_BREAKDOWN_EVENT",
+    "BETA_SPIKE_EVENT",
+    "SPREAD_REGIME_WIDENING_EVENT",
+    "SLIPPAGE_SPIKE_EVENT",
+    "FEE_REGIME_CHANGE_EVENT",
+    "DEPTH_COLLAPSE",
+    "SPREAD_BLOWOUT",
+    "ORDERFLOW_IMBALANCE_SHOCK",
+    "SWEEP_STOPRUN",
+    "ABSORPTION_EVENT",
+    "LIQUIDITY_GAP_PRINT",
+    "VOL_SPIKE",
+    "VOL_RELAXATION_START",
+    "VOL_CLUSTER_SHIFT",
+    "RANGE_COMPRESSION_END",
+    "BREAKOUT_TRIGGER",
+    "FUNDING_FLIP",
+    "DELEVERAGING_WAVE",
+    "TREND_EXHAUSTION_TRIGGER",
+    "MOMENTUM_DIVERGENCE_TRIGGER",
+    "CLIMAX_VOLUME_BAR",
+    "FAILED_CONTINUATION",
+    "ZSCORE_STRETCH",
+    "BAND_BREAK",
+    "OVERSHOOT_AFTER_SHOCK",
+    "GAP_OVERSHOOT",
+    "INDEX_COMPONENT_DIVERGENCE",
+    "SPOT_PERP_BASIS_SHOCK",
+    "LEAD_LAG_BREAK",
+    "SESSION_OPEN_EVENT",
+    "SESSION_CLOSE_EVENT",
+    "FUNDING_TIMESTAMP_EVENT",
+    "SCHEDULED_NEWS_WINDOW_EVENT",
+}
+
 
 def _safe_series(df: pd.DataFrame, column: str) -> pd.Series:
     if column in df.columns:
@@ -115,76 +160,6 @@ def _event_mask(df: pd.DataFrame, event_type: str) -> pd.Series:
     if event_type == "FAILED_CONTINUATION":
         return ((ret_1.shift(1).abs() >= q(ret_1.abs(), 0.95)).fillna(False) & (ret_1 * ret_1.shift(1) < 0).fillna(False))
 
-    if event_type == "RANGE_BREAKOUT":
-        high_96 = _safe_series(df, "high_96").shift(1)
-        low_96 = _safe_series(df, "low_96").shift(1)
-        if high_96.isna().all() or low_96.isna().all():
-            high_96 = close.rolling(96, min_periods=24).max().shift(1)
-            low_96 = close.rolling(96, min_periods=24).min().shift(1)
-        return ((close > high_96) | (close < low_96)).fillna(False)
-    if event_type == "FALSE_BREAKOUT":
-        breakout = _event_mask(df, "RANGE_BREAKOUT")
-        return (breakout.shift(1).fillna(False) & (ret_1.abs() <= q(ret_1.abs(), 0.45)).fillna(False))
-    if event_type == "TREND_ACCELERATION":
-        d = trend_96.diff()
-        return (d >= q(d, 0.95)).fillna(False)
-    if event_type == "TREND_DECELERATION":
-        d = trend_96.diff()
-        return (d <= q(d, 0.05)).fillna(False)
-    if event_type == "PULLBACK_PIVOT":
-        return ((trend_96.shift(1).abs() >= q(trend_96.abs(), 0.75)).fillna(False) & (ret_1 * trend_96.shift(1) < 0).fillna(False) & (ret_1.abs() <= q(ret_1.abs(), 0.70)).fillna(False))
-    if event_type == "SUPPORT_RESISTANCE_BREAK":
-        rolling_hi = close.rolling(288, min_periods=96).max().shift(1)
-        rolling_lo = close.rolling(288, min_periods=96).min().shift(1)
-        return ((close > rolling_hi) | (close < rolling_lo)).fillna(False)
-
-    if event_type == "ZSCORE_STRETCH":
-        return (px_z.abs() >= max(2.0, q(px_z.abs(), 0.96))).fillna(False)
-    if event_type == "BAND_BREAK":
-        ma = close.rolling(96, min_periods=24).mean()
-        sd = close.rolling(96, min_periods=24).std().replace(0.0, np.nan)
-        return ((close > (ma + 2.0 * sd)) | (close < (ma - 2.0 * sd))).fillna(False)
-    if event_type == "OVERSHOOT_AFTER_SHOCK":
-        return ((rv_z.shift(1) >= q(rv_z, 0.95)).fillna(False) & (px_z.abs() >= q(px_z.abs(), 0.95)).fillna(False))
-    if event_type == "GAP_OVERSHOOT":
-        return (ret_1.abs() >= q(ret_1.abs(), 0.995)).fillna(False)
-
-    if event_type == "VOL_REGIME_SHIFT_EVENT":
-        regime = pd.cut(rv_96.rank(pct=True), bins=[-np.inf, 0.33, 0.66, np.inf], labels=[0, 1, 2])
-        return (regime.astype(str) != regime.shift(1).astype(str)).fillna(False)
-    if event_type == "TREND_TO_CHOP_SHIFT":
-        return ((trend_96.shift(1).abs() >= q(trend_96.abs(), 0.75)).fillna(False) & (trend_96.abs() <= q(trend_96.abs(), 0.35)).fillna(False))
-    if event_type == "CHOP_TO_TREND_SHIFT":
-        return ((trend_96.shift(1).abs() <= q(trend_96.abs(), 0.35)).fillna(False) & (trend_96.abs() >= q(trend_96.abs(), 0.75)).fillna(False))
-    if event_type == "CORRELATION_BREAKDOWN_EVENT":
-        return ((basis_z.abs() >= q(basis_z.abs(), 0.95)).fillna(False) & (spread_z.abs() >= q(spread_z.abs(), 0.75)).fillna(False))
-    if event_type == "BETA_SPIKE_EVENT":
-        return ((ret_1.abs() >= q(ret_1.abs(), 0.99)).fillna(False) & (basis_z.abs() >= q(basis_z.abs(), 0.85)).fillna(False))
-
-    if event_type == "INDEX_COMPONENT_DIVERGENCE":
-        return ((basis_z.abs() >= q(basis_z.abs(), 0.93)).fillna(False) & (ret_1.abs() >= q(ret_1.abs(), 0.75)).fillna(False))
-    if event_type == "SPOT_PERP_BASIS_SHOCK":
-        return (basis_z.abs() >= max(2.0, q(basis_z.abs(), 0.97))).fillna(False)
-    if event_type == "LEAD_LAG_BREAK":
-        return (basis_z.diff().abs() >= q(basis_z.diff().abs(), 0.99)).fillna(False)
-
-    ts = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
-    if event_type == "SESSION_OPEN_EVENT":
-        return ((ts.dt.minute == 0) & ts.dt.hour.isin([0, 8, 13])).fillna(False)
-    if event_type == "SESSION_CLOSE_EVENT":
-        return ((ts.dt.minute >= 55) & ts.dt.hour.isin([7, 12, 23])).fillna(False)
-    if event_type == "FUNDING_TIMESTAMP_EVENT":
-        return ((ts.dt.minute == 0) & ts.dt.hour.isin([0, 8, 16])).fillna(False)
-    if event_type == "SCHEDULED_NEWS_WINDOW_EVENT":
-        return (ts.dt.hour.isin([12, 13, 14, 18]) & ts.dt.minute.between(25, 35)).fillna(False)
-
-    if event_type == "SPREAD_REGIME_WIDENING_EVENT":
-        return (spread_z >= max(2.0, q(spread_z, 0.97))).fillna(False)
-    if event_type == "SLIPPAGE_SPIKE_EVENT":
-        return ((spread_z >= q(spread_z, 0.95)).fillna(False) & (ret_1.abs() >= q(ret_1.abs(), 0.90)).fillna(False))
-    if event_type == "FEE_REGIME_CHANGE_EVENT":
-        return ((ts.dt.day == 1) & (ts.dt.hour == 0) & (ts.dt.minute == 0)).fillna(False)
-
     return pd.Series(False, index=df.index, dtype=bool)
 
 
@@ -246,6 +221,13 @@ def main() -> int:
     args = parser.parse_args()
 
     event_type = str(args.event_type).strip().upper()
+    if event_type in REJECTED_EVENT_TYPES:
+        print(
+            f"event_type={event_type} has moved to family-specific analyzers; "
+            "analyze_canonical_events.py is disabled for this event.",
+            file=sys.stderr,
+        )
+        return 1
     spec = EVENT_REGISTRY_SPECS.get(event_type)
     if spec is None:
         print(f"Unknown event_type: {event_type}", file=sys.stderr)
