@@ -17,6 +17,7 @@ Backtest is a spec-first quantitative research and backtesting platform for cryp
 - Multi-dimensional context state vectors for advanced regime conditioning.
 - Interaction lift analysis to quantify marginal value of context states.
 - Copula-based pairs trading detection for cross-asset statistical arbitrage.
+- Positioning and basis shock detection for perp-spot arbitrage research.
 - Strict statistical and economic gating before promotion/execution.
 - Auditable run traces from config/spec hashes to artifact outputs.
 
