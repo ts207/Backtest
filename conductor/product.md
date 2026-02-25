@@ -16,6 +16,7 @@ Backtest is a spec-first quantitative research and backtesting platform for cryp
 - Built-in microstructure metrics (VPIN, Roll spread) for toxicity and liquidity analysis.
 - Multi-dimensional context state vectors for advanced regime conditioning.
 - Interaction lift analysis to quantify marginal value of context states.
+- Copula-based pairs trading detection for cross-asset statistical arbitrage.
 - Strict statistical and economic gating before promotion/execution.
 - Auditable run traces from config/spec hashes to artifact outputs.
 
@@ -25,11 +26,12 @@ Backtest is a spec-first quantitative research and backtesting platform for cryp
 2. Feature/context construction.
 3. Microstructure feature extraction.
 4. Event detection and registry normalization.
-5. Phase2 conditional discovery with multiplicity controls.
-6. Bridge and promotion filtering.
-7. Interaction lift analysis.
-8. Manual DSL strategy definition and testing.
-9. Optional execution evaluation (backtest/walkforward/report).
+5. Cross-asset dependency and mispricing analysis (Copulas).
+6. Phase2 conditional discovery with multiplicity controls.
+7. Bridge and promotion filtering.
+8. Interaction lift analysis.
+9. Manual DSL strategy definition and testing.
+10. Optional execution evaluation (backtest/walkforward/report).
 
 ## Quality Bar
 

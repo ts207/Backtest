@@ -3,6 +3,7 @@
 ## Runtime
 
 - Python 3.12
+- SciPy for advanced statistical analysis (Copulas, Cointegration).
 - Subprocess-driven orchestration via `project/pipelines/run_all.py`
 
 ## Data and Artifacts
