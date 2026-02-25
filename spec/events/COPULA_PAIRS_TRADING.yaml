@@ -1,13 +1,4 @@
 event_type: "COPULA_PAIRS_TRADING"
-active: false
-status: planned
-description: "Pairs trading execution window triggered by copula mispricing index exceeding thresholds."
 reports_dir: "copula_pairs"
-signal_column: "copula_signal"
-parameters:
-  alpha_entry: 0.1
-  alpha_exit: 0.1
-  reference_asset: "BTCUSDT"
-provenance:
-  source_id: "R19"
-  claim_id: ["CL_1001", "CL_1002"]
+events_file: "copula_pairs_events.csv"
+signal_column: "copula_pairs_trading_event"
