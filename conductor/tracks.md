@@ -17,5 +17,5 @@ Current active tracks should be recorded here as concise status items.
 
 ---
 
-- [ ] **Track: Implement VPIN and Roll microstructure metrics**
+- [x] **Track: Implement VPIN and Roll microstructure metrics**
 *Link: [./tracks/microstructure_metrics_20260225/](./tracks/microstructure_metrics_20260225/)*

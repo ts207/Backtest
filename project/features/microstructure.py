@@ -2,7 +2,15 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List
 
-def calculate_roll_spread(close_series: pd.Series, window: int = 20) -> pd.Series:
+def calculate_roll(close_series: pd.Series, window: int = 24) -> pd.Series:
+    """
+    Standard Roll measure (raw units).
+    """
+    diff = close_series.diff()
+    cov = diff.rolling(window).cov(diff.shift(1))
+    return 2 * np.sqrt(np.maximum(0, -cov))
+
+def calculate_roll_spread(close_series: pd.Series, window: int = 24) -> pd.Series:
     """
     Roll Spread (bps) = 2 * sqrt(-cov(dp_t, dp_{t-1})) / price * 10000
     """

@@ -25,6 +25,7 @@ from pipelines._lib.run_manifest import (
     validate_input_provenance,
 )
 from pipelines._lib.validation import ensure_utc_timestamp, validate_columns
+from features.microstructure import calculate_vpin, calculate_roll
 
 FUNDING_MAX_STALENESS = pd.Timedelta("8h")
 OI_MAX_STALENESS = pd.Timedelta("2h")
@@ -445,6 +446,21 @@ def main() -> int:
                 "revision_lag_minutes",
             ]].copy()
             features["logret_1"] = np.log(features["close"]).diff()
+            features["funding_rate_scaled"] = features["funding_rate_feature"]
+            
+            # Microstructure metrics
+            # VPIN proxy: using taker_base_volume if available, else approximate.
+            vol_raw = pd.to_numeric(bars["volume"], errors="coerce").fillna(0.0)
+            if "taker_base_volume" in bars.columns:
+                buy_vol_proxy = pd.to_numeric(bars["taker_base_volume"], errors="coerce").fillna(0.0)
+            else:
+                # Fallback to HLC proxy if taker volume is missing
+                h, l, c = features["high"], features["low"], features["close"]
+                buy_vol_proxy = vol_raw * (c - l) / (h - l).replace(0.0, np.nan).fillna(0.5)
+            
+            features["ms_vpin_24"] = calculate_vpin(vol_raw, buy_vol_proxy, window=24)
+            features["ms_roll_24"] = calculate_roll(features["close"], window=24)
+
             features["rv_96"] = features["logret_1"].rolling(window=96, min_periods=72).std()
             features["rv_pct_17280"] = _rolling_percentile(features["rv_96"], window=17280)
             features["high_96"] = features["high"].rolling(window=96, min_periods=72).max()
