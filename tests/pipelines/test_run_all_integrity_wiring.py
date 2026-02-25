@@ -138,6 +138,20 @@ def test_run_all_declared_subtype_families_are_not_noop():
         "OI_SPIKE_POSITIVE": "analyze_oi_shock_events.py",
         "OI_SPIKE_NEGATIVE": "analyze_oi_shock_events.py",
         "OI_FLUSH": "analyze_oi_shock_events.py",
+        "RANGE_BREAKOUT": "analyze_trend_structure_events.py",
+        "FALSE_BREAKOUT": "analyze_trend_structure_events.py",
+        "TREND_ACCELERATION": "analyze_trend_structure_events.py",
+        "TREND_DECELERATION": "analyze_trend_structure_events.py",
+        "PULLBACK_PIVOT": "analyze_trend_structure_events.py",
+        "SUPPORT_RESISTANCE_BREAK": "analyze_trend_structure_events.py",
+        "VOL_REGIME_SHIFT_EVENT": "analyze_regime_transition_events.py",
+        "TREND_TO_CHOP_SHIFT": "analyze_regime_transition_events.py",
+        "CHOP_TO_TREND_SHIFT": "analyze_regime_transition_events.py",
+        "CORRELATION_BREAKDOWN_EVENT": "analyze_regime_transition_events.py",
+        "BETA_SPIKE_EVENT": "analyze_regime_transition_events.py",
+        "SPREAD_REGIME_WIDENING_EVENT": "analyze_execution_friction_events.py",
+        "SLIPPAGE_SPIKE_EVENT": "analyze_execution_friction_events.py",
+        "FEE_REGIME_CHANGE_EVENT": "analyze_execution_friction_events.py",
     }
     chain_map = {event: script for event, script, _ in run_all.PHASE2_EVENT_CHAIN}
     for event_type, expected_script in expected_scripts.items():
