@@ -168,6 +168,7 @@ def _merge_event_features(features: pd.DataFrame, event_features: pd.DataFrame |
     
     # Forward-fill event features for a small window (e.g. 12 bars) to allow
     # DSL strategies with decision lag to still see the event magnitude.
+    # TODO(research): Consider making this limit configurable via strategy params.
     event_cols = [c for c in ef.columns if c != "timestamp"]
     if event_cols:
         merged[event_cols] = merged[event_cols].ffill(limit=12)
