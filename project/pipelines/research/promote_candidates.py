@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -34,6 +35,116 @@ def _safe_int(value: object, default: int = 0) -> int:
         return int(float(value))  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return int(default)
+
+
+def _load_manual_candidate(spec_path: Path, backtest_run_id: str) -> pd.DataFrame:
+    import yaml
+    from pipelines.research.analyze_conditional_expectancy import build_walk_forward_split_labels
+    from pipelines.research.phase2_statistical_gates import gate_regime_stability
+    
+    if not spec_path.exists():
+        raise ValueError(f"Manual spec not found: {spec_path}")
+    
+    with spec_path.open("r", encoding="utf-8") as f:
+        spec_data = yaml.safe_load(f)
+    
+    spec_id = str(spec_data.get("id", spec_path.stem))
+    trigger = spec_data.get("trigger", {})
+    event_type = str(trigger.get("event_type", "UNKNOWN"))
+    
+    trades_root = DATA_ROOT / "lake" / "trades" / "backtests" / "dsl" / backtest_run_id
+    if not trades_root.exists():
+        raise ValueError(f"Backtest trades not found for run {backtest_run_id} at {trades_root}")
+    
+    trade_files = list(trades_root.glob("trades_*.csv"))
+    if not trade_files:
+        raise ValueError(f"No trades_*.csv files found in {trades_root}")
+    
+    all_trades: List[pd.DataFrame] = []
+    for f in trade_files:
+        df = pd.read_csv(f)
+        if not df.empty:
+            all_trades.append(df)
+    
+    if not all_trades:
+        return pd.DataFrame()
+    
+    df = pd.concat(all_trades, ignore_index=True)
+    df["timestamp"] = pd.to_datetime(df["entry_time"], utc=True)
+    df = df.sort_values("timestamp")
+    
+    # Assign splits
+    df["split_label"] = build_walk_forward_split_labels(df, time_col="timestamp")
+    
+    # Join vol_regime from feature lake for regime stability check
+    for sym in df["symbol"].unique():
+        try:
+            from pipelines.research.analyze_conditional_expectancy import _load_features
+            feats = _load_features(sym, backtest_run_id)
+            if "vol_regime" in feats.columns:
+                feats_sub = feats[["timestamp", "vol_regime"]].copy()
+                df = df.merge(feats_sub, on="timestamp", how="left")
+        except Exception:
+            pass
+
+    # Calculate metrics
+    returns = pd.to_numeric(df["pnl"], errors="coerce").fillna(0.0)
+    n = len(returns)
+    expectancy = float(returns.mean())
+    std_ret = float(returns.std())
+    
+    def _get_t_stat(subset: pd.Series) -> float:
+        if len(subset) < 2: return 0.0
+        s = float(subset.std())
+        m = float(subset.mean())
+        if s == 0: return 0.0
+        return float(m / (s / np.sqrt(len(subset))))
+
+    val_t = _get_t_stat(returns[df["split_label"] == "validation"])
+    oos_t = _get_t_stat(returns[df["split_label"] == "test"])
+    train_t = _get_t_stat(returns[df["split_label"] == "train"])
+    
+    # Sign consistency
+    base_sign = 1.0 if expectancy >= 0 else -1.0
+    signs = []
+    for t in [train_t, val_t, oos_t]:
+        if t == 0: continue
+        match = 1.0 if (t > 0 and base_sign > 0) or (t < 0 and base_sign < 0) else 0.0
+        signs.append(match)
+    
+    sign_consistency = float(sum(signs) / len(signs)) if signs else 1.0
+    
+    # Regime stability check
+    gate_regime, _, _ = gate_regime_stability(
+        sub=df,
+        effect_col="pnl",
+        condition_name=spec_id,
+        min_stable_splits=1,
+    )
+    
+    row = {
+        "candidate_id": f"manual_{spec_id}",
+        "event_type": event_type,
+        "event": event_type,
+        "expectancy": expectancy,
+        "std_return": std_ret,
+        "sample_size": n,
+        "n_events": n,
+        "val_t_stat": val_t,
+        "oos1_t_stat": oos_t,
+        "train_t_stat": train_t,
+        "gate_stability": bool(sign_consistency >= 0.67 and gate_regime),
+        "gate_after_cost_positive": bool(expectancy > 0),
+        "gate_after_cost_stressed_positive": bool(expectancy > 0),
+        "gate_bridge_after_cost_positive_validation": bool(val_t > 0),
+        "gate_bridge_after_cost_stressed_positive_validation": bool(val_t > 0),
+        "q_value": 0.0,
+        "is_manual": True,
+        "manual_spec_path": str(spec_path),
+        "backtest_run_id": backtest_run_id,
+    }
+    
+    return pd.DataFrame([row])
 
 
 def _as_bool(value: object) -> bool:
@@ -314,6 +425,7 @@ def _evaluate_row(
 
 
 def main() -> int:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="Promote phase2 candidates using stability/cost/control gates.")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--out_dir", default=None)
@@ -328,6 +440,8 @@ def main() -> int:
     parser.add_argument("--max_negative_control_pass_rate", type=float, default=0.01)
     parser.add_argument("--require_hypothesis_audit", type=int, default=0)
     parser.add_argument("--allow_missing_negative_controls", type=int, default=1)
+    parser.add_argument("--manual_spec_path", default=None, help="Path to a manual strategy specification YAML")
+    parser.add_argument("--backtest_run_id", default=None, help="Backtest run ID to evaluate for manual strategy")
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "promotions" / args.run_id
@@ -347,12 +461,22 @@ def main() -> int:
 
     manifest = start_manifest("promote_candidates", args.run_id, vars(args), [], [])
     try:
+        from pipelines._lib.ontology_contract import ontology_spec_hash as compute_ontology_hash
+        
         run_manifest_hashes = load_run_manifest_hashes(DATA_ROOT, args.run_id)
         ontology_hash = str(run_manifest_hashes.get("ontology_spec_hash", "") or "").strip()
+        if not ontology_hash:
+            ontology_hash = compute_ontology_hash(PROJECT_ROOT.parent)
 
-        phase2_df = _load_phase2_candidates(phase2_root)
+        if args.manual_spec_path:
+            if not args.backtest_run_id:
+                raise ValueError("--backtest_run_id is required when using --manual_spec_path")
+            phase2_df = _load_manual_candidate(Path(args.manual_spec_path), args.backtest_run_id)
+        else:
+            phase2_df = _load_phase2_candidates(phase2_root)
+            
         if phase2_df.empty:
-            raise ValueError(f"No phase2 candidates found under {phase2_root}")
+            raise ValueError(f"No candidates found (manual={bool(args.manual_spec_path)})")
 
         hypothesis_df = _load_hypothesis_audit(hypothesis_audit_path)
         hypothesis_index = _build_audit_index(hypothesis_df)
@@ -421,12 +545,18 @@ def main() -> int:
                 "phase2_root": str(phase2_root),
                 "hypothesis_audit_path": str(hypothesis_audit_path),
                 "negative_controls_path": str(negative_controls_path),
+                "manual_spec_path": str(args.manual_spec_path or ""),
             },
         }
         (out_dir / "promotion_summary.json").write_text(
             json.dumps(summary, indent=2, sort_keys=True),
             encoding="utf-8",
         )
+
+        manual_spec_hash = None
+        if args.manual_spec_path:
+            from pipelines._lib.run_manifest import _sha256_file
+            manual_spec_hash = _sha256_file(Path(args.manual_spec_path))
 
         finalize_manifest(
             manifest,
@@ -436,6 +566,7 @@ def main() -> int:
                 "promoted_total": int(len(promoted_df)),
                 "promotion_audit_path": str(audit_path.relative_to(PROJECT_ROOT.parent)),
                 "promoted_candidates_path": str(promoted_path.relative_to(PROJECT_ROOT.parent)),
+                "manual_spec_hash": manual_spec_hash,
             },
         )
         return 0

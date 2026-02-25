@@ -17,5 +17,5 @@ Current active tracks should be recorded here as concise status items.
 
 ---
 
-- [ ] **Track: Enable statistical promotion for manual DSL strategies**
+- [x] **Track: Enable statistical promotion for manual DSL strategies**
 *Link: [./tracks/manual_promotion_20260225/](./tracks/manual_promotion_20260225/)*
