@@ -47,7 +47,13 @@ KNOWN_ENTRY_SIGNALS = {
     "funding_normalization_pass",
     "breakout_confirmation",
 }
-REGISTRY_SIGNAL_COLUMNS = set(REGISTRY_BACKED_SIGNALS)
+def _active_signal_column(signal: str) -> str:
+    return f"{signal.removesuffix('_event')}_active"
+
+REGISTRY_SIGNAL_COLUMNS = set()
+for signal in REGISTRY_BACKED_SIGNALS:
+    REGISTRY_SIGNAL_COLUMNS.add(signal)
+    REGISTRY_SIGNAL_COLUMNS.add(_active_signal_column(signal))
 
 MOMENTUM_BIAS_EVENTS = {
     "vol_shock",

@@ -293,6 +293,66 @@ def _load_blueprints(path: Path) -> List[Blueprint]:
     return blueprints
 
 
+def _blueprint_from_manual_spec(data: Dict[str, object], run_id: str, symbols: List[str]) -> Blueprint:
+    from datetime import datetime, timezone
+    spec_id = str(data.get("id", "manual_strategy"))
+    trigger = data.get("trigger", {}) if isinstance(data.get("trigger"), dict) else {}
+    filters = data.get("filters", []) if isinstance(data.get("filters"), list) else []
+    execution = data.get("execution", {}) if isinstance(data.get("execution"), dict) else {}
+    
+    conditions = [str(f.get("expression")) for f in filters if isinstance(f, dict) and f.get("expression")]
+    
+    # Respect explicit signal if provided, else fallback to _event
+    trigger_signal = str(trigger.get("signal")) if trigger.get("signal") else f"{str(trigger.get('event_type', 'unknown')).lower()}_event"
+    
+    return Blueprint(
+        id=spec_id,
+        run_id=run_id,
+        event_type=str(trigger.get("event_type", "unknown")),
+        candidate_id=f"manual_{spec_id}",
+        symbol_scope=SymbolScopeSpec(
+            mode="all",
+            symbols=symbols,
+            candidate_symbol="ALL",
+        ),
+        direction="conditional",
+        entry=EntrySpec(
+            triggers=[trigger_signal],
+            conditions=conditions,
+            confirmations=[],
+            delay_bars=int(execution.get("entry_lag_bars", 1)),
+            cooldown_bars=12,
+            condition_logic="all",
+            condition_nodes=[],
+        ),
+        exit=ExitSpec(
+            time_stop_bars=int(execution.get("horizon_bars", 12)),
+            invalidation={"metric": "vol_regime_code", "operator": ">", "value": 2.0},
+            stop_type="atr",
+            stop_value=2.0,
+            target_type="atr",
+            target_value=4.0,
+        ),
+        sizing=SizingSpec(
+            mode="fixed_risk",
+            risk_per_trade=0.01,
+            target_vol=None,
+            max_gross_leverage=1.0,
+        ),
+        overlays=[],
+        evaluation=EvaluationSpec(
+            min_trades=0,
+            cost_model={"fees_bps": 2.0, "slippage_bps": 2.0, "funding_included": True},
+            robustness_flags={"oos_required": False, "multiplicity_required": False, "regime_stability_required": False},
+        ),
+        lineage=LineageSpec(
+            source_path="manual_spec",
+            compiler_version="manual_v1",
+            generated_at_utc=datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+
+
 def _filter_blueprints(
     blueprints: List[Blueprint],
     event_type: str,
@@ -759,6 +819,7 @@ def main() -> int:
     parser.add_argument("--write_trigger_coverage", type=int, default=1)
     parser.add_argument("--strategies", default=None)
     parser.add_argument("--blueprints_path", default=None)
+    parser.add_argument("--strategy_spec_path", default=None, help="Path to a manual strategy specification YAML")
     parser.add_argument("--blueprints_top_k", type=int, default=10)
     parser.add_argument("--blueprints_filter_event_type", default="all")
     parser.add_argument("--overlays", default="")
@@ -792,11 +853,14 @@ def main() -> int:
     cost_bps = float(resolved_costs.cost_bps)
     strategy_mode = bool(args.strategies and str(args.strategies).strip())
     blueprint_mode = bool(args.blueprints_path and str(args.blueprints_path).strip())
-    if strategy_mode and blueprint_mode:
-        print("Invalid arguments: --strategies and --blueprints_path are mutually exclusive.", file=sys.stderr)
+    manual_spec_mode = bool(args.strategy_spec_path and str(args.strategy_spec_path).strip())
+    
+    modes_active = sum([strategy_mode, blueprint_mode, manual_spec_mode])
+    if modes_active > 1:
+        print("Invalid arguments: --strategies, --blueprints_path, and --strategy_spec_path are mutually exclusive.", file=sys.stderr)
         return 1
-    if not strategy_mode and not blueprint_mode:
-        print("Provide either --strategies or --blueprints_path.", file=sys.stderr)
+    if modes_active == 0:
+        print("Provide one of --strategies, --blueprints_path, or --strategy_spec_path.", file=sys.stderr)
         return 1
 
     overlays = [o.strip() for o in str(args.overlays).split(",") if o.strip()]
@@ -809,6 +873,7 @@ def main() -> int:
         if not strategies:
             print("No strategies provided. Pass --strategies with at least one strategy id.", file=sys.stderr)
             return 1
+    
     params = {
         "fee_bps_per_side": fee_bps,
         "slippage_bps_per_fill": slippage_bps,
@@ -822,9 +887,10 @@ def main() -> int:
         "strategies": strategies,
         "overlays": overlays,
         "blueprints_path": blueprint_source_path if blueprint_mode else "",
+        "strategy_spec_path": str(args.strategy_spec_path or ""),
         "blueprints_top_k": int(args.blueprints_top_k),
         "blueprints_filter_event_type": str(args.blueprints_filter_event_type),
-        "execution_mode": "blueprint" if blueprint_mode else "strategy",
+        "execution_mode": "blueprint" if (blueprint_mode or manual_spec_mode) else "strategy",
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
@@ -864,8 +930,21 @@ def main() -> int:
                 strategies.append(strategy_id)
                 blueprint_ids.append(bp.id)
             params["strategies"] = list(strategies)
+        elif manual_spec_mode:
+            import yaml
+            spec_path = Path(str(args.strategy_spec_path))
+            if not spec_path.exists():
+                raise ValueError(f"Strategy spec file not found: {spec_path}")
+            with spec_path.open("r", encoding="utf-8") as f:
+                spec_data = yaml.safe_load(f)
+            bp = _blueprint_from_manual_spec(spec_data, run_id, symbols)
+            selected_blueprints = [bp]
+            strategy_id = f"dsl_interpreter_v1__{_sanitize_id(bp.id)}"
+            strategies.append(strategy_id)
+            blueprint_ids.append(bp.id)
+            params["strategies"] = list(strategies)
 
-        execution_family = 'dsl' if blueprint_mode else _execution_family_for_strategies(strategies)
+        execution_family = 'dsl' if (blueprint_mode or manual_spec_mode) else _execution_family_for_strategies(strategies)
         trades_dir = DATA_ROOT / 'lake' / 'trades' / 'backtests' / str(execution_family) / run_id
         trades_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1024,9 +1103,10 @@ def main() -> int:
             "metadata": {
                 "strategy_ids": strategies,
                 "execution_family": _execution_family_for_strategies(strategies),
-                "execution_mode": "blueprint" if blueprint_mode else "strategy",
+                "execution_mode": "blueprint" if (blueprint_mode or manual_spec_mode) else "strategy",
                 "blueprint_ids": blueprint_ids,
                 "blueprint_source_path": blueprint_source_path if blueprint_mode else "",
+                "strategy_spec_path": str(args.strategy_spec_path or "") if manual_spec_mode else "",
                 "blueprint_filter_event_type": str(args.blueprints_filter_event_type) if blueprint_mode else "",
                 "blueprint_top_k": int(args.blueprints_top_k) if blueprint_mode else 0,
             },

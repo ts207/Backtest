@@ -1,0 +1,21 @@
+version: 1
+kind: strategy_spec
+id: liquidity_dislocation_mr
+description: Mean Reversion on Liquidity Dislocations with Volatility Gating
+
+trigger:
+  event_type: LIQUIDITY_VACUUM
+  family: LIQUIDITY_VACUUM
+  signal: liquidity_vacuum_active
+
+filters:
+  - name: volatility_gate
+    expression: vol_regime_code <= 2.0
+  - name: severity_gate
+    expression: liquidity_vacuum_shock_return > 0.001
+
+execution:
+  operator: mean_reversion
+  horizon_bars: 12
+  entry_lag_bars: 1
+  cost_multiplier: 1.5

@@ -13,7 +13,7 @@ import pandas as pd
 
 from engine.pnl import compute_pnl_components, compute_returns
 from engine.execution_model import estimate_transaction_cost_bps
-from events.registry import load_registry_flags
+from events.registry import load_registry_flags, build_event_feature_frame
 from engine.risk_allocator import RiskLimits, allocate_position_scales
 from pipelines._lib.io_utils import (
     choose_partition_dir,
@@ -155,6 +155,26 @@ def _merge_event_flags(features: pd.DataFrame, event_flags: pd.DataFrame | None)
     return merged
 
 
+def _merge_event_features(features: pd.DataFrame, event_features: pd.DataFrame | None) -> pd.DataFrame:
+    if event_features is None or event_features.empty:
+        return features
+    out = features.copy()
+    ef = event_features.copy()
+    ef["timestamp"] = pd.to_datetime(ef["timestamp"], utc=True, errors="coerce")
+    ef = ef.dropna(subset=["timestamp"]).drop_duplicates(subset=["timestamp"], keep="last")
+    
+    # Merge event-specific features (e.g., stress_score, severity)
+    merged = out.merge(ef, on="timestamp", how="left")
+    
+    # Forward-fill event features for a small window (e.g. 12 bars) to allow
+    # DSL strategies with decision lag to still see the event magnitude.
+    event_cols = [c for c in ef.columns if c != "timestamp"]
+    if event_cols:
+        merged[event_cols] = merged[event_cols].ffill(limit=12)
+        
+    return merged
+
+
 def _load_universe_snapshots(data_root: Path, run_id: str) -> pd.DataFrame:
     candidates = [
         data_root / "lake" / "runs" / run_id / "metadata" / "universe_snapshots",
@@ -213,6 +233,7 @@ def _load_symbol_data(
     start_ts: pd.Timestamp | None = None,
     end_ts: pd.Timestamp | None = None,
     event_flags: pd.DataFrame | None = None,
+    event_features: pd.DataFrame | None = None,
     timeframe: str = _DEFAULT_TIMEFRAME,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     feature_candidates = [
@@ -279,6 +300,15 @@ def _load_symbol_data(
         if end_ts is not None and flags is not None:
             flags = flags[flags["timestamp"] <= end_ts].copy()
         features = _merge_event_flags(features, flags)
+    
+    if isinstance(event_features, pd.DataFrame):
+        ef = event_features.copy()
+        if start_ts is not None and not ef.empty and "timestamp" in ef.columns:
+            ef = ef[ef["timestamp"] >= start_ts].copy()
+        if end_ts is not None and not ef.empty and "timestamp" in ef.columns:
+            ef = ef[ef["timestamp"] <= end_ts].copy()
+        features = _merge_event_features(features, ef)
+        
     return bars, features
 
 
@@ -736,6 +766,7 @@ def run_engine(
     strategy_traces: Dict[str, pd.DataFrame] = {}
     metrics: Dict[str, object] = {"strategies": {}}
     event_flags_cache: Dict[Tuple[str, str], pd.DataFrame] = {}
+    event_features_cache: Dict[Tuple[str, str], pd.DataFrame] = {}
 
     overlays = [str(o).strip() for o in params.get("overlays", []) if str(o).strip()]
     universe_snapshots = _load_universe_snapshots(data_root, run_id)
@@ -745,6 +776,7 @@ def run_engine(
         for symbol in symbols:
             strategy_params = params_by_strategy.get(strategy_name, params) if params_by_strategy else params
             event_flags = pd.DataFrame()
+            event_features = pd.DataFrame()
             if strategy_name.startswith("dsl_interpreter_v1"):
                 blueprint_run_id = str(
                     strategy_params.get("dsl_blueprint", {}).get("run_id", run_id)
@@ -759,6 +791,15 @@ def run_engine(
                         symbol=symbol,
                     )
                 event_flags = event_flags_cache[cache_key]
+                
+                if cache_key not in event_features_cache:
+                    event_features_cache[cache_key] = build_event_feature_frame(
+                        data_root=data_root,
+                        run_id=blueprint_run_id,
+                        symbol=symbol,
+                    )
+                event_features = event_features_cache[cache_key]
+
             bars, features = _load_symbol_data(
                 data_root,
                 symbol,
@@ -766,6 +807,7 @@ def run_engine(
                 start_ts=start_ts,
                 end_ts=end_ts,
                 event_flags=event_flags,
+                event_features=event_features,
                 timeframe=timeframe,
             )
             eligibility_mask = _symbol_eligibility_mask(bars["timestamp"], symbol, universe_snapshots)

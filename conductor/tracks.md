@@ -17,5 +17,5 @@ Current active tracks should be recorded here as concise status items.
 
 ---
 
-- [ ] **Track: DSL Strategy: Liquidity Dislocation Mean Reversion**
+- [x] **Track: DSL Strategy: Liquidity Dislocation Mean Reversion**
 *Link: [./tracks/dsl_strategy_20260225/](./tracks/dsl_strategy_20260225/)*

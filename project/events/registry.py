@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -138,6 +139,11 @@ def _feature_payload(row: pd.Series) -> str:
         "range_pct_96",
         "rv_decay_half_life",
         "time_to_secondary_shock",
+        "severity",
+        "stress_score",
+        "depth_drop_pct",
+        "shock_return",
+        "auc_excess_range",
     ]
     payload = {}
     for key in keys:
@@ -528,3 +534,35 @@ def merge_event_flags_for_selected_event_types(
         out_cols.append(signal)
         out_cols.append(_active_signal_column(signal))
     return merged[out_cols].sort_values(["timestamp", "symbol"]).reset_index(drop=True)
+
+
+def build_event_feature_frame(
+    data_root: Path,
+    run_id: str,
+    symbol: str,
+) -> pd.DataFrame:
+    """
+    Pivot registry event features into a sparse time-series frame for DSL strategies.
+    Unpacks JSON 'features_at_event' and prefixes them with event_type.
+    """
+    events = load_registry_events(data_root=data_root, run_id=run_id, symbols=[symbol])
+    if events.empty:
+        return pd.DataFrame()
+
+    rows = []
+    for _, row in events.iterrows():
+        try:
+            payload = json.loads(row["features_at_event"])
+        except (ValueError, TypeError):
+            payload = {}
+
+        prefix = str(row["event_type"]).lower()
+        flattened = {"timestamp": row["timestamp"]}
+        for k, v in payload.items():
+            flattened[f"{prefix}_{k}"] = v
+        rows.append(flattened)
+
+    df = pd.DataFrame(rows)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+    df = df.sort_values("timestamp").drop_duplicates(subset=["timestamp"], keep="last")
+    return df
