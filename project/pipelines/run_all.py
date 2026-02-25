@@ -574,6 +574,7 @@ def main() -> int:
     parser.add_argument("--run_expectancy_analysis", type=int, default=0)
     parser.add_argument("--run_expectancy_robustness", type=int, default=0)
     parser.add_argument("--run_recommendations_checklist", type=int, default=1)
+    parser.add_argument("--run_interaction_lift", type=int, default=1)
     parser.add_argument("--strict_recommendations_checklist", type=int, default=0)
     parser.add_argument("--auto_continue_on_keep_research", type=int, default=0)
     parser.add_argument("--liq_vol_th", type=float, default=100000.0)

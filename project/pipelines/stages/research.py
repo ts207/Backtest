@@ -237,4 +237,13 @@ def build_research_stages(
             )
         )
 
+    if int(args.run_interaction_lift):
+        stages.append(
+            (
+                "analyze_interaction_lift",
+                project_root / "pipelines" / "research" / "analyze_interaction_lift.py",
+                ["--run_id", run_id],
+            )
+        )
+
     return stages
