@@ -18,6 +18,7 @@ Backtest is a spec-first quantitative research and backtesting platform for cryp
 - Interaction lift analysis to quantify marginal value of context states.
 - Copula-based pairs trading detection for cross-asset statistical arbitrage.
 - Positioning and basis shock detection for perp-spot arbitrage research.
+- Automated backlog verification to link research outcomes to scientific claims.
 - Strict statistical and economic gating before promotion/execution.
 - Auditable run traces from config/spec hashes to artifact outputs.
 
@@ -31,8 +32,9 @@ Backtest is a spec-first quantitative research and backtesting platform for cryp
 6. Phase2 conditional discovery with multiplicity controls.
 7. Bridge and promotion filtering.
 8. Interaction lift analysis.
-9. Manual DSL strategy definition and testing.
-10. Optional execution evaluation (backtest/walkforward/report).
+9. Automated backlog claim verification.
+10. Manual DSL strategy definition and testing.
+11. Optional execution evaluation (backtest/walkforward/report).
 
 ## Quality Bar
 
