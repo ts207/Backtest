@@ -11,10 +11,11 @@ def test_new_templates_defined():
     assert "pullback_entry" in DEFAULT_RULE_TEMPLATES
 
 def test_granular_conditioning_defined():
-    """Verify that the new conditioning keys are included in the default configuration."""
+    """Verify default conditioning keeps only bounded-cardinality keys."""
     assert "funding_bps" in DEFAULT_CONDITIONING
-    assert "vpin" in DEFAULT_CONDITIONING
-    assert "regime_vol_liquidity" in DEFAULT_CONDITIONING
+    assert "carry_state" in DEFAULT_CONDITIONING
+    assert "vpin" not in DEFAULT_CONDITIONING
+    assert "regime_vol_liquidity" not in DEFAULT_CONDITIONING
 
 def test_lineage_metadata_present(tmp_path):
     """Verify that generated templates include lineage metadata and attribution scores."""

@@ -1,53 +1,53 @@
-# Architecture Guide
+# Architecture
 
-Backtest is a subprocess-orchestrated pipeline. `project/pipelines/run_all.py` builds an ordered stage list and executes each stage as an independent script.
+Backtest is a subprocess-orchestrated pipeline centered on `project/pipelines/run_all.py`.
 
-## Stage Graph
+## High-Level Flow
 
-1. Ingest (`pipelines/ingest/*`)
-2. Clean (`pipelines/clean/build_cleaned_5m.py`)
-3. Features (`pipelines/features/build_features_v1.py`)
-4. Context (`build_context_features.py`, `build_market_context.py`, `build_universe_snapshots.py`)
-5. Phase1 analyzers (`pipelines/research/analyze_*.py`)
-6. Registry (`pipelines/research/build_event_registry.py`)
-7. Phase2 discovery (`pipelines/research/phase2_candidate_discovery.py`)
-8. Bridge (`bridge_evaluate_phase2.py`)
-9. Candidate export / blueprint compile / strategy builder
-10. Optional backtest, walkforward, promotion, report
+1. Ingest market data (`pipelines/ingest/*`)
+2. Build cleaned bars (`pipelines/clean/*`)
+3. Build features/context (`pipelines/features/*`)
+4. Run Phase1 analyzers (`pipelines/research/analyze_*.py`)
+5. Build event registry (`build_event_registry.py`)
+6. Run Phase2 discovery (`phase2_candidate_discovery.py`)
+7. Bridge/economic checks (`bridge_evaluate_phase2.py`)
+8. Candidate promotion and registry update
+9. Optional compile/builder/backtest/eval/report
 
-## Data Contracts
+## Run Orchestration Model
 
-### Data root
+`run_all.py` constructs an ordered stage list and executes stages as isolated subprocesses.
 
-All artifacts are rooted at `BACKTEST_DATA_ROOT` (default: `./data`).
+- Stage command-line wiring is explicit.
+- Stage-level success/failure is tracked in `data/runs/<run_id>/`.
+- Phase2 event families can expand into multiple stage instances.
 
-### Registry contract
+## Stage Instance Tracing
 
-`build_event_registry.py` canonicalizes Phase1 rows into:
-- `events.parquet`: normalized event table (`enter_ts`, `exit_ts`, `event_id`, `signal_column`)
-- `event_flags.parquet`: symbol/time grid with:
-  - impulse flags: `*_event`
-  - active-window flags: `*_active`
+Event-specific stages are tracked with instance IDs to avoid overwrite collisions.
 
-### Phase2 timing contract
+- Example: `build_event_registry_LIQUIDITY_VACUUM`
+- Instance timing is captured separately from logical stage timing.
 
-`phase2_candidate_discovery.py`:
-- consumes registry events first,
-- uses `enter_ts` for alignment when available,
-- enforces `entry_lag_bars >= 1`.
+This preserves per-event provenance and makes post-run audits reliable.
 
-## Integrity Controls
+## Manifest and Audit Contracts
 
-- PIT-safe backward joins with explicit tolerances.
-- Funding coverage fail-closed in context/market-state.
-- Family-level then global BH-FDR in Phase2.
-- Cost/tradability gates before promotion.
-- Run/stage manifests with config and provenance metadata.
+Run manifest (`run_manifest.json`) captures:
 
-## Main Runtime Paths
+- spec hashes, ontology component hashes, git commit, data hash, config digest
+- planned logical/instance stages
+- logical/instance timing maps
+- checklist/execution guard fields
+- terminal artifact audit fields (`artifact_cutoff_utc`, late artifact metadata)
 
-- Stage manifests: `data/runs/<run_id>/*.json`
-- Registry artifacts: `data/events/<run_id>/`
-- Phase2 artifacts: `data/reports/phase2/<run_id>/<event_type>/`
-- Bridge artifacts: `data/reports/bridge_eval/<run_id>/<event_type>/`
-- Blueprints: `data/reports/strategy_blueprints/<run_id>/`
+Stage manifests include stage/session identity propagated from orchestrator.
+
+## Artifact Roots
+
+All outputs are rooted at `BACKTEST_DATA_ROOT`.
+
+- `data/runs/<run_id>/...`
+- `data/events/<run_id>/...`
+- `data/reports/<stage>/<run_id>/...`
+- `data/lake/...`

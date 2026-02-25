@@ -41,6 +41,7 @@ PRIMARY_OUTPUT_COLUMNS = [
     "candidate_id",
     "condition",
     "condition_desc",
+    "condition_source",
     "action",
     "action_family",
     "candidate_type",
@@ -1585,7 +1586,7 @@ def _effective_sample_size(values: np.ndarray, max_lag: int) -> Tuple[float, int
 
 
 def _multiplicity_penalty(*, multiplicity_k: float, num_tests_event_family: int, ess_effective: float) -> float:
-    tests = max(2.0, float(num_tests_event_family))
+    tests = max(1.0, float(num_tests_event_family))
     eff_n = max(1.0, float(ess_effective))
     return float(float(multiplicity_k) * np.sqrt(np.log(tests) / eff_n))
 

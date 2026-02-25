@@ -1306,6 +1306,12 @@ def main() -> int:
             else:
                 edge_df = pd.DataFrame()
         if edge_df.empty:
+            if Path(edge_path).exists():
+                raise ValueError(
+                    f"Promoted candidates artifact is empty for compile: {edge_path}. "
+                    "No promoted candidates are available for blueprint compilation; "
+                    "inspect promotion_summary.json for reject reasons."
+                )
             raise ValueError(
                 f"Missing promoted candidates artifact for compile: {edge_path}. "
                 "Run promote_candidates stage first."

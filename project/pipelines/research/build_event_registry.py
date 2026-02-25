@@ -17,7 +17,9 @@ from events.registry import (
     EVENT_REGISTRY_SPECS,
     build_event_flags,
     collect_registry_events,
+    load_registry_flags,
     load_registry_events,
+    merge_event_flags_for_selected_event_types,
     merge_registry_events,
     write_event_registry_artifacts,
 )
@@ -69,13 +71,29 @@ def main() -> int:
             incoming=incoming_events,
             selected_event_types=selected_event_types,
         )
-        flags = build_event_flags(
-            events=events,
-            symbols=symbols,
-            data_root=DATA_ROOT,
-            run_id=args.run_id,
-            timeframe=str(args.timeframe),
-        )
+        if args.event_type == "all":
+            flags = build_event_flags(
+                events=events,
+                symbols=symbols,
+                data_root=DATA_ROOT,
+                run_id=args.run_id,
+                timeframe=str(args.timeframe),
+            )
+        else:
+            selected_events = events[events["event_type"].astype(str).isin(selected_event_types)].copy()
+            selected_flags = build_event_flags(
+                events=selected_events,
+                symbols=symbols,
+                data_root=DATA_ROOT,
+                run_id=args.run_id,
+                timeframe=str(args.timeframe),
+            )
+            existing_flags = load_registry_flags(data_root=DATA_ROOT, run_id=args.run_id)
+            flags = merge_event_flags_for_selected_event_types(
+                existing_flags=existing_flags,
+                recomputed_flags=selected_flags,
+                selected_event_types=selected_event_types,
+            )
 
         events["enter_ts"] = events["enter_ts"].astype("int64") // 10**6
         events["exit_ts"] = events["exit_ts"].astype("int64") // 10**6

@@ -39,10 +39,7 @@ DEFAULT_RULE_TEMPLATES = GLOBAL_DEFAULTS.get("rule_templates", ["mean_reversion"
 DEFAULT_CONDITIONING = GLOBAL_DEFAULTS.get("conditioning", {
     "vol_regime": ["high", "low"],
     "carry_state": ["pos", "neg", "neutral"],
-    "severity_bucket": ["top_10pct", "extreme_5pct"],
     "funding_bps": ["extreme_pos", "extreme_neg"],
-    "vpin": ["high_toxic"],
-    "regime_vol_liquidity": ["high_vol_low_liq", "low_vol_high_liq"]
 })
 
 _ONTOLOGY_PATHS = ontology_spec_paths(PROJECT_ROOT.parent)

@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -39,6 +39,8 @@ PHASE2_EVENT_CHAIN: List[Tuple[str, str, List[str]]] = [
     ("LIQUIDATION_CASCADE", "analyze_liquidation_cascade.py", []),
 ]
 _STRICT_RECOMMENDATIONS_CHECKLIST = False
+_CURRENT_PIPELINE_SESSION_ID: Optional[str] = None
+_CURRENT_STAGE_INSTANCE_ID: Optional[str] = None
 
 
 def _run_id_default() -> str:
@@ -61,16 +63,116 @@ def _script_supports_flag(script_path: Path, flag: str) -> bool:
         return False
 
 
+def _flag_value(args: List[str], flag: str) -> Optional[str]:
+    try:
+        idx = args.index(flag)
+    except ValueError:
+        return None
+    if idx + 1 >= len(args):
+        return None
+    return str(args[idx + 1]).strip()
+
+
+def _stage_instance_base(stage: str, base_args: List[str]) -> str:
+    event_type = _flag_value(base_args, "--event_type")
+    if event_type and stage in {
+        "build_event_registry",
+        "phase2_conditional_hypotheses",
+        "bridge_evaluate_phase2",
+    }:
+        return f"{stage}_{event_type}"
+    return stage
+
+
+def _compute_stage_instance_ids(stages: List[Tuple[str, Path, List[str]]]) -> List[str]:
+    counts: Dict[str, int] = {}
+    out: List[str] = []
+    for stage, _, base_args in stages:
+        base = _stage_instance_base(stage, base_args)
+        n = counts.get(base, 0) + 1
+        counts[base] = n
+        out.append(base if n == 1 else f"{base}__{n}")
+    return out
+
+
+def _build_timing_map(rows: List[Tuple[str, float]]) -> Dict[str, float]:
+    out: Dict[str, float] = {}
+    for name, duration in rows:
+        out[name] = round(float(out.get(name, 0.0) + float(duration)), 3)
+    return out
+
+
+def _read_run_manifest(run_id: str) -> Dict[str, object]:
+    path = DATA_ROOT / "runs" / run_id / "run_manifest.json"
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _collect_late_artifacts(
+    run_id: str,
+    artifact_cutoff_utc: str | None,
+    *,
+    tolerance_sec: float = 1.0,
+    max_examples: int = 20,
+) -> tuple[int, List[str]]:
+    if not artifact_cutoff_utc:
+        return 0, []
+    try:
+        cutoff_ts = datetime.fromisoformat(artifact_cutoff_utc).timestamp() + float(tolerance_sec)
+    except Exception:
+        return 0, []
+
+    paths: List[Path] = []
+    run_root = DATA_ROOT / "runs" / run_id
+    if run_root.exists():
+        paths.extend(sorted(p for p in run_root.rglob("*") if p.is_file()))
+
+    reports_root = DATA_ROOT / "reports"
+    if reports_root.exists():
+        for stage_dir in sorted(p for p in reports_root.iterdir() if p.is_dir()):
+            run_dir = stage_dir / run_id
+            if run_dir.exists() and run_dir.is_dir():
+                paths.extend(sorted(p for p in run_dir.rglob("*") if p.is_file()))
+
+    late: List[str] = []
+    for path in paths:
+        try:
+            if path.stat().st_mtime > cutoff_ts:
+                late.append(str(path.relative_to(DATA_ROOT)))
+        except OSError:
+            continue
+    late_sorted = sorted(set(late))
+    return len(late_sorted), late_sorted[:max_examples]
+
+
+def _apply_run_terminal_audit(run_id: str, manifest: Dict[str, object]) -> None:
+    cutoff = str(manifest.get("finished_at") or manifest.get("ended_at") or "").strip() or None
+    manifest["artifact_cutoff_utc"] = cutoff
+    late_count, late_examples = _collect_late_artifacts(run_id, cutoff)
+    manifest["late_artifact_count"] = int(late_count)
+    manifest["late_artifact_examples"] = late_examples
+
+
 def _run_stage(stage: str, script_path: Path, base_args: List[str], run_id: str) -> bool:
     runs_dir = DATA_ROOT / "runs" / run_id
     runs_dir.mkdir(parents=True, exist_ok=True)
-    log_path = runs_dir / f"{stage}.log"
-    manifest_path = runs_dir / f"{stage}.json"
+    stage_instance_id = _CURRENT_STAGE_INSTANCE_ID or _stage_instance_base(stage, base_args)
+    log_path = runs_dir / f"{stage_instance_id}.log"
+    manifest_path = runs_dir / f"{stage_instance_id}.json"
 
     cmd = [sys.executable, str(script_path)] + base_args
     if _script_supports_log_path(script_path):
         cmd.extend(["--log_path", str(log_path)])
-    result = subprocess.run(cmd)
+    env = os.environ.copy()
+    env["BACKTEST_STAGE_INSTANCE_ID"] = stage_instance_id
+    if _CURRENT_PIPELINE_SESSION_ID:
+        env["BACKTEST_PIPELINE_SESSION_ID"] = _CURRENT_PIPELINE_SESSION_ID
+    result = subprocess.run(cmd, env=env)
 
     allowed_nonzero = {}
     if not _STRICT_RECOMMENDATIONS_CHECKLIST:
@@ -909,7 +1011,10 @@ def main() -> int:
                 "--allow_ontology_hash_mismatch",
                 str(int(args.allow_ontology_hash_mismatch)),
             ]
-            if candidate_plan_path.exists():
+            # Always pass the canonical candidate-plan path when hypothesis generation
+            # is enabled. The plan is produced earlier in the same run and may not
+            # exist yet at stage-construction time.
+            if int(args.run_hypothesis_generator):
                 phase2_args.extend(["--candidate_plan", str(candidate_plan_path)])
                 phase2_args.extend(["--atlas_mode", str(int(args.atlas_mode))])
             
@@ -1292,7 +1397,12 @@ def main() -> int:
                 base_args.extend(["--blueprints_filter_event_type", str(args.blueprints_filter_event_type)])
             base_args.extend(["--timeframe", str(args.backtest_timeframe)])
 
+    planned_stage_instances = _compute_stage_instance_ids(stages)
     stage_timings: List[Tuple[str, float]] = []
+    stage_instance_timings: List[Tuple[str, float]] = []
+    pipeline_session_id = _sha256_text(f"{run_id}:{time.time_ns()}:{os.getpid()}")
+    global _CURRENT_PIPELINE_SESSION_ID
+    _CURRENT_PIPELINE_SESSION_ID = pipeline_session_id
     feature_schema_version, feature_schema_hash = _feature_schema_metadata()
     ontology_hash = ontology_spec_hash(PROJECT_ROOT.parent)
     ontology_component_fields = ontology_component_hash_fields(
@@ -1319,15 +1429,21 @@ def main() -> int:
         "verb_lexicon_hash": ontology_component_fields.get("verb_lexicon_hash"),
         "feature_schema_version": feature_schema_version,
         "feature_schema_hash": feature_schema_hash,
+        "pipeline_session_id": pipeline_session_id,
         "config_digest": _config_digest([str(x) for x in args.config]),
         "planned_stages": [stage for stage, _, _ in stages],
+        "planned_stage_instances": planned_stage_instances,
         "stage_timings_sec": {},
+        "stage_instance_timings_sec": {},
         "failed_stage": None,
         "checklist_decision": None,
         "auto_continue_applied": False,
         "auto_continue_reason": "",
         "execution_blocked_by_checklist": False,
         "non_production_overrides": [],
+        "artifact_cutoff_utc": None,
+        "late_artifact_count": 0,
+        "late_artifact_examples": [],
     }
     existing_manifest_path = DATA_ROOT / "runs" / run_id / "run_manifest.json"
     if existing_manifest_path.exists():
@@ -1402,7 +1518,9 @@ def main() -> int:
 
     pipeline_started = time.perf_counter()
     total_stages = len(stages)
-    for idx, (stage, script, base_args) in enumerate(stages, start=1):
+    for idx, ((stage, script, base_args), stage_instance) in enumerate(
+        zip(stages, planned_stage_instances), start=1
+    ):
         # Event-specific gating: skip if queue has no entries for this event type.
         skip_stage = False
         for prefix in ["phase2_conditional_hypotheses_", "bridge_evaluate_phase2_", "build_event_registry_"]:
@@ -1413,10 +1531,30 @@ def main() -> int:
                     skip_stage = True
                     # Record a zero-time timing entry to keep manifest aligned.
                     stage_timings.append((stage, 0.0))
+                    stage_instance_timings.append((stage_instance, 0.0))
                 break
         
         if skip_stage:
             continue
+
+        disk_manifest = _read_run_manifest(run_id)
+        disk_status = str(disk_manifest.get("status", "")).strip().lower()
+        if disk_status in {"success", "failed"}:
+            run_manifest["finished_at"] = _utc_now_iso()
+            run_manifest["ended_at"] = run_manifest["finished_at"]
+            run_manifest["status"] = "failed"
+            run_manifest["failed_stage"] = "terminal_state_guard"
+            run_manifest["failed_stage_instance"] = stage_instance
+            run_manifest["terminal_guard_observed_status"] = disk_status
+            run_manifest["stage_timings_sec"] = _build_timing_map(stage_timings)
+            run_manifest["stage_instance_timings_sec"] = _build_timing_map(stage_instance_timings)
+            _apply_run_terminal_audit(run_id, run_manifest)
+            _write_run_manifest(run_id, run_manifest)
+            print(
+                "Terminal run manifest detected before stage launch; aborting further stage execution.",
+                file=sys.stderr,
+            )
+            return 1
 
         elapsed_pipeline_before = time.perf_counter() - pipeline_started
         print(
@@ -1424,9 +1562,15 @@ def main() -> int:
             f"(pipeline_elapsed={elapsed_pipeline_before:.1f}s)"
         )
         started = time.perf_counter()
-        ok = _run_stage(stage, script, base_args, run_id)
+        global _CURRENT_STAGE_INSTANCE_ID
+        _CURRENT_STAGE_INSTANCE_ID = stage_instance
+        try:
+            ok = _run_stage(stage, script, base_args, run_id)
+        finally:
+            _CURRENT_STAGE_INSTANCE_ID = None
         elapsed_sec = time.perf_counter() - started
         stage_timings.append((stage, elapsed_sec))
+        stage_instance_timings.append((stage_instance, elapsed_sec))
         elapsed_pipeline = time.perf_counter() - pipeline_started
         avg_stage = elapsed_pipeline / float(idx)
         remaining = max(0, total_stages - idx)
@@ -1440,7 +1584,10 @@ def main() -> int:
             run_manifest["ended_at"] = run_manifest["finished_at"]
             run_manifest["status"] = "failed"
             run_manifest["failed_stage"] = stage
-            run_manifest["stage_timings_sec"] = {name: round(duration, 3) for name, duration in stage_timings}
+            run_manifest["failed_stage_instance"] = stage_instance
+            run_manifest["stage_timings_sec"] = _build_timing_map(stage_timings)
+            run_manifest["stage_instance_timings_sec"] = _build_timing_map(stage_instance_timings)
+            _apply_run_terminal_audit(run_id, run_manifest)
             _write_run_manifest(run_id, run_manifest)
             print("Slow-stage summary before failure:")
             for stage_name, duration in sorted(stage_timings, key=lambda x: x[1], reverse=True):
@@ -1463,9 +1610,9 @@ def main() -> int:
                         "--allow_fallback_blueprints=1, producing fallback blueprints that "
                         "bypass BH-FDR [INV_NO_FALLBACK_IN_MEASUREMENT]"
                     )
-                    run_manifest["stage_timings_sec"] = {
-                        name: round(duration, 3) for name, duration in stage_timings
-                    }
+                    run_manifest["stage_timings_sec"] = _build_timing_map(stage_timings)
+                    run_manifest["stage_instance_timings_sec"] = _build_timing_map(stage_instance_timings)
+                    _apply_run_terminal_audit(run_id, run_manifest)
                     _write_run_manifest(run_id, run_manifest)
                     print(
                         "EVALUATION GUARD [INV_NO_FALLBACK_IN_MEASUREMENT]: "
@@ -1497,9 +1644,8 @@ def main() -> int:
                     run_manifest["status"] = "failed"
                     run_manifest["failed_stage"] = "checklist_gate"
                     run_manifest["execution_blocked_by_checklist"] = True
-                    run_manifest["stage_timings_sec"] = {
-                        name: round(duration, 3) for name, duration in stage_timings
-                    }
+                    run_manifest["stage_timings_sec"] = _build_timing_map(stage_timings)
+                    run_manifest["stage_instance_timings_sec"] = _build_timing_map(stage_instance_timings)
                     auto_continue_reason = (
                         "checklist decision KEEP_RESEARCH with execution requested; "
                         "fail-closed default blocked execution stages"
@@ -1507,6 +1653,7 @@ def main() -> int:
                     run_manifest["auto_continue_applied"] = False
                     run_manifest["auto_continue_reason"] = auto_continue_reason
                     run_manifest["non_production_overrides"] = []
+                    _apply_run_terminal_audit(run_id, run_manifest)
                     _write_run_manifest(run_id, run_manifest)
                     print(
                         "Checklist gate blocked execution because decision=KEEP_RESEARCH. "
@@ -1530,13 +1677,16 @@ def main() -> int:
     run_manifest["finished_at"] = _utc_now_iso()
     run_manifest["ended_at"] = run_manifest["finished_at"]
     run_manifest["status"] = "success"
-    run_manifest["stage_timings_sec"] = {name: round(duration, 3) for name, duration in stage_timings}
+    run_manifest["stage_timings_sec"] = _build_timing_map(stage_timings)
+    run_manifest["stage_instance_timings_sec"] = _build_timing_map(stage_instance_timings)
     run_manifest["checklist_decision"] = checklist_decision
     run_manifest["auto_continue_applied"] = bool(auto_continue_applied)
     run_manifest["auto_continue_reason"] = auto_continue_reason
     run_manifest["execution_blocked_by_checklist"] = False
     run_manifest["non_production_overrides"] = sorted(set(non_production_overrides))
+    _apply_run_terminal_audit(run_id, run_manifest)
     _write_run_manifest(run_id, run_manifest)
+    _CURRENT_PIPELINE_SESSION_ID = None
     return 0
 
 

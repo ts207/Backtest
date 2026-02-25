@@ -93,3 +93,66 @@ def test_build_event_flags_all_symbol_event_sets_active_for_all_symbols(monkeypa
     rows = flags[flags["timestamp"] == check_ts]
     assert len(rows) == 2
     assert rows[active_col].all()
+
+
+def test_merge_event_flags_for_selected_event_types_replaces_only_selected_columns():
+    timestamps = pd.to_datetime(
+        ["2026-01-01T00:00:00Z", "2026-01-01T00:05:00Z"],
+        utc=True,
+    )
+    existing = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "symbol": ["BTCUSDT", "BTCUSDT"],
+            "vol_shock_relaxation_event": [True, False],
+            "vol_shock_relaxation_active": [True, True],
+            "liquidity_vacuum_event": [True, True],
+            "liquidity_vacuum_active": [True, True],
+        }
+    )
+    recomputed = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "symbol": ["BTCUSDT", "BTCUSDT"],
+            "vol_shock_relaxation_event": [False, False],
+            "vol_shock_relaxation_active": [False, False],
+            "liquidity_vacuum_event": [False, True],
+            "liquidity_vacuum_active": [False, True],
+        }
+    )
+
+    merged = registry.merge_event_flags_for_selected_event_types(
+        existing_flags=existing,
+        recomputed_flags=recomputed,
+        selected_event_types=["LIQUIDITY_VACUUM"],
+    )
+
+    # Non-selected columns must remain as in existing.
+    assert merged["vol_shock_relaxation_event"].tolist() == [True, False]
+    assert merged["vol_shock_relaxation_active"].tolist() == [True, True]
+    # Selected columns must come from recomputed.
+    assert merged["liquidity_vacuum_event"].tolist() == [False, True]
+    assert merged["liquidity_vacuum_active"].tolist() == [False, True]
+
+
+def test_merge_event_flags_for_selected_event_types_bootstraps_when_existing_empty():
+    timestamps = pd.to_datetime(
+        ["2026-01-01T00:00:00Z", "2026-01-01T00:05:00Z"],
+        utc=True,
+    )
+    recomputed = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "symbol": ["BTCUSDT", "BTCUSDT"],
+            "vol_shock_relaxation_event": [True, False],
+            "vol_shock_relaxation_active": [True, True],
+        }
+    )
+    merged = registry.merge_event_flags_for_selected_event_types(
+        existing_flags=pd.DataFrame(),
+        recomputed_flags=recomputed,
+        selected_event_types=["VOL_SHOCK"],
+    )
+    assert len(merged) == 2
+    assert merged["vol_shock_relaxation_event"].tolist() == [True, False]
+    assert "vol_shock_relaxation_active" in merged.columns

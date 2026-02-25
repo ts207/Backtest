@@ -459,3 +459,71 @@ def load_registry_flags(data_root: Path, run_id: str, symbol: str | None = None)
         cols.append(signal)
         cols.append(_active_signal_column(signal))
     return flags[cols].sort_values(["timestamp", "symbol"]).reset_index(drop=True)
+
+
+def merge_event_flags_for_selected_event_types(
+    *,
+    existing_flags: pd.DataFrame,
+    recomputed_flags: pd.DataFrame,
+    selected_event_types: Sequence[str],
+) -> pd.DataFrame:
+    """
+    Merge fresh flag computation for selected event types into an existing flag frame.
+
+    This is used by per-event registry updates to avoid rebuilding every signal column
+    from all historical events on each stage.
+    """
+    selected = [str(event_type).strip() for event_type in selected_event_types if str(event_type).strip()]
+    selected_signal_cols: List[str] = []
+    for event_type in selected:
+        spec = EVENT_REGISTRY_SPECS.get(event_type)
+        if spec is None:
+            continue
+        selected_signal_cols.append(spec.signal_column)
+        selected_signal_cols.append(_active_signal_column(spec.signal_column))
+    selected_signal_cols = list(dict.fromkeys(selected_signal_cols))
+
+    keys = ["timestamp", "symbol"]
+    left = existing_flags.copy() if existing_flags is not None else pd.DataFrame(columns=keys)
+    right = recomputed_flags.copy() if recomputed_flags is not None else pd.DataFrame(columns=keys)
+
+    if "timestamp" in left.columns:
+        left["timestamp"] = pd.to_datetime(left["timestamp"], utc=True, errors="coerce")
+    if "timestamp" in right.columns:
+        right["timestamp"] = pd.to_datetime(right["timestamp"], utc=True, errors="coerce")
+    left = left.dropna(subset=["timestamp"]) if "timestamp" in left.columns else pd.DataFrame(columns=keys)
+    right = right.dropna(subset=["timestamp"]) if "timestamp" in right.columns else pd.DataFrame(columns=keys)
+
+    if left.empty:
+        merged = right.copy()
+    else:
+        if right.empty:
+            merged = left.copy()
+        else:
+            keep_right_cols = [c for c in [*keys, *selected_signal_cols] if c in right.columns]
+            merged = left.merge(right[keep_right_cols], on=keys, how="outer", suffixes=("", "__recomputed"))
+            for col in selected_signal_cols:
+                new_col = f"{col}__recomputed"
+                if new_col in merged.columns:
+                    merged[col] = merged[new_col]
+                    merged.drop(columns=[new_col], inplace=True)
+
+    if "symbol" not in merged.columns:
+        merged["symbol"] = "ALL"
+    merged["symbol"] = merged["symbol"].fillna("").astype(str).str.upper()
+    merged = merged[merged["symbol"].str.len() > 0].copy()
+
+    for signal in sorted(REGISTRY_BACKED_SIGNALS):
+        if signal not in merged.columns:
+            merged[signal] = False
+        merged[signal] = merged[signal].fillna(False).astype(bool)
+        active_signal = _active_signal_column(signal)
+        if active_signal not in merged.columns:
+            merged[active_signal] = False
+        merged[active_signal] = merged[active_signal].fillna(False).astype(bool)
+
+    out_cols = ["timestamp", "symbol"]
+    for signal in sorted(REGISTRY_BACKED_SIGNALS):
+        out_cols.append(signal)
+        out_cols.append(_active_signal_column(signal))
+    return merged[out_cols].sort_values(["timestamp", "symbol"]).reset_index(drop=True)

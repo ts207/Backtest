@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import hashlib
+from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Any, Tuple, Optional
 
@@ -64,7 +65,7 @@ PRIMARY_OUTPUT_COLUMNS = [
     "hypothesis_candidate_id",
     "candidate_hash_inputs",
     "template_id", "template_verb", "operator_id", "operator_version",
-    "candidate_id", "condition", "condition_desc", "action", "action_family", "candidate_type",
+    "candidate_id", "condition", "condition_desc", "condition_source", "action", "action_family", "candidate_type",
     "condition_signature", "horizon_bars", "entry_lag_bars", "direction_rule",
     "overlay_base_candidate_id", "sample_size", "train_samples", "validation_samples", "test_samples",
     "baseline_mode", "delta_adverse_mean", "delta_adverse_ci_low", "delta_adverse_ci_high",
@@ -265,6 +266,22 @@ def _direction_sign(value: Any) -> Optional[int]:
     if token in {"-1", "down", "short", "sell", "bear", "negative", "neg"}:
         return -1
     return None
+
+
+def _optional_token(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    token = str(value).strip()
+    if not token:
+        return None
+    if token.lower() in {"none", "null", "nan", "na"}:
+        return None
+    return token
 
 
 def _event_direction_from_joined_row(
@@ -505,7 +522,19 @@ def _estimate_adaptive_lambda(
     lambda_shock_cap_pct: float = 0.5,
 ) -> pd.DataFrame:
     if units_df.empty:
-        return pd.DataFrame(columns=parent_cols + [lambda_name, f"{lambda_name}_status", f"{lambda_name}_sigma_within", f"{lambda_name}_sigma_between", f"{lambda_name}_total_n", f"{lambda_name}_child_count"])
+        return pd.DataFrame(
+            columns=parent_cols
+            + [
+                lambda_name,
+                f"{lambda_name}_status",
+                f"{lambda_name}_sigma_within",
+                f"{lambda_name}_sigma_between",
+                f"{lambda_name}_total_n",
+                f"{lambda_name}_child_count",
+                f"{lambda_name}_raw",
+                f"{lambda_name}_prev",
+            ]
+        )
 
     if not adaptive:
         base = units_df[parent_cols].drop_duplicates().copy()
@@ -1300,7 +1329,7 @@ def calculate_expectancy_stats(
     # We use the features_df index to look up close horizon_bars later.
     feat_close = features_df["close"].astype(float).values
     # Use DatetimeIndex for timezone-safe searchsorted (handles UTC-aware ts).
-    feat_ts_idx = pd.DatetimeIndex(features_df["timestamp"])
+    feat_ts_idx = pd.to_datetime(features_df["timestamp"], utc=True)
 
     event_returns: List[float] = []
     event_ts_list: List[pd.Timestamp] = []
@@ -2105,6 +2134,7 @@ def main():
     symbols = [s.strip() for s in args.symbols.split(",")]
     if len(symbols) * len(templates) * len(horizons) > max_cands:
         log.error("Search budget exceeded for %s. Limit: %d", args.event_type, max_cands)
+        finalize_manifest(manifest, "failed", error="Search budget exceeded", stats={"limit": max_cands, "requested": len(symbols) * len(templates) * len(horizons)})
         sys.exit(1)
 
     reports_root = DATA_ROOT / "reports" / "phase2" / args.run_id / args.event_type
@@ -2131,6 +2161,9 @@ def main():
     if events_df.empty:
         try:
             events_df = pd.read_csv(events_path)
+            symbol_set = {str(s).strip().upper() for s in symbols if str(s).strip()}
+            if symbol_set and not events_df.empty and "symbol" in events_df.columns:
+                events_df = events_df[events_df["symbol"].astype(str).str.upper().isin(symbol_set)].copy()
         except pd.errors.EmptyDataError:
             events_df = pd.DataFrame()
 
@@ -2141,6 +2174,8 @@ def main():
                  if col in events_df.columns:
                      events_df["enter_ts"] = events_df[col]
                      break
+             if "enter_ts" not in events_df.columns:
+                 log.warning("No enter_ts (or fallback timestamp, anchor_ts, event_ts) column found in events. Market state conditioning will be silently skipped, defaulting to unconditional.")
         
         if "enter_ts" in events_df.columns:
             events_df["enter_ts"] = pd.to_datetime(events_df["enter_ts"], utc=True, errors="coerce")
@@ -2175,6 +2210,8 @@ def main():
                                 direction="backward",
                                 tolerance=pd.Timedelta("1h")
                             )
+                            if "vol_regime_code" in sym_events.columns and sym_events["vol_regime_code"].isna().any():
+                                log.warning(f"Market state merge for {sym} produced gaps > 1h (NaNs present in context columns).")
                     except Exception as e:
                         log.warning(f"Failed to load/merge market_state for {sym}: {e}")
                 
@@ -2185,6 +2222,8 @@ def main():
 
     # 3. Candidate Generation (Family = event_type × rule × horizon × condition)
     results = []
+    skip_reason_counts: Counter[str] = Counter()
+    missing_condition_columns: set[str] = set()
     
     candidate_plan_hash = ""
     plan_rows = []
@@ -2252,10 +2291,10 @@ def main():
             runtime_event_type = str(plan_row.get("runtime_event_type", event_type)).strip() or str(event_type)
             canonical_event_type = str(plan_row.get("canonical_event_type", event_type)).strip() or str(event_type)
             canonical_family = str(plan_row.get("canonical_family", canonical_family_for_event)).strip().upper() or canonical_family_for_event
-            state_id = str(plan_row.get("state_id", "")).strip() or None
+            state_id = _optional_token(plan_row.get("state_id"))
             state_provenance = str(plan_row.get("state_provenance", "none")).strip() or "none"
-            state_activation = str(plan_row.get("state_activation", "")).strip() or None
-            state_activation_hash = str(plan_row.get("state_activation_hash", "")).strip() or None
+            state_activation = _optional_token(plan_row.get("state_activation"))
+            state_activation_hash = _optional_token(plan_row.get("state_activation_hash"))
             hypothesis_id = str(plan_row.get("hypothesis_id", "")).strip()
             hypothesis_version = int(plan_row.get("hypothesis_version", 0) or 0)
             hypothesis_spec_path = str(plan_row.get("hypothesis_spec_path", "")).strip()
@@ -2271,6 +2310,7 @@ def main():
             condition_signature = str(plan_row.get("condition_signature", "")).strip() or "all"
             
             if event_type != args.event_type:
+                skip_reason_counts["plan_event_type_mismatch"] += 1
                 continue
             operator_def = _validate_operator_for_event(
                 template_verb=str(rule),
@@ -2287,12 +2327,17 @@ def main():
             # Filter events for this symbol
             sym_events = events_df[events_df["symbol"] == symbol] if "symbol" in events_df.columns else events_df
             if sym_events.empty:
+                skip_reason_counts["symbol_events_empty"] += 1
                 continue
                 
             # Apply conditioning if any
             bucket_events = sym_events
             cond_label = "all"
             if conditioning_map:
+                missing_cols = [col for col in conditioning_map.keys() if col not in bucket_events.columns]
+                if missing_cols:
+                    skip_reason_counts["conditioning_columns_missing_in_events"] += 1
+                    missing_condition_columns.update(str(col) for col in missing_cols if str(col).strip())
                 for col, val in conditioning_map.items():
                     if col in bucket_events.columns:
                         bucket_events = bucket_events[bucket_events[col] == val]
@@ -2301,18 +2346,21 @@ def main():
             if state_id:
                 state_col = _resolve_state_context_column(bucket_events.columns, state_id)
                 if not state_col:
+                    skip_reason_counts["state_column_missing"] += 1
                     continue
                 state_mask = _bool_mask_from_series(bucket_events[state_col])
                 bucket_events = bucket_events[state_mask]
                 if bucket_events.empty:
+                    skip_reason_counts["state_filter_empty"] += 1
                     continue
             
             if len(bucket_events) < min_samples:
-                # print(f"DEBUG: Insufficient samples for {cond_label}: {len(bucket_events)}")
+                skip_reason_counts["below_min_samples_after_filters"] += 1
                 continue
                 
             features_df = _load_features(args.run_id, symbol)
             if features_df.empty:
+                skip_reason_counts["features_empty"] += 1
                 continue
                 
             exp_stats = calculate_expectancy_stats(
@@ -2668,6 +2716,30 @@ def main():
                             "gate_stability": stab,
                             "gate_phase2_research": g_phase2_research,
                             "gate_phase2_final": g_phase2_final,
+                            "gate_a_ci_separated": False,
+                            "gate_b_time_stable": stab,
+                            "gate_b_year_signs": False,
+                            "gate_c_regime_stable": False,
+                            "gate_c_stable_splits": 0,
+                            "gate_c_required_splits": 2,
+                            "gate_d_friction_floor": bool(ec_pass),
+                            "gate_e_simplicity": True,
+                            "gate_f_exposure_guard": True,
+                            "gate_g_net_benefit": bool(ec_pass),
+                            "gate_h_executable_condition": _compile_eligible,
+                            "gate_h_executable_action": True,
+                            "gate_pass": g_phase2_final,
+                            "gate_all_research": g_phase2_research,
+                            "gate_all": g_phase2_final,
+                            "gate_multiplicity": False,
+                            "gate_multiplicity_strict": False,
+                            "gate_ess": False,
+                            "gate_delay_robustness": False,
+                            "gate_oos_min_samples": False,
+                            "gate_oos_validation": False,
+                            "gate_oos_validation_test": False,
+                            "gate_oos_consistency_strict": False,
+                            "bridge_eval_status": "pending",
                             "robustness_score": _p2_qs,
                             # Explicit semantic columns
                             "is_discovery": False,  # Populated after BH-FDR pass
@@ -2780,13 +2852,52 @@ def main():
                                 f"{col}_{val}",
                             )
 
+    generation_diagnostics = {
+        "run_id": str(args.run_id),
+        "event_type": str(args.event_type),
+        "mode": "atlas" if bool(plan_rows) else "fallback",
+        "atlas_mode": bool(int(args.atlas_mode)),
+        "candidate_plan_provided": bool(args.candidate_plan),
+        "candidate_plan_rows_total": int(len(plan_rows)),
+        "results_count": int(len(results)),
+        "skip_reason_counts": {str(k): int(v) for k, v in skip_reason_counts.items()},
+        "missing_condition_columns_in_events": sorted(missing_condition_columns),
+    }
+
+    if plan_rows:
+        generation_diagnostics["candidate_plan_rows_matching_event"] = int(
+            sum(
+                1
+                for row in plan_rows
+                if str(row.get("event_type", "")).strip() == str(args.event_type).strip()
+            )
+        )
+
     if not results:
         log.warning("No results produced — check features/events availability for %s. Continuing.", args.event_type)
         # Emit empty artifacts to satisfy pipeline expectations
         ensure_dir(reports_root)
+        with open(reports_root / "phase2_generation_diagnostics.json", "w", encoding="utf-8") as f:
+            json.dump(generation_diagnostics, f, indent=2, sort_keys=True)
         pd.DataFrame(columns=PRIMARY_OUTPUT_COLUMNS).to_parquet(reports_root / "phase2_candidates_raw.parquet", index=False)
         pd.DataFrame(columns=PRIMARY_OUTPUT_COLUMNS).to_csv(reports_root / "phase2_candidates.csv", index=False)
-        sys.exit(0)
+        finalize_manifest(
+            manifest,
+            "success",
+            stats={
+                "total_tested": 0,
+                "discoveries_statistical": 0,
+                "survivors_phase2": 0,
+                "no_results": True,
+                "skip_reason_counts": generation_diagnostics["skip_reason_counts"],
+                "ontology_spec_hash": run_manifest_ontology_hash or current_ontology_hash,
+                "taxonomy_hash": current_ontology_components.get("taxonomy_hash"),
+                "canonical_event_registry_hash": current_ontology_components.get("canonical_event_registry_hash"),
+                "state_registry_hash": current_ontology_components.get("state_registry_hash"),
+                "verb_lexicon_hash": current_ontology_components.get("verb_lexicon_hash"),
+            },
+        )
+        return
 
     raw_df = pd.DataFrame(results)
     prev_lambda_maps, prev_lambda_source = _load_previous_lambda_maps(
@@ -3024,6 +3135,8 @@ def main():
 
     with open(reports_root / "phase2_report.json", "w") as f:
         json.dump(report, f, indent=2)
+    with open(reports_root / "phase2_generation_diagnostics.json", "w", encoding="utf-8") as f:
+        json.dump(generation_diagnostics, f, indent=2, sort_keys=True)
 
     finalize_manifest(
         manifest,

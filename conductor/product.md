@@ -1,27 +1,31 @@
-# Initial Concept\nA high-performance, event-driven quantitative trading research and backtesting platform specialized for cryptocurrency markets.
-
 # Product Definition: Backtest
 
 ## Vision
-Backtest is a high-performance, event-driven research and backtesting platform specialized for cryptocurrency markets (Binance Perpetual and Spot). It implements a rigorous, multi-phase discovery pipeline designed to discover, validate, and simulate trading strategies with statistical integrity.
+
+Backtest is a spec-first quantitative research and backtesting platform for crypto markets. It prioritizes reproducibility, PIT correctness, and measurable promotion standards over ad-hoc experimentation.
 
 ## Target Users
-- **Quant Researchers**: Focusing on reproducibility, statistical rigor, and the discovery of new market edges.
-- **Algorithmic Traders**: Prioritizing execution simulation, cost modeling, and finding truly tradable strategies.
 
-## Core Functional Goals
-- **Automated Discovery**: Rapidly identify new market edges through automated, multi-stage pipelines.
-- **Data Integrity (PIT)**: Strictly adhere to Point-in-Time (PIT) guards to prevent lookahead bias and ensure research reliability.
-- **Spec-Driven R&D**: Maintain a "Spec-First" approach where YAML specifications for features, events, and validation gates serve as the source of truth.
-- **High-Performance Execution**: Efficiently handle high-frequency cryptocurrency market data across perpetual and spot markets.
+- Quant researchers building and validating event-driven hypotheses.
+- Systematic traders evaluating whether statistical signals survive economic constraints.
 
-## Primary Core Priority
-**Speed of Discovery**: While maintaining a high standard of statistical rigor and data integrity, the system is optimized to reduce the time-to-market for new trading ideas and hypotheses.
+## Product Outcomes
+
+- Fast, repeatable discovery across event families.
+- Strict statistical and economic gating before promotion/execution.
+- Auditable run traces from config/spec hashes to artifact outputs.
 
 ## Discovery Lifecycle
-The platform provides full support for the following critical phases:
-1. **Ingestion & Cleaning**: Normalizing raw exchange data into high-quality, research-ready "Point-in-Time" (PIT) datasets.
-2. **Hypothesis & Events**: Detecting market events (e.g., liquidity vacuums, vol shocks) and generating directional hypotheses. Now includes **Atlas**, an automated generation system that scales hypotheses across strategy archetypes and market regimes.
-3. **Statistical Validation**: Applying Multiplicity Control (BH-FDR) to filter out lucky discoveries and ensure statistical significance.
-4. **Economic Evaluation (Bridge)**: Simulating execution costs, slippage, and market impact to assess the real-world viability of strategies. Now includes robust performance attribution to market regimes.
-5. **Walkforward Backtesting**: Evaluating strategy robustness across non-overlapping time splits and market regimes.
+
+1. Data ingest and normalization.
+2. Feature/context construction.
+3. Event detection and registry normalization.
+4. Phase2 conditional discovery with multiplicity controls.
+5. Bridge and promotion filtering.
+6. Optional execution evaluation (backtest/walkforward/report).
+
+## Quality Bar
+
+- No lookahead leakage.
+- No hidden fallback in protected measurement flows.
+- No unverifiable run outputs.

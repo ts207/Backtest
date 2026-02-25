@@ -25,7 +25,32 @@ def _manifest_path(run_id: str, stage: str) -> Path:
     data_root = Path(os.getenv("BACKTEST_DATA_ROOT", project_root.parent / "data"))
     out_dir = data_root / "runs" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
-    return out_dir / f"{stage}.json"
+    stage_instance_id = str(os.getenv("BACKTEST_STAGE_INSTANCE_ID", "")).strip()
+    out_name = stage_instance_id or stage
+    return out_dir / f"{out_name}.json"
+
+
+def _run_manifest_path(run_id: str) -> Path:
+    project_root = Path(__file__).resolve().parents[2]
+    data_root = Path(os.getenv("BACKTEST_DATA_ROOT", project_root.parent / "data"))
+    return data_root / "runs" / run_id / "run_manifest.json"
+
+
+def _is_stale_pipeline_session(manifest: Dict[str, Any]) -> bool:
+    session_id = str(os.getenv("BACKTEST_PIPELINE_SESSION_ID", "")).strip()
+    if not session_id:
+        return False
+    run_manifest_path = _run_manifest_path(str(manifest.get("run_id", "")))
+    if not run_manifest_path.exists():
+        return False
+    try:
+        payload = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    current = str(payload.get("pipeline_session_id", "")).strip()
+    return bool(current) and current != session_id
 
 
 def _project_root() -> Path:
@@ -178,6 +203,8 @@ def start_manifest(
     manifest = {
         "run_id": run_id,
         "stage": stage_name,
+        "stage_instance_id": str(os.getenv("BACKTEST_STAGE_INSTANCE_ID", "")).strip() or stage_name,
+        "pipeline_session_id": str(os.getenv("BACKTEST_PIPELINE_SESSION_ID", "")).strip() or None,
         "started_at": _utc_now_iso(),
         "finished_at": None,
         "status": "running",
@@ -204,6 +231,10 @@ def finalize_manifest(
     error: Optional[str] = None,
     stats: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    if _is_stale_pipeline_session(manifest):
+        status = "aborted_stale_run"
+        stale_msg = "stale pipeline_session_id detected; refusing to finalize stage as current run"
+        error = f"{error}; {stale_msg}" if error else stale_msg
     manifest["finished_at"] = _utc_now_iso()
     manifest["status"] = status
     manifest["error"] = error

@@ -63,3 +63,12 @@ def test_phase2_bool_mask_from_series_accepts_numeric_and_text_flags():
     text = p2._bool_mask_from_series(pd.Series(["true", "false", "yes", "off"]))
     assert numeric.tolist() == [True, False, True, False]
     assert text.tolist() == [True, False, True, False]
+
+
+def test_optional_token_normalizes_null_markers():
+    assert p2._optional_token(None) is None
+    assert p2._optional_token(float("nan")) is None
+    assert p2._optional_token("None") is None
+    assert p2._optional_token(" null ") is None
+    assert p2._optional_token("NaN") is None
+    assert p2._optional_token("LOW_LIQUIDITY_STATE") == "LOW_LIQUIDITY_STATE"

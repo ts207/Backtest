@@ -383,6 +383,75 @@ def test_run_all_passes_phase2_cost_calibration_overrides(monkeypatch, tmp_path)
     assert _arg_value(phase2_args, "--cost_tob_tolerance_minutes") == "15"
 
 
+def test_run_all_always_wires_candidate_plan_when_hypothesis_generator_enabled(monkeypatch, tmp_path):
+    captured: list[tuple[str, list[str]]] = []
+    run_id = "r_plan_wiring"
+
+    def fake_run_stage(stage: str, script_path: Path, base_args: list[str], _run_id: str) -> bool:
+        captured.append((stage, list(base_args)))
+        if stage == "generate_candidate_plan":
+            plan_path = (
+                tmp_path
+                / "data"
+                / "reports"
+                / "hypothesis_generator"
+                / run_id
+                / "candidate_plan.jsonl"
+            )
+            plan_path.parent.mkdir(parents=True, exist_ok=True)
+            plan_path.write_text(json.dumps({"event_type": "LIQUIDITY_VACUUM"}) + "\n", encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path / "data")
+    monkeypatch.setattr(run_all, "_git_commit", lambda _project_root: "test-sha")
+    monkeypatch.setattr(run_all, "_run_stage", fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--run_id",
+            run_id,
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-02",
+            "--skip_ingest_ohlcv",
+            "1",
+            "--skip_ingest_funding",
+            "1",
+            "--skip_ingest_spot_ohlcv",
+            "1",
+            "--run_hypothesis_generator",
+            "1",
+            "--run_phase2_conditional",
+            "1",
+            "--phase2_event_type",
+            "LIQUIDITY_VACUUM",
+            "--run_bridge_eval_phase2",
+            "0",
+            "--run_strategy_blueprint_compiler",
+            "0",
+            "--run_strategy_builder",
+            "0",
+            "--run_recommendations_checklist",
+            "0",
+        ],
+    )
+
+    rc = run_all.main()
+    assert rc == 0
+
+    stage_map = {stage: args for stage, args in captured}
+    phase2_args = stage_map["phase2_conditional_hypotheses"]
+    expected_plan_path = str(
+        tmp_path / "data" / "reports" / "hypothesis_generator" / run_id / "candidate_plan.jsonl"
+    )
+    assert _arg_value(phase2_args, "--candidate_plan") == expected_plan_path
+
+
 def test_run_all_production_gate_profile_wiring(monkeypatch, tmp_path):
     captured: list[tuple[str, list[str]]] = []
 
@@ -640,3 +709,129 @@ def test_run_all_skips_event_stages_when_hypothesis_queue_empty(monkeypatch, tmp
     skipped_timing_keys = [k for k in timings.keys() if k.startswith(skipped_prefixes)]
     assert skipped_timing_keys
     assert all(float(timings[k]) == 0.0 for k in skipped_timing_keys)
+
+
+def test_run_all_records_stage_instance_timings_for_single_event(monkeypatch, tmp_path):
+    manifests: list[dict] = []
+
+    def fake_write_run_manifest(_run_id: str, payload: dict) -> None:
+        manifests.append(copy.deepcopy(payload))
+
+    def fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        return True
+
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path / "data")
+    monkeypatch.setattr(run_all, "_git_commit", lambda _project_root: "test-sha")
+    monkeypatch.setattr(run_all, "_run_stage", fake_run_stage)
+    monkeypatch.setattr(run_all, "_write_run_manifest", fake_write_run_manifest)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-02",
+            "--skip_ingest_ohlcv",
+            "1",
+            "--skip_ingest_funding",
+            "1",
+            "--skip_ingest_spot_ohlcv",
+            "1",
+            "--run_hypothesis_generator",
+            "0",
+            "--run_phase2_conditional",
+            "1",
+            "--phase2_event_type",
+            "LIQUIDITY_VACUUM",
+            "--run_bridge_eval_phase2",
+            "1",
+            "--run_strategy_blueprint_compiler",
+            "0",
+            "--run_strategy_builder",
+            "0",
+            "--run_recommendations_checklist",
+            "0",
+            "--run_backtest",
+            "0",
+            "--run_make_report",
+            "0",
+        ],
+    )
+
+    rc = run_all.main()
+    assert rc == 0
+    assert manifests
+    final_manifest = manifests[-1]
+
+    planned_instances = final_manifest.get("planned_stage_instances", [])
+    assert "build_event_registry_LIQUIDITY_VACUUM" in planned_instances
+    assert "phase2_conditional_hypotheses_LIQUIDITY_VACUUM" in planned_instances
+    assert "bridge_evaluate_phase2_LIQUIDITY_VACUUM" in planned_instances
+
+    instance_timings = final_manifest.get("stage_instance_timings_sec", {})
+    assert "build_event_registry_LIQUIDITY_VACUUM" in instance_timings
+    assert "phase2_conditional_hypotheses_LIQUIDITY_VACUUM" in instance_timings
+    assert "bridge_evaluate_phase2_LIQUIDITY_VACUUM" in instance_timings
+
+
+def test_run_all_terminal_manifest_guard_blocks_subsequent_stages(monkeypatch, tmp_path, capsys):
+    call_count = 0
+
+    def fake_run_stage(stage: str, script_path: Path, base_args: list[str], run_id: str) -> bool:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            manifest_path = tmp_path / "data" / "runs" / run_id / "run_manifest.json"
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+            payload["status"] = "success"
+            payload["finished_at"] = "2024-01-01T00:00:00+00:00"
+            payload["ended_at"] = "2024-01-01T00:00:00+00:00"
+            manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(run_all, "DATA_ROOT", tmp_path / "data")
+    monkeypatch.setattr(run_all, "_git_commit", lambda _project_root: "test-sha")
+    monkeypatch.setattr(run_all, "_run_stage", fake_run_stage)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_all.py",
+            "--symbols",
+            "BTCUSDT",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-02",
+            "--skip_ingest_ohlcv",
+            "1",
+            "--skip_ingest_funding",
+            "1",
+            "--skip_ingest_spot_ohlcv",
+            "1",
+            "--run_phase2_conditional",
+            "0",
+            "--run_hypothesis_generator",
+            "0",
+            "--run_strategy_blueprint_compiler",
+            "0",
+            "--run_strategy_builder",
+            "0",
+            "--run_recommendations_checklist",
+            "0",
+            "--run_backtest",
+            "0",
+            "--run_make_report",
+            "0",
+        ],
+    )
+
+    rc = run_all.main()
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert call_count == 1
+    assert "Terminal run manifest detected" in captured.err

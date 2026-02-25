@@ -1,92 +1,70 @@
 # Getting Started
 
-This guide covers the current, supported way to run the pipeline.
+This guide covers the supported local workflow for running and validating the pipeline.
 
 ## Prerequisites
 
-- Python 3.10+
-- `pip`
+- Python 3.12 recommended
+- POSIX shell (`bash`)
 - Optional: `make`
 
 ## Setup
 
 ```bash
-git clone <repo-url>
-cd Backtest
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
+. .venv/bin/activate
+.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
 export BACKTEST_DATA_ROOT=$(pwd)/data
 ```
 
-## First Run: Build Core Data
+## First Run (Core Pipeline)
 
 ```bash
 ./.venv/bin/python project/pipelines/run_all.py \
   --run_id first_run \
   --symbols BTCUSDT \
-  --start 2026-01-01 \
-  --end 2026-01-31
+  --start 2024-01-01 \
+  --end 2024-01-31
 ```
 
-This executes ingest -> cleaned bars -> features -> context -> market context by default.
-
-## Run Discovery for One Event Family
+## Run Discovery (Single Event)
 
 ```bash
 ./.venv/bin/python project/pipelines/run_all.py \
   --run_id first_discovery \
   --symbols BTCUSDT \
-  --start 2026-01-01 \
-  --end 2026-01-31 \
+  --start 2024-01-01 \
+  --end 2024-01-31 \
   --run_hypothesis_generator 0 \
   --run_phase2_conditional 1 \
   --phase2_event_type LIQUIDITY_VACUUM \
   --run_bridge_eval_phase2 1
 ```
 
-## Run Discovery for All Event Families
+## Run Discovery (All Events)
 
 ```bash
-make discover-edges RUN_ID=discover_all SYMBOLS=BTCUSDT,ETHUSDT START=2026-01-01 END=2026-01-31
+make discover-edges
 ```
 
-## Optional: Backtest and Walkforward
+## Validate Before Claims
 
 ```bash
-./.venv/bin/python project/pipelines/run_all.py \
-  --run_id full_eval \
-  --symbols BTCUSDT,ETHUSDT \
-  --start 2026-01-01 \
-  --end 2026-01-31 \
-  --run_phase2_conditional 1 \
-  --phase2_event_type all \
-  --run_backtest 1 \
-  --run_walkforward_eval 1 \
-  --run_make_report 1
-```
-
-## Key Outputs
-
-- Registry events and flags:
-  - `data/events/<run_id>/events.parquet`
-  - `data/events/<run_id>/event_flags.parquet`
-- Phase2 candidates:
-  - `data/reports/phase2/<run_id>/<event_type>/phase2_candidates.csv`
-- Blueprints:
-  - `data/reports/strategy_blueprints/<run_id>/blueprints.jsonl`
-
-## Sanity Checks
-
-```bash
-make test-fast
 make check-hygiene
+make test-fast
 ```
+
+## Where to Inspect Outputs
+
+- Run manifest: `data/runs/<run_id>/run_manifest.json`
+- Stage manifests/logs: `data/runs/<run_id>/*.json`, `data/runs/<run_id>/*.log`
+- Event registry: `data/events/<run_id>/`
+- Phase2: `data/reports/phase2/<run_id>/<event_type>/`
+- Bridge: `data/reports/bridge_eval/<run_id>/<event_type>/`
 
 ## Common Fail-Closed Stops
 
-- Funding coverage gaps in context/market-state stages.
-- Missing Phase1 events file for selected event family.
-- Non-executable blueprint condition/action in compile path.
-- Attempt to enable fallback blueprint compilation in protected flows.
+- Checklist gate: decision `KEEP_RESEARCH` with execution requested.
+- Missing/empty promotion artifacts when compile/builder require promoted candidates.
+- Funding/context integrity gates in context and market-state stages.
+- Protected evaluation guard violations (fallback blueprint path in measurement flow).

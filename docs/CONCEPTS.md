@@ -2,47 +2,52 @@
 
 ## 1) Point-in-Time (PIT)
 
-No stage may use future information at decision time.
+All joins and labels must be valid at decision time.
 
-- Features are timestamped and joined backward.
-- Event anchoring uses `enter_ts`.
-- Phase2 expectancy uses lagged entry (`entry_lag_bars >= 1`).
+- Backward/asof joins with explicit staleness windows.
+- No same-bar fill leakage for Phase2 (`entry_lag_bars >= 1`).
+- No future timestamps in features or event alignment.
 
-## 2) Event Semantics
+## 2) Spec-First Contracts
 
-Each event family has two runtime signal forms:
+Behavior is defined in specs before implementation.
 
-- `*_event`: impulse flag at anchor timestamp.
-- `*_active`: active window from `enter_ts` through `exit_ts`.
+- Event and registry contracts: `spec/events/*.yaml`
+- Gates and thresholds: `spec/gates.yaml`
+- Multiplicity and taxonomy: `spec/multiplicity/*`
+- State registry and ontology linkage: `spec/states/*`, `spec/multiplicity/*`
 
-This allows impulse-triggered entries and window-aware filtering.
+## 3) Event Semantics
 
-## 3) Discovery Pipeline
+Each family can produce:
 
-- Phase1: detect event instances.
-- Registry: normalize and align to symbol/time grid.
-- Phase2: test conditional hypotheses and compute q-values.
-- Bridge: apply tradability/cost constraints.
-- Compile: convert candidates to executable blueprints.
+- Impulse flags (`*_event`) at anchor timestamps.
+- Active-window flags (`*_active`) across enter/exit intervals.
 
-## 4) Multiplicity Control
+This allows impulse-triggered and window-filtered logic.
 
-Phase2 applies BH-FDR in two layers:
+## 4) Discovery Pipeline Semantics
 
-- family-level correction,
-- global correction over family-adjusted values.
+- Phase1 analyzers detect event candidates.
+- Registry normalizes analyzer outputs.
+- Phase2 evaluates hypotheses with multiplicity control.
+- Bridge and promotion gates enforce economic viability.
 
-Only statistical discoveries can survive final Phase2 gates.
+## 5) Run Trace and Auditability
 
-## 5) Economic Validation
+Run manifests track both plan and execution details.
 
-Statistical edge is insufficient. Candidates must also pass:
+- Logical plan: `planned_stages`
+- Concrete execution plan: `planned_stage_instances`
+- Timings: `stage_timings_sec` and `stage_instance_timings_sec`
+- Session token: `pipeline_session_id`
+- Terminal audit fields: `artifact_cutoff_utc`, `late_artifact_count`, `late_artifact_examples`
 
-- after-cost expectancy,
-- stressed-cost expectancy,
-- bridge validation trade-count and tradability constraints.
+## 6) Checklist and Execution Guard
 
-## 6) Spec-Driven Behavior
+The checklist decision controls execution transitions.
 
-Specs in `spec/` define event mappings, gates, and defaults.
-Code should derive behavior from specs where possible.
+- `PROMOTE`: execution stages may proceed.
+- `KEEP_RESEARCH`: execution stages are fail-closed unless explicitly bypassed by safe, allowed flows.
+
+Execution guard behavior is intentionally conservative to protect measurement integrity.

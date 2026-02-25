@@ -24,12 +24,33 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1] / "project"
 DATA_ROOT = Path(__file__).resolve().parents[1] / "data"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 _RULE_TEMPLATE_ENUM_BASE = {"mean_reversion", "continuation", "carry", "breakout"}
+def _templates_from_verb_lexicon() -> set[str]:
+    path = REPO_ROOT / "spec" / "hypotheses" / "template_verb_lexicon.yaml"
+    if not path.exists():
+        return set()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except Exception:
+        return set()
+    verbs = data.get("verbs", {})
+    if not isinstance(verbs, dict):
+        return set()
+    out: set[str] = set()
+    for group in verbs.values():
+        if not isinstance(group, list):
+            continue
+        out.update({str(v).strip().lower() for v in group if str(v).strip()})
+    return out
+
 try:
     from pipelines.research._hypothesis_defaults import load_hypothesis_defaults
 
@@ -38,9 +59,9 @@ try:
         str(x).strip().lower()
         for x in _spec_defaults.get("rule_templates", [])
         if str(x).strip()
-    } | _RULE_TEMPLATE_ENUM_BASE
+    } | _RULE_TEMPLATE_ENUM_BASE | _templates_from_verb_lexicon()
 except Exception:
-    _RULE_TEMPLATE_ENUM = set(_RULE_TEMPLATE_ENUM_BASE)
+    _RULE_TEMPLATE_ENUM = set(_RULE_TEMPLATE_ENUM_BASE) | _templates_from_verb_lexicon()
 _CONDITION_SOURCE_ENUM = {"runtime", "bucket_non_runtime", "unconditional", "permissive_fallback", "blocked"}
 
 # ── Helpers ────────────────────────────────────────────────────────────────

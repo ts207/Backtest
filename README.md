@@ -1,33 +1,37 @@
-# Backtest: Event-Driven Crypto Research Pipeline
+# Backtest: Spec-First Crypto Research and Backtesting
 
-Backtest is a discovery-first research platform for Binance perp/spot data. It is built to find edges, reject weak candidates, and only compile executable strategy blueprints when statistical and economic gates pass.
+Backtest is a discovery-first quantitative research platform for crypto markets. It is designed for reproducibility, point-in-time correctness, and auditability across the full lifecycle from event discovery to evaluation.
 
-## What Is Implemented Today
+## What This Repository Does
 
-Core orchestrator: `project/pipelines/run_all.py`
+- Ingests and normalizes perp/spot market data.
+- Builds cleaned 5m bars and feature/context datasets.
+- Detects event families and builds canonical event registries.
+- Runs Phase2 conditional discovery with multiplicity controls.
+- Applies bridge/economic gates and promotion filters.
+- Optionally runs backtest, walkforward, and report stages.
 
-Stage flow (high level):
-1. Ingest raw market data (OHLCV, optional funding/OI/liquidations, optional spot).
-2. Build cleaned 5m bars.
-3. Build `features_v1`.
-4. Build context datasets (`funding_persistence`, `market_state`) and universe snapshots.
-5. Run Phase 1 event analyzers.
-6. Build canonical event registry (`events.parquet`, `event_flags.parquet`).
-7. Run Phase 2 candidate discovery with multiplicity control.
-8. Run bridge tradability checks.
-9. Compile strategy blueprints and optional strategy builder outputs.
-10. Optional backtest, walkforward, promotion, and reporting.
+Primary orchestrator: `project/pipelines/run_all.py`
 
-## Integrity Contracts
+## Core Principles
 
-- PIT joins use backward `merge_asof` with explicit staleness tolerances.
-- Funding alignment is fail-closed in context/market-state stages when coverage gaps exist.
-- Event registry emits both impulse and active flags:
-  - `*_event` for anchor timestamp
-  - `*_active` for `[enter_ts, exit_ts]`
-- Phase 2 discovery uses registry events first (not raw analyzer CSV by default).
-- Phase 2 enforces lagged entry (`entry_lag_bars >= 1`) to prevent same-bar fill leakage.
-- Bridge and walkforward embargo defaults are `1` day.
+- Spec-first contracts in `spec/` are the source of truth.
+- No lookahead joins (PIT-safe joins and lagged entry controls).
+- Fail-closed gating for checklist/execution and protected flows.
+- Run-level provenance captured in `data/runs/<run_id>/run_manifest.json`.
+
+## Run Integrity Model
+
+Run outputs are tracked with both logical and instance-level traces.
+
+- `planned_stages`: logical stage names.
+- `planned_stage_instances`: expanded stage instances (for event-specific stages).
+- `stage_timings_sec`: timing by logical stage.
+- `stage_instance_timings_sec`: timing by stage instance.
+- `pipeline_session_id`: session token propagated into stage manifests.
+- `artifact_cutoff_utc`, `late_artifact_count`, `late_artifact_examples`: terminal audit metadata.
+
+Stage manifests use stage-instance naming when available (for example `build_event_registry_<EVENT>.json`) to prevent event trace overwrites.
 
 ## Quick Start
 
@@ -35,53 +39,56 @@ Stage flow (high level):
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
+. .venv/bin/activate
+.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
 export BACKTEST_DATA_ROOT=$(pwd)/data
 ```
 
-### 2) Build data/features/context only
-
-```bash
-make run RUN_ID=quick_btc SYMBOLS=BTCUSDT START=2026-01-01 END=2026-01-31
-```
-
-### 3) Run one-family discovery (example: liquidity vacuum)
+### 2) Baseline run
 
 ```bash
 ./.venv/bin/python project/pipelines/run_all.py \
-  --run_id liqvac_1m \
+  --run_id quick_start \
   --symbols BTCUSDT \
-  --start 2026-01-01 \
-  --end 2026-01-31 \
-  --run_hypothesis_generator 0 \
-  --run_phase2_conditional 1 \
-  --phase2_event_type LIQUIDITY_VACUUM \
-  --run_bridge_eval_phase2 1
+  --start 2024-01-01 \
+  --end 2024-01-31
 ```
 
-### 4) Run tests
+### 3) Discovery run (all event families)
 
 ```bash
-make test-fast
-make check-hygiene
+make discover-edges
 ```
 
-## Where Artifacts Go
+### 4) Validation
+
+```bash
+make check-hygiene
+make test-fast
+```
+
+## Standard Commands
+
+- Fast tests: `make test-fast`
+- Full tests: `make test`
+- Hygiene checks: `make check-hygiene`
+- Compile check: `make compile`
+- Discovery run: `make discover-edges`
+- Baseline run: `make baseline STRATEGIES=<comma-separated>`
+
+## Artifact Layout
 
 - Run manifests/logs: `data/runs/<run_id>/`
-- Lake data: `data/lake/...`
-- Registry outputs: `data/events/<run_id>/`
-- Phase2 outputs: `data/reports/phase2/<run_id>/<event_type>/`
-- Bridge outputs: `data/reports/bridge_eval/<run_id>/<event_type>/`
-- Blueprints: `data/reports/strategy_blueprints/<run_id>/blueprints.jsonl`
+- Event registry artifacts: `data/events/<run_id>/`
+- Stage reports: `data/reports/<stage>/<run_id>/...`
+- Phase2 candidates: `data/reports/phase2/<run_id>/<event_type>/`
+- Bridge eval: `data/reports/bridge_eval/<run_id>/<event_type>/`
 
 ## Documentation
 
 - [Getting Started](docs/GETTING_STARTED.md)
-- [Architecture](docs/ARCHITECTURE.md)
 - [Core Concepts](docs/CONCEPTS.md)
+- [Architecture](docs/ARCHITECTURE.md)
 - [Spec-First Development](docs/SPEC_FIRST.md)
 - [Current Audit Baseline](docs/AUDIT.md)
 - [Project Package Guide](project/README.md)

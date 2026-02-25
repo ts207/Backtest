@@ -17,7 +17,10 @@ def test_load_hypothesis_defaults_reads_global_defaults():
     defaults = load_hypothesis_defaults(project_root=PROJECT_ROOT)
     assert "5m" in defaults["horizons"]
     assert "mean_reversion" in defaults["rule_templates"]
-    assert "severity_bucket" in defaults["conditioning"]
+    assert "vol_regime" in defaults["conditioning"]
+    assert "carry_state" in defaults["conditioning"]
+    assert "funding_bps" in defaults["conditioning"]
+    assert "severity_bucket" not in defaults["conditioning"]
 
 
 def test_parse_symbols_filter_restricts_to_run_universe():
