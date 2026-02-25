@@ -14,6 +14,7 @@
 ## Configuration and Contracts
 
 - YAML specs under `spec/`
+- YAML-based manual strategy specifications.
 - JSON-based run/stage manifests for execution provenance
 - Feature schema contract at `project/schemas/feature_schema_v1.json`
 

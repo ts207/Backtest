@@ -12,6 +12,7 @@ Backtest is a spec-first quantitative research and backtesting platform for cryp
 ## Product Outcomes
 
 - Fast, repeatable discovery across event families.
+- Support for manual DSL strategy hypothesis testing via YAML.
 - Strict statistical and economic gating before promotion/execution.
 - Auditable run traces from config/spec hashes to artifact outputs.
 
@@ -22,7 +23,8 @@ Backtest is a spec-first quantitative research and backtesting platform for cryp
 3. Event detection and registry normalization.
 4. Phase2 conditional discovery with multiplicity controls.
 5. Bridge and promotion filtering.
-6. Optional execution evaluation (backtest/walkforward/report).
+6. Manual DSL strategy definition and testing.
+7. Optional execution evaluation (backtest/walkforward/report).
 
 ## Quality Bar
 
