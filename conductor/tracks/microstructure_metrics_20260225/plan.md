@@ -22,3 +22,6 @@
 - [x] Task: Final Hygiene and Audit
     - [x] Run `make test-fast` to ensure no regressions.
     - [x] Run `make check-hygiene` to verify repository consistency.
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions 3085d36
