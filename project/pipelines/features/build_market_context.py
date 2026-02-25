@@ -34,6 +34,13 @@ from pipelines._lib.ontology_contract import MATERIALIZED_STATE_COLUMNS_BY_ID
 from features.vol_regime import calculate_rv_percentile_24h
 from features.carry_state import calculate_funding_rate_bps
 from features.state_mapping import map_vol_regime, map_carry_state
+from features.context_states import (
+    calculate_ms_vol_state,
+    calculate_ms_liq_state,
+    calculate_ms_oi_state,
+    calculate_ms_funding_state,
+    encode_context_state_code,
+)
 
 
 def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
@@ -195,6 +202,15 @@ def _build_market_context(symbol: str, features: pd.DataFrame) -> pd.DataFrame:
         & (out["rv_percentile_24h"] >= 0.66).fillna(False)
     )
 
+    # Multi-dimensional Context State Vector (Milestone D)
+    out["ms_vol_state"] = calculate_ms_vol_state(out["rv_percentile_24h"])
+    out["ms_liq_state"] = calculate_ms_liq_state(out.get("quote_volume", features.get("quote_volume", pd.Series(0.0, index=out.index))))
+    out["ms_oi_state"] = calculate_ms_oi_state(oi_delta_1h)
+    out["ms_funding_state"] = calculate_ms_funding_state(out["funding_rate_bps"])
+    out["ms_context_state_code"] = encode_context_state_code(
+        out["ms_vol_state"], out["ms_liq_state"], out["ms_oi_state"], out["ms_funding_state"]
+    )
+
     # Broad fallback state masks so every ontology state has a materialized column.
     trend_abs = out["trend_return_96"].abs().fillna(0.0)
     trend_q75 = float(trend_abs.quantile(0.75)) if trend_abs.notna().any() else 0.0
@@ -228,6 +244,9 @@ def _build_market_context(symbol: str, features: pd.DataFrame) -> pd.DataFrame:
 
     for state_id, column in MATERIALIZED_STATE_COLUMNS_BY_ID.items():
         if column in out.columns:
+            # Numeric dimensions and codes should not be cast to bool.
+            if column.startswith("ms_"):
+                continue
             out[column] = out[column].fillna(False).astype(bool)
             continue
 

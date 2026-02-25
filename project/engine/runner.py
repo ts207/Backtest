@@ -58,6 +58,15 @@ _CONTEXT_COLUMNS = [
     "fp_exit_ts",
     "fp_severity",
     "fp_norm_due",
+    "vol_regime",
+    "vol_regime_code",
+    "carry_state",
+    "carry_state_code",
+    "ms_vol_state",
+    "ms_liq_state",
+    "ms_oi_state",
+    "ms_funding_state",
+    "ms_context_state_code",
 ]
 
 
@@ -73,27 +82,47 @@ def _dedupe_timestamp_rows(frame: pd.DataFrame, *, label: str) -> Tuple[pd.DataF
 
 
 def _load_context_data(data_root: Path, symbol: str, run_id: str, timeframe: str = "15m") -> pd.DataFrame:
-    context_candidates = [
+    # 1. Load funding persistence context
+    fp_candidates = [
         run_scoped_lake_path(data_root, run_id, "context", "funding_persistence", symbol),
         data_root / "features" / "context" / "funding_persistence" / symbol,
     ]
-    context_dir = choose_partition_dir(context_candidates)
-    if context_dir is None:
-        context_dir = context_candidates[0]
-    context_files = list_parquet_files(context_dir)
-    if not context_files:
+    fp_dir = choose_partition_dir(fp_candidates)
+    fp_files = list_parquet_files(fp_dir) if fp_dir else []
+    fp_df = read_parquet(fp_files) if fp_files else pd.DataFrame()
+    
+    # 2. Load market state context
+    ms_candidates = [
+        run_scoped_lake_path(data_root, run_id, "context", "market_state", symbol),
+        data_root / "features" / "context" / "market_state" / symbol,
+    ]
+    ms_dir = choose_partition_dir(ms_candidates)
+    ms_files = list_parquet_files(ms_dir) if ms_dir else []
+    ms_df = read_parquet(ms_files) if ms_files else pd.DataFrame()
+
+    if fp_df.empty and ms_df.empty:
         return pd.DataFrame(columns=["timestamp", *_CONTEXT_COLUMNS])
 
-    context = read_parquet(context_files)
-    if context.empty:
-        return pd.DataFrame(columns=["timestamp", *_CONTEXT_COLUMNS])
+    # Standardize timestamps
+    for df in [fp_df, ms_df]:
+        if not df.empty:
+            df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+            ensure_utc_timestamp(df["timestamp"], "timestamp")
 
-    if "timestamp" not in context.columns:
-        raise ValueError(f"Context data missing timestamp for {symbol}: {context_dir}")
+    # Merge
+    if fp_df.empty:
+        context = ms_df
+    elif ms_df.empty:
+        context = fp_df
+    else:
+        context = fp_df.merge(ms_df, on="timestamp", how="outer", suffixes=("", "_ms_dup"))
+        # Drop duplicates if any from merge
+        dup_cols = [c for c in context.columns if c.endswith("_ms_dup")]
+        if dup_cols:
+            context = context.drop(columns=dup_cols)
 
-    context["timestamp"] = pd.to_datetime(context["timestamp"], utc=True)
-    ensure_utc_timestamp(context["timestamp"], "timestamp")
     context, _ = _dedupe_timestamp_rows(context, label=f"context:{symbol}:{timeframe}")
+    
     if "fp_def_version" not in context.columns:
         context["fp_def_version"] = FP_DEF_VERSION
 
@@ -107,7 +136,8 @@ def _load_context_data(data_root: Path, symbol: str, run_id: str, timeframe: str
         context["fp_age_bars"] = context["fp_age_bars"].fillna(0).astype(int)
     if "fp_norm_due" in context.columns:
         context["fp_norm_due"] = context["fp_norm_due"].fillna(0).astype(int)
-    return context[["timestamp", *_CONTEXT_COLUMNS]]
+    
+    return context[["timestamp", *_CONTEXT_COLUMNS]].sort_values("timestamp").reset_index(drop=True)
 
 
 def _apply_context_defaults(frame: pd.DataFrame) -> pd.DataFrame:

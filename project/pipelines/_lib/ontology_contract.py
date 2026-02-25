@@ -73,6 +73,11 @@ MATERIALIZED_STATE_COLUMNS_BY_ID: Dict[str, str] = {
     "HIGH_FRICTION_STATE": "high_friction_state",
     "LOW_FRICTION_STATE": "low_friction_state",
     "ILLIQUID_EXECUTION_STATE": "illiquid_execution_state",
+    "MS_VOL_STATE": "ms_vol_state",
+    "MS_LIQ_STATE": "ms_liq_state",
+    "MS_OI_STATE": "ms_oi_state",
+    "MS_FUNDING_STATE": "ms_funding_state",
+    "MS_CONTEXT_STATE_CODE": "ms_context_state_code",
 }
 
 

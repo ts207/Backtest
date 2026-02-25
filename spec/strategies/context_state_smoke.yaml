@@ -1,0 +1,19 @@
+version: 1
+kind: strategy_spec
+id: context_state_smoke
+description: Smoke test for multi-dimensional context state vectors
+
+trigger:
+  event_type: VOL_SHOCK
+  family: VOL_SHOCK
+  signal: vol_shock_relaxation_active
+
+filters:
+  - name: composite_state_filter
+    expression: ms_context_state_code == 200.0
+
+execution:
+  operator: continuation
+  horizon_bars: 12
+  entry_lag_bars: 1
+  cost_multiplier: 1.0

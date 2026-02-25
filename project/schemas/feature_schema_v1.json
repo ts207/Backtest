@@ -56,6 +56,11 @@
         "compression_state",
         "funding_mean_32",
         "funding_regime",
+        "ms_vol_state",
+        "ms_liq_state",
+        "ms_oi_state",
+        "ms_funding_state",
+        "ms_context_state_code",
         "context_def_version"
       ]
     }

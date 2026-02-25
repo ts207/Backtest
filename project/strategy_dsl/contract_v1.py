@@ -182,7 +182,7 @@ def is_executable_condition(
 ALLOWED_FEATURE_PREFIXES = (
     "vol_", "range_", "ret_", "rvol_", "atr_", "basis_", "spread_", "quote_vol_", "volume_", "oi_", "liq_",
     "liquidity_", "funding_", "carry_", "basis_", "sentiment_", "onchain_", "flow_",
-    "fp_", "mc_", "session_", "regime_", "bb_", "z_", "event_", "flag_", "symbol_"
+    "fp_", "mc_", "ms_", "session_", "regime_", "bb_", "z_", "event_", "flag_", "symbol_"
 )
 
 # Explicitly disallow common forward return/outcome tokens and training labels.
