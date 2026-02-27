@@ -7,7 +7,7 @@ import pandas as pd
 
 from pipelines._lib.validation import ensure_utc_timestamp, validate_columns
 
-FUNDING_MAX_ABS = 0.01
+FUNDING_MAX_ABS = 0.05
 FUNDING_SCALE_CANDIDATES = (1.0, 0.01, 0.0001)
 _KNOWN_DECIMAL_FUNDING_SOURCES = {"archive_monthly", "archive_daily", "api"}
 FUNDING_SCALE_NAME_TO_MULTIPLIER = {

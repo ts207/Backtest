@@ -295,9 +295,11 @@ def main() -> int:
                     on="timestamp",
                     how="left",
                 )
+                bars["funding_rate_scaled"] = bars["funding_rate_feature"]
                 bars["funding_missing"] = bars["funding_missing"].fillna(True).astype(bool)
             else:
                 bars["funding_rate_feature"] = np.nan
+                bars["funding_rate_scaled"] = np.nan
                 bars["funding_rate_realized"] = 0.0
                 bars["funding_missing"] = True
 

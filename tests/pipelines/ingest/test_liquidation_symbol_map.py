@@ -28,37 +28,40 @@ class TestAssertCmMappingComplete:
     def test_known_eth_variants_pass(self):
         _assert_cm_mapping_complete(["ETH", "ETHUSDT", "ETHUSD", "ETHUSD_PERP"])
 
+    def test_known_sol_variants_pass(self):
+        _assert_cm_mapping_complete(["SOL", "SOLUSDT", "SOLUSD", "SOLUSD_PERP"])
+
     def test_mixed_known_symbols_pass(self):
-        _assert_cm_mapping_complete(["BTC", "ETH"])
+        _assert_cm_mapping_complete(["BTC", "ETH", "SOL"])
 
     def test_empty_symbol_list_passes(self):
         # No symbols → no constraint to violate.
         _assert_cm_mapping_complete([])
 
-    def test_sol_raises(self):
-        """SOL has no CM perpetual; _to_cm_contract returns 'SOL' which is not in
+    def test_xrp_raises(self):
+        """XRP has no CM perpetual; _to_cm_contract returns 'XRP' which is not in
         _KNOWN_CM_CONTRACTS.  Must raise ValueError before any network call."""
-        with pytest.raises(ValueError, match="Symbol mapping validation failed"):
-            _assert_cm_mapping_complete(["SOL"])
-
-    def test_sol_error_includes_symbol_name(self):
-        with pytest.raises(ValueError, match="SOL"):
-            _assert_cm_mapping_complete(["SOL"])
-
-    def test_unknown_symbol_raises(self):
         with pytest.raises(ValueError, match="Symbol mapping validation failed"):
             _assert_cm_mapping_complete(["XRP"])
 
+    def test_xrp_error_includes_symbol_name(self):
+        with pytest.raises(ValueError, match="XRP"):
+            _assert_cm_mapping_complete(["XRP"])
+
+    def test_unknown_symbol_raises(self):
+        with pytest.raises(ValueError, match="Symbol mapping validation failed"):
+            _assert_cm_mapping_complete(["ADA"])
+
     def test_mixed_known_and_unknown_raises(self):
         """Even one unmapped symbol in a larger list must trigger failure."""
-        with pytest.raises(ValueError, match="SOL"):
-            _assert_cm_mapping_complete(["BTC", "SOL", "ETH"])
+        with pytest.raises(ValueError, match="XRP"):
+            _assert_cm_mapping_complete(["BTC", "XRP", "ETH"])
 
     def test_error_includes_derived_contract(self):
         """Error message should show the (wrong) derived CM contract so users understand
         what _to_cm_contract returned."""
         with pytest.raises(ValueError, match="->"):
-            _assert_cm_mapping_complete(["SOL"])
+            _assert_cm_mapping_complete(["XRP"])
 
     def test_all_known_cm_contract_values_pass(self):
         """Every value in CM_SYMBOL_MAP should map to itself and pass."""
@@ -118,12 +121,16 @@ class TestToCmContract:
         ("ETHUSDT",     "ETHUSD_PERP"),
         ("ETHUSD",      "ETHUSD_PERP"),
         ("ETHUSD_PERP", "ETHUSD_PERP"),
+        ("SOL",         "SOLUSD_PERP"),
+        ("SOLUSDT",     "SOLUSD_PERP"),
+        ("SOLUSD",      "SOLUSD_PERP"),
+        ("SOLUSD_PERP", "SOLUSD_PERP"),
     ])
     def test_known_symbols_map_to_known_cm_contracts(self, sym, expected):
         assert _to_cm_contract(sym) == expected
         assert _to_cm_contract(sym) in _KNOWN_CM_CONTRACTS
 
-    @pytest.mark.parametrize("sym", ["SOL", "XRP", "MATIC", "AVAX"])
+    @pytest.mark.parametrize("sym", ["XRP", "MATIC", "AVAX", "ADA"])
     def test_unknown_symbols_produce_unmapped_contracts(self, sym):
         """Unknown symbols must NOT end up in _KNOWN_CM_CONTRACTS."""
         assert _to_cm_contract(sym) not in _KNOWN_CM_CONTRACTS
