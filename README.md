@@ -64,6 +64,7 @@ make check-hygiene        # enforce repo hygiene constraints
 | Document | Contents |
 |----------|---------|
 | [GETTING_STARTED.md](docs/GETTING_STARTED.md) | Installation, first run, viewing results, troubleshooting |
+| [NON_TECHNICAL_GUIDE.md](docs/NON_TECHNICAL_GUIDE.md) | A beginner-friendly introduction to what the project does and how it works |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Pipeline diagram, module map, data lake layout, Phase 2 statistical detail |
 | [CONCEPTS.md](docs/CONCEPTS.md) | PIT safety, market states, shrinkage math, gates, blueprint schema |
 | [DEVELOPER.md](docs/DEVELOPER.md) | Adding events/features/gates, spec workflow, testing guide |
