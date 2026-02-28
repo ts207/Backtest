@@ -13,7 +13,7 @@ import pandas as pd
 
 from engine.pnl import compute_pnl_components, compute_returns, compute_returns_next_open
 from engine.execution_model import estimate_transaction_cost_bps
-from engine.exchange_constraints import load_symbol_constraints, apply_constraints, SymbolConstraints
+from engine.exchange_constraints import load_symbol_constraints, apply_constraints
 from events.registry import load_registry_flags, build_event_feature_frame
 from engine.risk_allocator import RiskLimits, allocate_position_scales
 from pipelines._lib.io_utils import (
@@ -481,7 +481,9 @@ def _strategy_returns(
         for _idx in positions.index:
             _raw_change = float(positions.loc[_idx] - prior_pos_for_constraints.loc[_idx])
             if _raw_change != 0.0:
-                _price = float(close_for_constraints.loc[_idx]) if not np.isnan(close_for_constraints.loc[_idx]) else 1.0
+                if np.isnan(close_for_constraints.loc[_idx]):
+                    continue  # can't enforce notional without a price — pass through
+                _price = float(close_for_constraints.loc[_idx])
                 _adj_change = apply_constraints(
                     requested_qty=_raw_change,
                     price=_price,
@@ -490,6 +492,9 @@ def _strategy_returns(
                 if _adj_change == 0.0:
                     _clipped_trades += 1
                     new_positions.loc[_idx] = float(prior_pos_for_constraints.loc[_idx])
+                elif _adj_change != _raw_change:
+                    # Step rounding reduced the change — write back the rounded position
+                    new_positions.loc[_idx] = float(prior_pos_for_constraints.loc[_idx]) + _adj_change
         positions = new_positions.round().astype(int)
     # --- END EXCHANGE CONSTRAINTS ---
 
