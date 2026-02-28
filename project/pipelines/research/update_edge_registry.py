@@ -147,6 +147,9 @@ def _build_observations(
     if not rows:
         return pd.DataFrame()
     out = pd.DataFrame(rows)
+    # Drop complex object columns that cause Parquet serialization errors
+    cols_to_drop = [c for c in out.columns if "schema" in c or "trace" in c or c == "audit_statuses" or out[c].dtype == object and isinstance(out[c].dropna().iloc[0] if not out[c].dropna().empty else None, (list, dict, np.ndarray))]
+    out = out.drop(columns=cols_to_drop, errors="ignore")
     out = out.drop_duplicates(subset=["run_id", "candidate_id", "event_type"], keep="last")
     return out
 

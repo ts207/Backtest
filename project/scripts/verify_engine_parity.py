@@ -34,6 +34,8 @@ def main():
     flags_path = DATA_ROOT / "events" / args.run_id / "event_flags.parquet"
     if flags_path.exists():
         event_flags = pd.read_parquet(flags_path)
+        if not event_flags.empty and "symbol" in event_flags.columns:
+            event_flags = event_flags[event_flags["symbol"] == args.symbol].copy()
     
     bars, features = _load_symbol_data(DATA_ROOT, args.symbol, args.run_id, event_flags=event_flags)
     
@@ -54,6 +56,12 @@ def main():
         
     blueprint["entry"]["confirmations"] = []
     blueprint["overlays"] = []
+    blueprint["exit"]["stop_value"] = 1.0
+    blueprint["exit"]["target_value"] = 1.0
+    blueprint["exit"]["trailing_stop_type"] = "none"
+    blueprint["exit"]["trailing_stop_value"] = 0.0
+    blueprint["exit"]["break_even_r"] = 0.0
+    blueprint["exit"]["invalidation"] = {"metric": "close", "operator": ">", "value": 1e12}
     
     # 3. Run Engine
     strategy_id = f"dsl_interpreter_v1__{args.candidate_id}"
