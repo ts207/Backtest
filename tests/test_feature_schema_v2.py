@@ -1,7 +1,11 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "project"))
+
 import os
 import pytest
 import pandas as pd
-from project.pipelines._lib.run_manifest import validate_feature_schema_columns
+from pipelines._lib.run_manifest import validate_feature_schema_columns
 
 def test_feature_schema_v2_enforcement():
     # Mock columns matching a typical v1 output (missing v2 specific fields)

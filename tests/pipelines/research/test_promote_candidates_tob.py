@@ -1,7 +1,11 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "project"))
+
 import pandas as pd
 import numpy as np
 import pytest
-from project.pipelines.research.promote_candidates import _evaluate_row
+from pipelines.research.promote_candidates import _evaluate_row
 
 def test_promotion_tob_coverage_gate():
     # Base row that passes all other gates

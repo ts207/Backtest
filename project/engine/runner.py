@@ -270,6 +270,7 @@ def _load_symbol_data(
     event_flags: pd.DataFrame | None = None,
     event_features: pd.DataFrame | None = None,
     timeframe: str = _DEFAULT_TIMEFRAME,
+    event_feature_ffill_bars: int = 12,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     feature_candidates = [
         run_scoped_lake_path(data_root, run_id, "features", "perp", symbol, timeframe, "features_v1"),
@@ -306,7 +307,7 @@ def _load_symbol_data(
         features = features[features["timestamp"] <= end_ts].copy()
         bars = bars[bars["timestamp"] <= end_ts].copy()
     if features.empty or bars.empty:
-        raise ValueError(f"No data in selected window for {symbol}")
+        raise ValueError(f"No data for {symbol} after filtering to selected time window {start_ts} to {end_ts}")
 
     context = _load_context_data(data_root, symbol, run_id=run_id, timeframe=timeframe)
     if start_ts is not None:
@@ -344,7 +345,7 @@ def _load_symbol_data(
             ef = ef[ef["timestamp"] <= end_ts].copy()
         features = _merge_event_features(
             features, ef,
-            ffill_limit=int(params.get("event_feature_ffill_bars", 12)) if isinstance(params, dict) else 12,
+            ffill_limit=int(event_feature_ffill_bars),
         )
         
     return bars, features
@@ -434,6 +435,7 @@ def _strategy_returns(
     close = bars_indexed["close"].astype(float)
     high = bars_indexed["high"].astype(float)
     low = bars_indexed["low"].astype(float)
+    execution_cfg = dict(params.get("execution_model", {})) if isinstance(params, dict) and isinstance(params.get("execution_model", {}), dict) else {}
     _exec_mode = str(execution_cfg.get("exec_mode", "close")).strip().lower()
     if _exec_mode == "next_open" and "open" in bars_indexed.columns:
         open_ = bars_indexed["open"].astype(float)
@@ -476,8 +478,7 @@ def _strategy_returns(
     use_carry_components = _is_carry_strategy(strategy_name, strategy_metadata)
     scaled_positions = positions.astype(float) * requested_position_scale
     turnover = (scaled_positions - scaled_positions.shift(1).fillna(0.0)).abs()
-    execution_cfg = dict(params.get("execution_model", {})) if isinstance(params, dict) and isinstance(params.get("execution_model", {}), dict) else {}
-    
+    # execution_cfg was already built above (before exec_mode / return calculation).
     # --- COST PRIORITY FIX ---
     # Allow explicit 0 in execution_model to override cost_bps.
     if "base_fee_bps" not in execution_cfg:
@@ -886,6 +887,7 @@ def run_engine(
                 event_flags=event_flags,
                 event_features=event_features,
                 timeframe=timeframe,
+                event_feature_ffill_bars=int(strategy_params.get("event_feature_ffill_bars", 12)) if isinstance(strategy_params, dict) else 12,
             )
             eligibility_mask = _symbol_eligibility_mask(bars["timestamp"], symbol, universe_snapshots)
             result = _strategy_returns(

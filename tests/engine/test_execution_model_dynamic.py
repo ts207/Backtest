@@ -1,7 +1,11 @@
+import sys
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import pytest
-from project.engine.execution_model import estimate_transaction_cost_bps
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'project'))
+from engine.execution_model import estimate_transaction_cost_bps
 
 def test_dynamic_cost_model_basic():
     idx = pd.date_range("2024-01-01", periods=10, freq="5min")

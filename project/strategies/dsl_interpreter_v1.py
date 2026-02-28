@@ -8,6 +8,7 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
+from numba import njit
 
 LOGGER = logging.getLogger(__name__)
 
@@ -81,6 +82,11 @@ def _to_float(value: object, default: float = 0.0) -> float:
         return out
     except (TypeError, ValueError):
         return default
+
+def _to_float_arr(series: np.ndarray, default: float = 0.0) -> np.ndarray:
+    out = np.where(pd.isna(series), default, series)
+    out = np.where(np.isinf(out), default, out)
+    return out.astype(float)
 
 
 def _build_blueprint(raw: Dict[str, object]) -> Blueprint:
@@ -557,6 +563,15 @@ def _direction_score(row: pd.Series) -> float:
             return value
     return np.nan
 
+def _vectorized_direction_score(frame: pd.DataFrame) -> np.ndarray:
+    n = len(frame)
+    out = np.full(n, np.nan)
+    for col in ["direction_score", "signed_edge", "forward_return_h", "ret_4", "ret_1"]:
+        if col in frame.columns:
+            series = pd.to_numeric(frame[col], errors="coerce").values
+            mask = ~np.isnan(series) & np.isnan(out)
+            out[mask] = series[mask]
+    return out
 
 def _entry_side(row: pd.Series, blueprint: Blueprint) -> int:
     if blueprint.direction == "long":
@@ -580,6 +595,16 @@ def _range_proxy(row: pd.Series) -> float:
         return abs(high_96 - low_96) / close
     return 0.0
 
+def _vectorized_range_proxy(frame: pd.DataFrame) -> np.ndarray:
+    high_96 = _to_float_arr(frame.get("high_96", pd.Series(np.nan, index=frame.index)).values, np.nan)
+    low_96 = _to_float_arr(frame.get("low_96", pd.Series(np.nan, index=frame.index)).values, np.nan)
+    close = _to_float_arr(frame.get("close", pd.Series(np.nan, index=frame.index)).values, np.nan)
+    
+    valid = (~np.isnan(high_96)) & (~np.isnan(low_96)) & (close > 0)
+    out = np.zeros(len(frame))
+    out[valid] = np.abs(high_96[valid] - low_96[valid]) / close[valid]
+    return out
+
 
 def _offset(row: pd.Series, kind: str, value: float) -> float:
     close = _to_float(row.get("close"), default=np.nan)
@@ -595,6 +620,28 @@ def _offset(row: pd.Series, kind: str, value: float) -> float:
             atr_like = close * _range_proxy(row)
         out = atr_like * float(value)
     return max(0.0, out)
+
+def _vectorized_offset(frame: pd.DataFrame, kind: str, value: float) -> np.ndarray:
+    close = _to_float_arr(frame.get("close", pd.Series(0.0, index=frame.index)).values)
+    out = np.zeros(len(frame))
+    valid = close > 0
+    val = float(value)
+    
+    if kind == "percent":
+        out[valid] = close[valid] * val
+    elif kind == "range_pct":
+        rp = _vectorized_range_proxy(frame)
+        out[valid] = close[valid] * rp[valid] * val
+    else: # atr
+        atr_like = _to_float_arr(frame.get("atr_14", pd.Series(np.nan, index=frame.index)).values, np.nan)
+        rp = _vectorized_range_proxy(frame)
+        
+        fallback_mask = valid & (np.isnan(atr_like) | (atr_like <= 0))
+        atr_like[fallback_mask] = close[fallback_mask] * rp[fallback_mask]
+        
+        out[valid] = atr_like[valid] * val
+        
+    return np.maximum(0.0, out)
 
 
 def _stop_target_offsets(row: pd.Series, exit_spec: ExitSpec) -> Tuple[float, float]:
@@ -630,14 +677,168 @@ def _apply_overlay_entry_gate(overlay: OverlaySpec, row: pd.Series, side: int) -
     raise ValueError(f"Unknown overlay `{name}` in blueprint")
 
 
+@njit
+def generate_positions_numba(
+    timestamps: np.ndarray,
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    eligible: np.ndarray,
+    entry_sides: np.ndarray,
+    stop_offsets: np.ndarray,
+    target_offsets: np.ndarray,
+    allow_intrabar_exits: bool,
+    cooldown_bars: int,
+    reentry_lockout_bars: int,
+    arm_bars_base: int,
+    time_stop_bars: int,
+    break_even_r: float,
+    trailing_stop_type: int,
+    trailing_offsets: np.ndarray,
+    invalidation_mask: np.ndarray
+):
+    n = len(timestamps)
+    positions = np.zeros(n, dtype=np.int32)
+    events_timestamps = []
+    events_codes = []
+    # 1=entry, 2=exit_time, 3=exit_inv, 4=exit_stop, 5=exit_target
+
+    in_pos = 0
+    state = 0
+    arm_remaining = 0
+    entry_idx = -1
+    entry_price = np.nan
+    risk_per_unit = np.nan
+    best_price = np.nan
+    stop_price = np.nan
+    target_price = np.nan
+    cooldown_until = -1
+
+    for i in range(n):
+        c = close[i]
+        h = high[i]
+        l = low[i]
+
+        if in_pos != 0:
+            held = i - entry_idx
+            invalidate = invalidation_mask[i]
+
+            if in_pos > 0:
+                best_price = max(c if np.isnan(best_price) else best_price, h if not np.isnan(h) else c)
+            else:
+                best_price = min(c if np.isnan(best_price) else best_price, l if not np.isnan(l) else c)
+
+            if break_even_r > 0 and not np.isnan(risk_per_unit) and risk_per_unit > 0:
+                if in_pos > 0:
+                    reached_r = (best_price - entry_price) / risk_per_unit
+                    if reached_r >= break_even_r:
+                        stop_price = max(stop_price, entry_price)
+                else:
+                    reached_r = (entry_price - best_price) / risk_per_unit
+                    if reached_r >= break_even_r:
+                        stop_price = min(stop_price, entry_price)
+
+            if trailing_stop_type != 0:
+                trail = trailing_offsets[i]
+                if trail > 0:
+                    if in_pos > 0:
+                        stop_price = max(stop_price, best_price - trail)
+                    else:
+                        stop_price = min(stop_price, best_price + trail)
+
+            should_exit = False
+            code = 0
+            if held >= time_stop_bars:
+                should_exit = True
+                code = 2
+            elif invalidate:
+                should_exit = True
+                code = 3
+            elif allow_intrabar_exits and in_pos > 0 and not np.isnan(l) and l <= stop_price:
+                should_exit = True
+                code = 4
+            elif allow_intrabar_exits and in_pos < 0 and not np.isnan(h) and h >= stop_price:
+                should_exit = True
+                code = 4
+            elif allow_intrabar_exits and in_pos > 0 and not np.isnan(h) and h >= target_price:
+                should_exit = True
+                code = 5
+            elif allow_intrabar_exits and in_pos < 0 and not np.isnan(l) and l <= target_price:
+                should_exit = True
+                code = 5
+
+            if should_exit:
+                in_pos = 0
+                state = 3
+                cooldown_until = i + max(cooldown_bars, reentry_lockout_bars)
+                events_timestamps.append(i)
+                events_codes.append(code)
+
+        if in_pos == 0:
+            if state == 3 and i < cooldown_until:
+                positions[i] = 0
+                continue
+            if state == 3 and i >= cooldown_until:
+                state = 0
+            
+            is_eligible = eligible[i]
+            if state == 0:
+                if is_eligible:
+                    state = 1
+                    arm_remaining = arm_bars_base
+                    positions[i] = 0
+                    continue
+                else:
+                    positions[i] = 0
+                    continue
+                    
+            if state == 1:
+                if arm_remaining > 0:
+                    arm_remaining -= 1
+                    if arm_remaining > 0:
+                        positions[i] = 0
+                        continue
+                        
+                side = entry_sides[i]
+                if side == 0 or c <= 0:
+                    state = 0
+                    positions[i] = 0
+                    continue
+                    
+                stop_off = stop_offsets[i]
+                target_off = target_offsets[i]
+                if stop_off <= 0 or target_off <= 0:
+                    state = 0
+                    positions[i] = 0
+                    continue
+                    
+                in_pos = side
+                state = 2
+                entry_idx = i
+                entry_price = c
+                risk_per_unit = stop_off
+                best_price = c
+                if side > 0:
+                    stop_price = c - stop_off
+                    target_price = c + target_off
+                else:
+                    stop_price = c + stop_off
+                    target_price = c - target_off
+                events_timestamps.append(i)
+                events_codes.append(1)
+
+        positions[i] = in_pos
+        
+    return positions, events_timestamps, events_codes
+
+
+from dataclasses import dataclass, field
+
 @dataclass
 class DslInterpreterV1:
     name: str = "dsl_interpreter_v1"
-    required_features: List[str] = None
+    required_features: List[str] = field(default_factory=lambda: ["high_96", "low_96"])
 
-    def __post_init__(self) -> None:
-        if self.required_features is None:
-            self.required_features = ["high_96", "low_96"]
 
     def generate_positions(self, bars: pd.DataFrame, features: pd.DataFrame, params: dict) -> pd.Series:
         if "dsl_blueprint" not in params or not isinstance(params.get("dsl_blueprint"), dict):
@@ -684,153 +885,103 @@ class DslInterpreterV1:
             return out
 
         eligible_mask = _entry_eligibility_mask(frame, blueprint.entry, blueprint)
-        positions: List[int] = []
-        signal_events: List[Dict[str, object]] = []
+        # Phase 1: Pre-compute numpy arrays for all row-level operations
+        close_arr = _to_float_arr(frame["close"].values)
+        high_arr = _to_float_arr(frame["high"].values)
+        low_arr = _to_float_arr(frame["low"].values)
+        eligible_arr = eligible_mask.values.astype(bool)
 
-        in_pos = 0
-        state = "flat"
-        arm_remaining = 0
-        entry_idx = -1
-        entry_price = np.nan
-        risk_per_unit = np.nan
-        best_price = np.nan
-        stop_price = np.nan
-        target_price = np.nan
-        cooldown_until = -1
+        # Precompute invalidation mask
+        invalidation_arr = np.zeros(len(frame), dtype=bool)
+        inv = blueprint.exit.invalidation
+        inv_col = str(inv.get("metric", "")).strip()
+        inv_op = str(inv.get("operator", "")).strip()
+        inv_val = _to_float(inv.get("value"), default=np.nan)
+        if inv_col in frame.columns and not np.isnan(inv_val):
+            metric_arr = _to_float_arr(frame[inv_col].values)
+            if inv_op == ">": invalidation_arr = metric_arr > inv_val
+            elif inv_op == ">=": invalidation_arr = metric_arr >= inv_val
+            elif inv_op == "<": invalidation_arr = metric_arr < inv_val
+            elif inv_op == "<=": invalidation_arr = metric_arr <= inv_val
 
-        # Conservative default: disable intrabar stop/target exits unless explicitly enabled.
-        # The engine PnL model is close-to-close; intrabar exits require OHLC fill simulation to be realistic.
+        # Precompute entry sides avoiding Python iterrows mapping
+        entry_sides = np.zeros(len(frame), dtype=np.int32)
+        score_arr = _vectorized_direction_score(frame)
+        bias = _event_direction_bias(blueprint.event_type)
+        if blueprint.direction == "long":
+            entry_sides[:] = 1
+        elif blueprint.direction == "short":
+            entry_sides[:] = -1
+        else:
+            entry_sides = np.where((~np.isnan(score_arr)) & (np.abs(score_arr) > 1e-12),
+                                   np.where(score_arr > 0, 1 * bias, -1 * bias), 0)
+
+        # Apply overlay entry gates to sides array
+        for overlay in blueprint.overlays:
+            if overlay.name == "risk_throttle":
+                scale = _to_float(overlay.params.get("size_scale", 1.0), default=1.0)
+                if scale <= 0: entry_sides[:] = 0
+            elif overlay.name == "liquidity_guard":
+                min_notional = _to_float(overlay.params.get("min_notional", 0.0), default=0.0)
+                notional = _to_float_arr(frame.get("quote_volume", pd.Series(0.0, index=frame.index)).values)
+                entry_sides[notional < min_notional] = 0
+            elif overlay.name == "spread_guard":
+                max_spread_bps = _to_float(overlay.params.get("max_spread_bps", 12.0), default=12.0)
+                spread = _to_float_arr(frame.get("spread_bps", pd.Series(0.0, index=frame.index)).values)
+                entry_sides[spread > max_spread_bps] = 0
+            elif overlay.name == "funding_guard":
+                max_abs_funding_bps = _to_float(overlay.params.get("max_abs_funding_bps", 15.0), default=15.0)
+                funding = np.abs(_to_float_arr(frame.get("funding_rate_scaled", pd.Series(0.0, index=frame.index)).values) * 10_000.0)
+                entry_sides[funding > max_abs_funding_bps] = 0
+            elif overlay.name == "cross_venue_guard":
+                max_desync_bps = _to_float(overlay.params.get("max_desync_bps", 20.0), default=20.0)
+                desync = np.abs(_to_float_arr(frame.get("spread_bps", pd.Series(0.0, index=frame.index)).values))
+                entry_sides[desync > max_desync_bps] = 0
+
+        # Precompute offsets
+        stop_offsets = _vectorized_offset(frame, blueprint.exit.stop_type, float(blueprint.exit.stop_value))
+        target_offsets = _vectorized_offset(frame, blueprint.exit.target_type, float(blueprint.exit.target_value))
+        
+        trail_type_str = str(blueprint.exit.trailing_stop_type).lower()
+        trail_type_int = 1 if trail_type_str == "percent" else (2 if trail_type_str == "range_pct" else (3 if trail_type_str == "atr" else 0))
+        trail_offsets = np.zeros(len(frame))
+        if trail_type_int != 0:
+            trail_offsets = _vectorized_offset(frame, trail_type_str, float(blueprint.exit.trailing_stop_value))
+
         allow_intrabar_exits = bool(params.get("allow_intrabar_exits", False)) if isinstance(params, dict) else False
-
-        for idx, row in frame.iterrows():
-            ts = row["timestamp"]
-            close = _to_float(row.get("close"), default=np.nan)
-            high = _to_float(row.get("high"), default=np.nan)
-            low = _to_float(row.get("low"), default=np.nan)
-
-            if in_pos != 0:
-                held = idx - entry_idx
-                inv = blueprint.exit.invalidation
-                inv_col = str(inv.get("metric", "")).strip()
-                inv_op = str(inv.get("operator", "")).strip()
-                inv_val = _to_float(inv.get("value"), default=np.nan)
-                invalidate = False
-                if inv_col in frame.columns and not np.isnan(inv_val):
-                    metric = _to_float(row.get(inv_col), default=np.nan)
-                    if not np.isnan(metric):
-                        invalidate = (
-                            (inv_op == ">" and metric > inv_val)
-                            or (inv_op == ">=" and metric >= inv_val)
-                            or (inv_op == "<" and metric < inv_val)
-                            or (inv_op == "<=" and metric <= inv_val)
-                        )
-
-                if in_pos > 0:
-                    best_price = max(_to_float(best_price, close), high if not np.isnan(high) else close)
-                else:
-                    best_price = min(_to_float(best_price, close), low if not np.isnan(low) else close)
-
-                if float(blueprint.exit.break_even_r) > 0 and not np.isnan(risk_per_unit) and risk_per_unit > 0:
-                    if in_pos > 0:
-                        reached_r = (best_price - entry_price) / risk_per_unit
-                        if reached_r >= float(blueprint.exit.break_even_r):
-                            stop_price = max(stop_price, entry_price)
-                    else:
-                        reached_r = (entry_price - best_price) / risk_per_unit
-                        if reached_r >= float(blueprint.exit.break_even_r):
-                            stop_price = min(stop_price, entry_price)
-
-                if blueprint.exit.trailing_stop_type != "none" and float(blueprint.exit.trailing_stop_value) > 0:
-                    trail = _offset(row, blueprint.exit.trailing_stop_type, float(blueprint.exit.trailing_stop_value))
-                    if trail > 0:
-                        if in_pos > 0:
-                            stop_price = max(stop_price, best_price - trail)
-                        else:
-                            stop_price = min(stop_price, best_price + trail)
-
-                should_exit = False
-                reason = ""
-                if held >= int(blueprint.exit.time_stop_bars):
-                    should_exit = True
-                    reason = "time_stop"
-                elif invalidate:
-                    should_exit = True
-                    reason = "invalidation"
-                elif allow_intrabar_exits and in_pos > 0 and not np.isnan(low) and low <= stop_price:
-                    should_exit = True
-                    reason = "stop"
-                elif allow_intrabar_exits and in_pos < 0 and not np.isnan(high) and high >= stop_price:
-                    should_exit = True
-                    reason = "stop"
-                elif allow_intrabar_exits and in_pos > 0 and not np.isnan(high) and high >= target_price:
-                    should_exit = True
-                    reason = "target"
-                elif allow_intrabar_exits and in_pos < 0 and not np.isnan(low) and low <= target_price:
-                    should_exit = True
-                    reason = "target"
-
-                if should_exit:
-                    in_pos = 0
-                    state = "cooldown"
-                    cooldown_until = idx + max(int(blueprint.entry.cooldown_bars), int(blueprint.entry.reentry_lockout_bars))
-                    signal_events.append({"timestamp": ts.isoformat(), "event": "exit", "reason": reason})
-
-            if in_pos == 0:
-                if state == "cooldown" and idx < cooldown_until:
-                    positions.append(0)
-                    continue
-                if state == "cooldown" and idx >= cooldown_until:
-                    state = "flat"
-                is_eligible = bool(eligible_mask.iat[idx])
-                if state == "flat":
-                    if is_eligible:
-                        state = "armed"
-                        # Enforce at least one-bar decision lag: signals computed on bar t are tradable no earlier than t+1.
-                        arm_remaining = max(1, int(blueprint.entry.delay_bars), int(blueprint.entry.arm_bars))
-                        positions.append(0)
-                        continue
-                    else:
-                        positions.append(0)
-                        continue
-                if state == "armed":
-                    if arm_remaining > 0:
-                        arm_remaining -= 1
-                        # If we just reached 0, we can evaluate entry on THIS bar,
-                        # or do we wait for the next? The logic continues below to enter.
-                        if arm_remaining > 0:
-                            positions.append(0)
-                            continue
-
-                    side = _entry_side(row, blueprint)
-                    for overlay in blueprint.overlays:
-                        side = _apply_overlay_entry_gate(overlay=overlay, row=row, side=side)
-                        if side == 0:
-                            break
-                    if side == 0 or close <= 0:
-                        state = "flat"
-                        positions.append(0)
-                        continue
-
-                    stop_offset, target_offset = _stop_target_offsets(row=row, exit_spec=blueprint.exit)
-                    if stop_offset <= 0 or target_offset <= 0:
-                        state = "flat"
-                        positions.append(0)
-                        continue
-
-                    in_pos = side
-                    state = "in_position"
-                    entry_idx = idx
-                    entry_price = close
-                    risk_per_unit = stop_offset
-                    best_price = close
-                    if side > 0:
-                        stop_price = close - stop_offset
-                        target_price = close + target_offset
-                    else:
-                        stop_price = close + stop_offset
-                        target_price = close - target_offset
-                    signal_events.append({"timestamp": ts.isoformat(), "event": "entry", "reason": "blueprint_entry"})
-            positions.append(int(in_pos))
+        
+        # Run Numba execution simulation
+        timestamps_arr = frame["timestamp"].values.astype(np.int64)
+        pos_arr, ev_idxs, ev_codes = generate_positions_numba(
+            timestamps_arr,
+            close_arr,
+            high_arr,
+            low_arr,
+            eligible_arr,
+            entry_sides,
+            stop_offsets,
+            target_offsets,
+            allow_intrabar_exits,
+            int(blueprint.entry.cooldown_bars),
+            int(blueprint.entry.reentry_lockout_bars),
+            max(1, int(blueprint.entry.delay_bars), int(blueprint.entry.arm_bars)),
+            int(blueprint.exit.time_stop_bars),
+            float(blueprint.exit.break_even_r),
+            trail_type_int,
+            trail_offsets,
+            invalidation_arr
+        )
+        
+        positions = pos_arr.tolist()
+        signal_events = []
+        # format events dictionary lists back for PnL engine compatibility
+        for i, code in zip(ev_idxs, ev_codes):
+            ts_str = frame["timestamp"].iloc[i].isoformat()
+            if code == 1:
+                signal_events.append({"timestamp": ts_str, "event": "entry", "reason": "blueprint_entry"})
+            else:
+                reason = {2: "time_stop", 3: "invalidation", 4: "stop", 5: "target"}.get(code, "unknown")
+                signal_events.append({"timestamp": ts_str, "event": "exit", "reason": reason})
 
         out = pd.Series(positions, index=frame["timestamp"], name="position", dtype=int)
         out.attrs["signal_events"] = signal_events

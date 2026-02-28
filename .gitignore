@@ -62,3 +62,13 @@ gha-creds-*.json
 /verify_hydra.py
 /artifacts/
 /outputs/
+
+# Runtime Logs
+*.log
+pytest.log
+pytest_smoke.log
+
+# Large Data Pipelines Binaries
+fragments.jsonl
+knowledge_atlas.json
+features_v1*.parquet

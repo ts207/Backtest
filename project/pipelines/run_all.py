@@ -23,6 +23,7 @@ from pipelines._lib.ontology_contract import (
     ontology_spec_hash,
 )
 from events.registry import EVENT_REGISTRY_SPECS
+from events.phase2 import PHASE2_EVENT_CHAIN
 from pipelines.stages import (
     build_ingest_stages,
     build_core_stages,
@@ -32,64 +33,7 @@ from pipelines.stages import (
 
 
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
-PHASE2_EVENT_CHAIN: List[Tuple[str, str, List[str]]] = [
-    ('VOL_SHOCK', 'analyze_vol_shock_relaxation.py', ['--timeframe', '5m']),
-    ('LIQUIDITY_VACUUM', 'analyze_liquidity_vacuum.py', ['--timeframe', '5m']),
-    ('FORCED_FLOW_EXHAUSTION', 'analyze_directional_exhaustion_after_forced_flow.py', []),
-    ('CROSS_VENUE_DESYNC', 'analyze_cross_venue_desync.py', []),
-    ('FUNDING_EXTREME_ONSET', 'analyze_funding_episode_events.py', []),
-    ('FUNDING_PERSISTENCE_TRIGGER', 'analyze_funding_episode_events.py', []),
-    ('FUNDING_NORMALIZATION_TRIGGER', 'analyze_funding_episode_events.py', []),
-    ('OI_SPIKE_POSITIVE', 'analyze_oi_shock_events.py', []),
-    ('OI_SPIKE_NEGATIVE', 'analyze_oi_shock_events.py', []),
-    ('OI_FLUSH', 'analyze_oi_shock_events.py', []),
-    ('LIQUIDATION_CASCADE', 'analyze_liquidation_cascade.py', []),
-    ('DEPTH_COLLAPSE', 'analyze_liquidity_dislocation_events.py', ['--event_type', 'DEPTH_COLLAPSE', '--timeframe', '5m']),
-    ('SPREAD_BLOWOUT', 'analyze_liquidity_dislocation_events.py', ['--event_type', 'SPREAD_BLOWOUT', '--timeframe', '5m']),
-    ('ORDERFLOW_IMBALANCE_SHOCK', 'analyze_liquidity_dislocation_events.py', ['--event_type', 'ORDERFLOW_IMBALANCE_SHOCK', '--timeframe', '5m']),
-    ('SWEEP_STOPRUN', 'analyze_liquidity_dislocation_events.py', ['--event_type', 'SWEEP_STOPRUN', '--timeframe', '5m']),
-    ('ABSORPTION_EVENT', 'analyze_liquidity_dislocation_events.py', ['--event_type', 'ABSORPTION_EVENT', '--timeframe', '5m']),
-    ('LIQUIDITY_GAP_PRINT', 'analyze_liquidity_dislocation_events.py', ['--event_type', 'LIQUIDITY_GAP_PRINT', '--timeframe', '5m']),
-    ('VOL_SPIKE', 'analyze_volatility_transition_events.py', ['--event_type', 'VOL_SPIKE', '--timeframe', '5m']),
-    ('VOL_RELAXATION_START', 'analyze_volatility_transition_events.py', ['--event_type', 'VOL_RELAXATION_START', '--timeframe', '5m']),
-    ('VOL_CLUSTER_SHIFT', 'analyze_volatility_transition_events.py', ['--event_type', 'VOL_CLUSTER_SHIFT', '--timeframe', '5m']),
-    ('RANGE_COMPRESSION_END', 'analyze_volatility_transition_events.py', ['--event_type', 'RANGE_COMPRESSION_END', '--timeframe', '5m']),
-    ('BREAKOUT_TRIGGER', 'analyze_volatility_transition_events.py', ['--event_type', 'BREAKOUT_TRIGGER', '--timeframe', '5m']),
-    ('FUNDING_FLIP', 'analyze_positioning_extremes_events.py', ['--event_type', 'FUNDING_FLIP', '--timeframe', '5m']),
-    ('DELEVERAGING_WAVE', 'analyze_positioning_extremes_events.py', ['--event_type', 'DELEVERAGING_WAVE', '--timeframe', '5m']),
-    ('TREND_EXHAUSTION_TRIGGER', 'analyze_forced_flow_and_exhaustion_events.py', ['--event_type', 'TREND_EXHAUSTION_TRIGGER', '--timeframe', '5m']),
-    ('MOMENTUM_DIVERGENCE_TRIGGER', 'analyze_forced_flow_and_exhaustion_events.py', ['--event_type', 'MOMENTUM_DIVERGENCE_TRIGGER', '--timeframe', '5m']),
-    ('CLIMAX_VOLUME_BAR', 'analyze_forced_flow_and_exhaustion_events.py', ['--event_type', 'CLIMAX_VOLUME_BAR', '--timeframe', '5m']),
-    ('FAILED_CONTINUATION', 'analyze_forced_flow_and_exhaustion_events.py', ['--event_type', 'FAILED_CONTINUATION', '--timeframe', '5m']),
-    ('RANGE_BREAKOUT', 'analyze_trend_structure_events.py', ['--event_type', 'RANGE_BREAKOUT', '--timeframe', '5m']),
-    ('FALSE_BREAKOUT', 'analyze_trend_structure_events.py', ['--event_type', 'FALSE_BREAKOUT', '--timeframe', '5m']),
-    ('TREND_ACCELERATION', 'analyze_trend_structure_events.py', ['--event_type', 'TREND_ACCELERATION', '--timeframe', '5m']),
-    ('TREND_DECELERATION', 'analyze_trend_structure_events.py', ['--event_type', 'TREND_DECELERATION', '--timeframe', '5m']),
-    ('PULLBACK_PIVOT', 'analyze_trend_structure_events.py', ['--event_type', 'PULLBACK_PIVOT', '--timeframe', '5m']),
-    ('SUPPORT_RESISTANCE_BREAK', 'analyze_trend_structure_events.py', ['--event_type', 'SUPPORT_RESISTANCE_BREAK', '--timeframe', '5m']),
-    ('ZSCORE_STRETCH', 'analyze_statistical_dislocation_events.py', ['--event_type', 'ZSCORE_STRETCH', '--timeframe', '5m']),
-    ('BAND_BREAK', 'analyze_statistical_dislocation_events.py', ['--event_type', 'BAND_BREAK', '--timeframe', '5m']),
-    ('OVERSHOOT_AFTER_SHOCK', 'analyze_statistical_dislocation_events.py', ['--event_type', 'OVERSHOOT_AFTER_SHOCK', '--timeframe', '5m']),
-    ('GAP_OVERSHOOT', 'analyze_statistical_dislocation_events.py', ['--event_type', 'GAP_OVERSHOOT', '--timeframe', '5m']),
-    ('VOL_REGIME_SHIFT_EVENT', 'analyze_regime_transition_events.py', ['--event_type', 'VOL_REGIME_SHIFT_EVENT', '--timeframe', '5m']),
-    ('TREND_TO_CHOP_SHIFT', 'analyze_regime_transition_events.py', ['--event_type', 'TREND_TO_CHOP_SHIFT', '--timeframe', '5m']),
-    ('CHOP_TO_TREND_SHIFT', 'analyze_regime_transition_events.py', ['--event_type', 'CHOP_TO_TREND_SHIFT', '--timeframe', '5m']),
-    ('CORRELATION_BREAKDOWN_EVENT', 'analyze_regime_transition_events.py', ['--event_type', 'CORRELATION_BREAKDOWN_EVENT', '--timeframe', '5m']),
-    ('BETA_SPIKE_EVENT', 'analyze_regime_transition_events.py', ['--event_type', 'BETA_SPIKE_EVENT', '--timeframe', '5m']),
-    ('INDEX_COMPONENT_DIVERGENCE', 'analyze_information_desync_events.py', ['--event_type', 'INDEX_COMPONENT_DIVERGENCE', '--timeframe', '5m']),
-    ('SPOT_PERP_BASIS_SHOCK', 'analyze_information_desync_events.py', ['--event_type', 'SPOT_PERP_BASIS_SHOCK', '--timeframe', '5m']),
-    ('LEAD_LAG_BREAK', 'analyze_information_desync_events.py', ['--event_type', 'LEAD_LAG_BREAK', '--timeframe', '5m']),
-    ('SESSION_OPEN_EVENT', 'analyze_temporal_structure_events.py', ['--event_type', 'SESSION_OPEN_EVENT', '--timeframe', '5m']),
-    ('SESSION_CLOSE_EVENT', 'analyze_temporal_structure_events.py', ['--event_type', 'SESSION_CLOSE_EVENT', '--timeframe', '5m']),
-    ('FUNDING_TIMESTAMP_EVENT', 'analyze_temporal_structure_events.py', ['--event_type', 'FUNDING_TIMESTAMP_EVENT', '--timeframe', '5m']),
-    ('SCHEDULED_NEWS_WINDOW_EVENT', 'analyze_temporal_structure_events.py', ['--event_type', 'SCHEDULED_NEWS_WINDOW_EVENT', '--timeframe', '5m']),
-    ('SPREAD_REGIME_WIDENING_EVENT', 'analyze_execution_friction_events.py', ['--event_type', 'SPREAD_REGIME_WIDENING_EVENT', '--timeframe', '5m']),
-    ('SLIPPAGE_SPIKE_EVENT', 'analyze_execution_friction_events.py', ['--event_type', 'SLIPPAGE_SPIKE_EVENT', '--timeframe', '5m']),
-    ('FEE_REGIME_CHANGE_EVENT', 'analyze_execution_friction_events.py', ['--event_type', 'FEE_REGIME_CHANGE_EVENT', '--timeframe', '5m']),
-    ('COPULA_PAIRS_TRADING', 'analyze_copula_pairs.py', ['--pairs', 'BTCUSDT:ETHUSDT']),
-    ('FND_DISLOC', 'analyze_funding_dislocation.py', ['--timeframe', '5m']),
-    ('BASIS_DISLOC', 'analyze_basis_dislocation.py', ['--timeframe', '5m']),
-]
+
 _STRICT_RECOMMENDATIONS_CHECKLIST = False
 _CURRENT_PIPELINE_SESSION_ID: Optional[str] = None
 _CURRENT_STAGE_INSTANCE_ID: Optional[str] = None
@@ -212,12 +156,12 @@ def _apply_run_terminal_audit(run_id: str, manifest: Dict[str, object]) -> None:
 
 
 def _compute_stage_input_hash(script_path: Path, base_args: List[str], run_id: str) -> str:
-    """Hash the stage command + script mtime for cache-hit detection."""
+    """Hash the stage command + script content for robust cache-hit detection."""
     try:
-        script_mtime = str(script_path.stat().st_mtime)
+        script_hash = hashlib.sha256(script_path.read_bytes()).hexdigest()[:16]
     except OSError:
-        script_mtime = "unknown"
-    payload = f"{script_path}:{script_mtime}:{' '.join(base_args)}:{run_id}"
+        script_hash = "unknown"
+    payload = f"{script_path}:{script_hash}:{' '.join(base_args)}:{run_id}"
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
@@ -463,30 +407,38 @@ def _feature_schema_metadata() -> tuple[str, str]:
     return version_label, schema_hash
 
 
+def _fast_walk_stat(root_path: Path) -> List[str]:
+    import os
+    entries = []
+    # Use os.walk directly which is heavily optimized in Python 3.5+ (uses scandir)
+    for dirpath, dirnames, filenames in os.walk(str(root_path)):
+        for name in filenames:
+            path = os.path.join(dirpath, name)
+            try:
+                st = os.stat(path)
+                # Keep the same payload format: relative_path|size|mtime_ns
+                rel_path = os.path.relpath(path, str(DATA_ROOT))
+                entries.append(f"{rel_path}|{int(st.st_size)}|{int(st.st_mtime_ns)}")
+            except OSError:
+                continue
+    return entries
+
 def _data_hash(symbols: List[str]) -> str:
+    import concurrent.futures
     roots: List[Path] = []
     for symbol in symbols:
         roots.append(DATA_ROOT / "lake" / "raw" / "binance" / "perp" / symbol)
         roots.append(DATA_ROOT / "lake" / "raw" / "binance" / "spot" / symbol)
 
     entries: List[str] = []
-    for root in roots:
-        if not root.exists():
-            continue
-        for path in sorted([p for p in root.rglob("*") if p.is_file()]):
-            try:
-                stat = path.stat()
-            except OSError:
-                continue
-            entries.append(
-                "|".join(
-                    [
-                        str(path.relative_to(DATA_ROOT)),
-                        str(int(stat.st_size)),
-                        str(int(stat.st_mtime_ns)),
-                    ]
-                )
-            )
+    valid_roots = [r for r in roots if r.exists()]
+    
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        for result in executor.map(_fast_walk_stat, valid_roots):
+            entries.extend(result)
+            
+    # Sort after collecting all to ensure consistent hash
+    entries.sort()
     return _sha256_text("\n".join(entries))
 
 

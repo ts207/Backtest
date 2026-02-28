@@ -1,6 +1,10 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "project"))
+
 import pytest
 import pandas as pd
-from project.schemas.data_contracts import Cleaned5mBarsSchema, EventRegistrySchema
+from schemas.data_contracts import Cleaned5mBarsSchema, EventRegistrySchema
 from pandera.errors import SchemaError
 
 def test_cleaned_schema_valid():

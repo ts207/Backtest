@@ -1,10 +1,14 @@
 from __future__ import annotations
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "project"))
+
 
 import numpy as np
 import pandas as pd
 import pytest
 from pathlib import Path
-from project.events.registry import build_event_flags, _active_signal_column
+from events.registry import build_event_flags, _active_signal_column
 
 def test_build_event_flags_correctness():
     # 1. Setup small synthetic grid (1 day, 5m bars = 288 bars)
@@ -12,7 +16,7 @@ def test_build_event_flags_correctness():
     symbols = ["BTCUSDT", "ETHUSDT"]
     
     # Mock symbols timestamps loader
-    import project.events.registry as registry
+    import events.registry as registry
     original_loader = registry._load_symbol_timestamps
     registry._load_symbol_timestamps = lambda data_root, run_id, symbol, timeframe: pd.Series(ts)
     

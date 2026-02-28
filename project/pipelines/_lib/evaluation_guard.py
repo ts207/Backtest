@@ -383,10 +383,6 @@ def _check_symbol_stratified_family(
         "to: "
         "  family_id = f\"{symbol}_{event_type}_{rule}_{horizon}_{cond_label}\""
     )
-    known_symbols = {"BTCUSDT", "ETHUSDT", "SOLUSDT"}
-    symbol_prefix_re = re.compile(
-        r"^(" + "|".join(re.escape(s) for s in known_symbols) + r")_"
-    )
 
     if phase2_report_root is None or not phase2_report_root.exists():
         return InvariantResult(
@@ -399,20 +395,29 @@ def _check_symbol_stratified_family(
             remediation=remediation,
         )
 
-    # Sample family_ids from CSV files in the phase2 report directory
+    # Discover the actual symbol universe from the CSV `symbol` column,
+    # falling back to a broad ALLCAPS-prefix pattern if the column is absent.
+    # This avoids hardcoding the symbol list and works for any run configuration.
+    import csv
+
+    observed_symbols: set[str] = set()
     bad_family_ids: list[str] = []
+    unchecked_rows: list[tuple[str, str]] = []  # (fid, row_symbol) when symbol not yet known
     checked = 0
+
     try:
-        import csv
         for csv_path in sorted(phase2_report_root.rglob("phase2_candidates.csv")):
             with open(csv_path, newline="") as fh:
                 reader = csv.DictReader(fh)
                 for row in reader:
+                    sym = str(row.get("symbol", "")).strip().upper()
+                    if sym:
+                        observed_symbols.add(sym)
                     fid = row.get("family_id", "")
-                    if fid and not symbol_prefix_re.match(fid):
-                        bad_family_ids.append(fid)
+                    if fid:
+                        unchecked_rows.append((fid, sym))
                     checked += 1
-                    if checked >= 500:  # sample cap
+                    if checked >= 500:
                         break
             if checked >= 500:
                 break
@@ -431,6 +436,22 @@ def _check_symbol_stratified_family(
             failure_reason="No phase2_candidates.csv files found — cannot verify family stratification.",
             remediation=remediation,
         )
+
+    if observed_symbols:
+        # Build a precise regex from the actual symbols seen in this run.
+        symbol_prefix_re = re.compile(
+            r"^(" + "|".join(re.escape(s) for s in sorted(observed_symbols)) + r")_"
+        )
+        for fid, _ in unchecked_rows:
+            if fid and not symbol_prefix_re.match(fid):
+                bad_family_ids.append(fid)
+    else:
+        # No `symbol` column — fall back: family_id must start with an ALLCAPS word
+        # (≥3 chars) followed by '_'. This catches the obvious un-stratified case.
+        fallback_re = re.compile(r"^[A-Z]{3,}_")
+        for fid, _ in unchecked_rows:
+            if fid and not fallback_re.match(fid):
+                bad_family_ids.append(fid)
 
     if bad_family_ids:
         unique_bad = list(dict.fromkeys(bad_family_ids))[:5]

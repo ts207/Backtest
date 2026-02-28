@@ -1,9 +1,13 @@
 from __future__ import annotations
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "project"))
+
 
 import numpy as np
 import pandas as pd
 import pytest
-from project.scripts.verify_engine_parity import calculate_trade_parity
+from scripts.verify_engine_parity import calculate_trade_parity
 
 def test_calculate_trade_parity_success():
     # 1. Setup synthetic data

@@ -58,20 +58,32 @@ def allocate_position_scales(
         scale = scale.clip(lower=0.0)
         requested[key] = (pos * scale).astype(float)
 
-    requested_gross = sum(s.abs() for s in requested.values())
+    if not requested:
+        requested_gross = pd.Series(0.0, index=aligned_index)
+    else:
+        requested_gross = pd.DataFrame(requested).abs().sum(axis=1)
     allocated = {key: s.copy() for key, s in requested.items()}
 
     for key in ordered:
         max_s = float(max(0.0, limits.max_strategy_gross))
         gross = allocated[key].abs()
-        ratio = np.where(gross > max_s, max_s / gross.replace(0.0, np.nan), 1.0)
-        ratio_series = pd.Series(ratio, index=aligned_index).replace([np.inf, -np.inf], np.nan).fillna(1.0).clip(lower=0.0, upper=1.0)
+        
+        # Where gross > max_s, ratio = max_s / gross. Else 1.0.
+        # Ensure gross is non-zero when taking reciprocal.
+        safe_gross = gross.replace(0.0, np.nan)
+        ratio_series = (max_s / safe_gross).where(gross > max_s, 1.0)
+        ratio_series = ratio_series.replace([np.inf, -np.inf], np.nan).fillna(1.0).clip(lower=0.0, upper=1.0)
+
         allocated[key] = allocated[key] * ratio_series
 
     symbol_cap = float(max(0.0, limits.max_symbol_gross))
-    symbol_gross = sum(s.abs() for s in allocated.values())
-    symbol_ratio = np.where(symbol_gross > symbol_cap, symbol_cap / symbol_gross.replace(0.0, np.nan), 1.0)
-    symbol_ratio_series = pd.Series(symbol_ratio, index=aligned_index).replace([np.inf, -np.inf], np.nan).fillna(1.0).clip(lower=0.0, upper=1.0)
+    if not allocated:
+        symbol_gross = pd.Series(0.0, index=aligned_index)
+    else:
+        symbol_gross = pd.DataFrame(allocated).abs().sum(axis=1)
+    safe_symbol_gross = symbol_gross.replace(0.0, np.nan)
+    symbol_ratio_series = (symbol_cap / safe_symbol_gross).where(symbol_gross > symbol_cap, 1.0)
+    symbol_ratio_series = symbol_ratio_series.replace([np.inf, -np.inf], np.nan).fillna(1.0).clip(lower=0.0, upper=1.0)
     for key in ordered:
         allocated[key] = allocated[key] * symbol_ratio_series
 
@@ -79,15 +91,20 @@ def allocate_position_scales(
     # (all long or all short), limit the combined same-direction exposure.
     if limits.max_correlated_gross is not None:
         corr_cap = float(max(0.0, limits.max_correlated_gross))
-        net_direction = sum(s for s in allocated.values())  # positive = net long, negative = net short
-        same_dir_gross = sum(s.abs() for s in allocated.values())
+        if not allocated:
+            net_direction = pd.Series(0.0, index=aligned_index)
+            same_dir_gross = pd.Series(0.0, index=aligned_index)
+        else:
+            df_alloc = pd.DataFrame(allocated)
+            net_direction = df_alloc.sum(axis=1)  # positive = net long, negative = net short
+            same_dir_gross = df_alloc.abs().sum(axis=1)
         # Only clip when all strategies are directionally concordant (net == gross)
         fully_concordant = (net_direction.abs() - same_dir_gross).abs() < 1e-9
         corr_ratio = pd.Series(1.0, index=aligned_index)
         needs_clip = fully_concordant & (same_dir_gross > corr_cap)
         safe_gross = same_dir_gross.replace(0.0, np.nan)
-        corr_ratio = np.where(needs_clip, corr_cap / safe_gross, 1.0)
-        corr_ratio_series = pd.Series(corr_ratio, index=aligned_index).replace([np.inf, -np.inf], np.nan).fillna(1.0).clip(lower=0.0, upper=1.0)
+        corr_ratio_series = (corr_cap / safe_gross).where(needs_clip, 1.0)
+        corr_ratio_series = corr_ratio_series.replace([np.inf, -np.inf], np.nan).fillna(1.0).clip(lower=0.0, upper=1.0)
         for key in ordered:
             allocated[key] = allocated[key] * corr_ratio_series
 
@@ -122,25 +139,36 @@ def allocate_position_scales(
         allocated[key] = allocated[key] * dynamic_overlay_series
 
     portfolio_cap = float(max(0.0, limits.max_portfolio_gross))
-    portfolio_gross = sum(s.abs() for s in allocated.values())
-    portfolio_ratio = np.where(portfolio_gross > portfolio_cap, portfolio_cap / portfolio_gross.replace(0.0, np.nan), 1.0)
-    portfolio_ratio_series = (
-        pd.Series(portfolio_ratio, index=aligned_index).replace([np.inf, -np.inf], np.nan).fillna(1.0).clip(lower=0.0, upper=1.0)
-    )
+    if not allocated:
+        portfolio_gross = pd.Series(0.0, index=aligned_index)
+    else:
+        portfolio_gross = pd.DataFrame(allocated).abs().sum(axis=1)
+    safe_portfolio_gross = portfolio_gross.replace(0.0, np.nan)
+    portfolio_ratio_series = (portfolio_cap / safe_portfolio_gross).where(portfolio_gross > portfolio_cap, 1.0)
+    portfolio_ratio_series = portfolio_ratio_series.replace([np.inf, -np.inf], np.nan).fillna(1.0).clip(lower=0.0, upper=1.0)
     for key in ordered:
         allocated[key] = allocated[key] * portfolio_ratio_series
 
     max_new = float(max(0.0, limits.max_new_exposure_per_bar))
     for key in ordered:
-        series = allocated[key].copy()
-        prior = series.shift(1).fillna(0.0)
-        delta = series - prior
-        delta_abs = delta.abs()
-        ratio = np.where(delta_abs > max_new, max_new / delta_abs.replace(0.0, np.nan), 1.0)
-        ratio_series = pd.Series(ratio, index=aligned_index).replace([np.inf, -np.inf], np.nan).fillna(1.0).clip(lower=0.0, upper=1.0)
-        allocated[key] = prior + (delta * ratio_series)
+        # Autoregressive clamping: we must walk forward because the allowed position
+        # at t depends on the actually-taken position at t-1.
+        raw = allocated[key].values
+        clamped = np.zeros_like(raw)
+        prior = 0.0
+        for i in range(len(raw)):
+            target = raw[i]
+            delta = target - prior
+            if abs(delta) > max_new:
+                delta = np.sign(delta) * max_new
+            clamped[i] = prior + delta
+            prior = clamped[i]
+        allocated[key] = pd.Series(clamped, index=aligned_index)
 
-    allocated_gross = sum(s.abs() for s in allocated.values())
+    if not allocated:
+        allocated_gross = pd.Series(0.0, index=aligned_index)
+    else:
+        allocated_gross = pd.DataFrame(allocated).abs().sum(axis=1)
     req_total = float(requested_gross.sum())
     alloc_total = float(allocated_gross.sum())
     clipped_fraction = 0.0 if req_total <= 0 else float(max(0.0, (req_total - alloc_total) / req_total))
