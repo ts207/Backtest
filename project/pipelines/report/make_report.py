@@ -29,8 +29,9 @@ def _detect_backtest_family_dir(*, run_id: str) -> str:
 
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from eval.benchmarks import compute_btc_beta, compute_buy_hold_sharpe, compute_exposure_summary
 from pipelines._lib.config import load_configs
-from pipelines._lib.io_utils import ensure_dir
+from pipelines._lib.io_utils import ensure_dir, list_parquet_files, read_parquet
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines.report.capital_allocation import AllocationConfig, allocation_metadata, build_allocation_weights
 
@@ -221,6 +222,55 @@ def _format_funding_section(cleaned_stats: Dict[str, object]) -> List[str]:
         lines.append(f"  - % bars with funding_event_ts: {pct_bars_with_event:.2%}")
         lines.append(f"  - funding_rate_scaled min/max/std: {funding_min_display} / {funding_max_display} / {funding_std_display}")
     return lines
+
+
+BTC_SYMBOL = "BTCUSDT"
+
+
+def _load_btc_close(data_root: Path) -> pd.Series:
+    """Load BTC 5m close prices from the cleaned bar lake. Returns empty Series if unavailable."""
+    btc_dir = data_root / "lake" / "cleaned" / "perp" / BTC_SYMBOL / "bars_5m"
+    files = list_parquet_files(btc_dir)
+    if not files:
+        return pd.Series(dtype=float)
+    try:
+        df = read_parquet(files)
+        if "close" not in df.columns:
+            return pd.Series(dtype=float)
+        if "timestamp" in df.columns:
+            df = df.sort_values("timestamp")
+        return df["close"].reset_index(drop=True).astype(float)
+    except Exception:
+        return pd.Series(dtype=float)
+
+
+def _load_strategy_pnl_and_positions(engine_dir: Path) -> tuple[pd.Series, pd.Series]:
+    """Load combined strategy pnl returns and positions from engine output CSVs.
+
+    Returns a tuple of (pnl_returns, positions) as pd.Series. Returns empty
+    Series for each if data is unavailable or columns are missing.
+    """
+    strategy_files = sorted(engine_dir.glob("strategy_returns_*.csv"))
+    if not strategy_files:
+        return pd.Series(dtype=float), pd.Series(dtype=float)
+
+    pnl_frames: List[pd.Series] = []
+    pos_frames: List[pd.Series] = []
+    for path in strategy_files:
+        try:
+            df = pd.read_csv(path)
+        except Exception:
+            continue
+        if df.empty:
+            continue
+        if "pnl" in df.columns:
+            pnl_frames.append(df["pnl"].fillna(0.0).astype(float))
+        if "pos" in df.columns:
+            pos_frames.append(df["pos"].fillna(0.0).astype(float))
+
+    combined_pnl = pd.concat(pnl_frames, ignore_index=True) if pnl_frames else pd.Series(dtype=float)
+    combined_pos = pd.concat(pos_frames, ignore_index=True) if pos_frames else pd.Series(dtype=float)
+    return combined_pnl, combined_pos
 
 
 def main() -> int:
@@ -599,6 +649,33 @@ def main() -> int:
         report_path.write_text("\n".join(lines), encoding="utf-8")
         outputs.append({"path": str(report_path), "rows": len(lines), "start_ts": None, "end_ts": None})
 
+        # --- Benchmark + Exposure Decomposition ---
+        buy_hold_benchmark: object = None
+        btc_beta_decomposition: object = None
+        exposure_summary_result: object = None
+        try:
+            btc_close = _load_btc_close(DATA_ROOT)
+            if btc_close.empty:
+                logging.warning("BTC close data unavailable; skipping buy_hold_benchmark and btc_beta_decomposition")
+            else:
+                buy_hold_benchmark = compute_buy_hold_sharpe(btc_close)
+                btc_returns = btc_close.pct_change(fill_method=None).dropna()
+                strategy_pnl, strategy_pos = _load_strategy_pnl_and_positions(engine_dir)
+                if not strategy_pnl.empty and not btc_returns.empty:
+                    min_len = min(len(strategy_pnl), len(btc_returns))
+                    btc_beta_decomposition = compute_btc_beta(
+                        strategy_returns=strategy_pnl.iloc[:min_len].reset_index(drop=True),
+                        btc_returns=btc_returns.iloc[:min_len].reset_index(drop=True),
+                    )
+                else:
+                    logging.warning("Strategy pnl or BTC returns unavailable; skipping btc_beta_decomposition")
+                if not strategy_pos.empty:
+                    exposure_summary_result = compute_exposure_summary(strategy_pos)
+                else:
+                    logging.warning("Strategy positions unavailable; skipping exposure_summary")
+        except Exception as _bench_exc:
+            logging.warning("Benchmark computation failed (non-fatal): %s", _bench_exc)
+
         summary_json = {
             "run_id": run_id,
             "total_trades": total_trades,
@@ -636,6 +713,9 @@ def main() -> int:
                 "unexpected_strategy_ids": unexpected_strategy_ids,
                 "equity_curve_validated": True,
             },
+            "buy_hold_benchmark": buy_hold_benchmark,
+            "btc_beta_decomposition": btc_beta_decomposition,
+            "exposure_summary": exposure_summary_result,
         }
         summary_path = report_dir / "summary.json"
         summary_path.write_text(json.dumps(summary_json, indent=2, sort_keys=True), encoding="utf-8")
