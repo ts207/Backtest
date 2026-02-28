@@ -79,3 +79,44 @@ def build_time_splits(
     if labels[0] != "train":
         raise ValueError("Split generation failed: missing train window")
     return windows
+
+
+def build_time_splits_with_purge(
+    *,
+    start: str | pd.Timestamp,
+    end: str | pd.Timestamp,
+    train_frac: float = 0.6,
+    validation_frac: float = 0.2,
+    embargo_days: int = 0,
+    purge_bars: int = 0,
+    bar_duration_minutes: int = 5,
+) -> List[SplitWindow]:
+    """
+    Like build_time_splits but trims the tail of each non-test window by purge_bars.
+    Purge removes positions whose exit could overlap the embargo/next-split zone.
+    purge_bars = max(horizon_bars, entry_lag_bars) + max_feature_lookback_bars.
+    """
+    if int(purge_bars) < 0:
+        raise ValueError("purge_bars must be >= 0")
+    windows = build_time_splits(
+        start=start, end=end,
+        train_frac=train_frac, validation_frac=validation_frac,
+        embargo_days=embargo_days,
+    )
+    if int(purge_bars) == 0:
+        return windows
+
+    purge_delta = timedelta(minutes=int(purge_bars) * int(bar_duration_minutes))
+    result: List[SplitWindow] = []
+    for w in windows:
+        if w.label == "test":
+            result.append(w)
+        else:
+            new_end = w.end - purge_delta
+            if new_end < w.start:
+                raise ValueError(
+                    f"purge_bars={purge_bars} with bar_duration_minutes={bar_duration_minutes} "
+                    f"exceeds the {w.label} window length. Reduce purge_bars or extend the window."
+                )
+            result.append(SplitWindow(w.label, w.start, new_end))
+    return result

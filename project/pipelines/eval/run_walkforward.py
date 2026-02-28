@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from eval.splits import build_time_splits
+from eval.splits import build_time_splits, build_time_splits_with_purge
 from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.execution_costs import resolve_execution_costs
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
@@ -786,6 +786,7 @@ def main() -> int:
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
     parser.add_argument("--embargo_days", type=int, default=1)  # B2: default 1, never 0
+    parser.add_argument("--purge_bars", type=int, default=0)
     parser.add_argument("--allow_zero_trigger_coverage", type=int, default=0)
     parser.add_argument("--train_frac", type=float, default=0.6)
     parser.add_argument("--validation_frac", type=float, default=0.2)
@@ -869,12 +870,13 @@ def main() -> int:
     manifest = start_manifest("run_walkforward", args.run_id, params, inputs, outputs)
 
     try:
-        windows = build_time_splits(
+        windows = build_time_splits_with_purge(
             start=args.start,
             end=args.end,
             train_frac=float(args.train_frac),
             validation_frac=float(args.validation_frac),
             embargo_days=int(args.embargo_days),
+            purge_bars=int(args.purge_bars),
         )
         split_labels = [str(window.label) for window in windows]
         if "test" not in split_labels:
