@@ -479,10 +479,10 @@ def main() -> int:
     parser.add_argument("--run_id", required=False)
     parser.add_argument(
         "--symbols",
-        required=True,
+        default="dynamic",
         help=(
             "Comma-separated symbols for a single discovery run_id "
-            "(example: BTCUSDT,ETHUSDT,SOLUSDT)."
+            "or 'dynamic' to auto-resolve from spec/historical_universe.csv."
         ),
     )
     parser.add_argument("--start", required=True)
@@ -707,9 +707,30 @@ def main() -> int:
     _FEATURE_SCHEMA_VERSION = str(args.feature_schema_version).strip().lower()
 
     run_id = args.run_id or _run_id_default()
-    parsed_symbols = _parse_symbols_csv(args.symbols)
+    
+    # Resolve dynamic universe
+    resolved_symbols = str(args.symbols).strip()
+    if resolved_symbols.lower() == "dynamic":
+        seed_path = PROJECT_ROOT.parent / "spec" / "historical_universe.csv"
+        if seed_path.exists():
+            try:
+                import pandas as pd
+                df = pd.read_csv(seed_path)
+                if "symbol" in df.columns:
+                    resolved_symbols = ",".join(df["symbol"].dropna().astype(str).str.strip().tolist())
+                else:
+                    print("Error: historical_universe.csv missing 'symbol' column.", file=sys.stderr)
+                    return 1
+            except Exception as e:
+                print(f"Error reading dynamic universe seed file: {e}", file=sys.stderr)
+                return 1
+        else:
+            print("Error: dynamic set for --symbols, but spec/historical_universe.csv is missing.", file=sys.stderr)
+            return 1
+
+    parsed_symbols = _parse_symbols_csv(resolved_symbols)
     if not parsed_symbols:
-        print("--symbols must include at least one symbol (comma-separated).", file=sys.stderr)
+        print("--symbols must include at least one symbol.", file=sys.stderr)
         return 1
     symbols = ",".join(parsed_symbols)
     start = args.start
