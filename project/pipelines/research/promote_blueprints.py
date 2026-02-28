@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from eval.redundancy import greedy_diversified_subset
 from eval.robustness import simulate_parameter_perturbation
 from eval.selection_bias import probabilistic_sharpe_ratio, deflated_sharpe_ratio
 
@@ -427,6 +428,10 @@ def main() -> int:
         help="Minimum Probabilistic Sharpe Ratio for promotion.")
     parser.add_argument("--min_dsr", type=float, default=0.60,
         help="Minimum Deflated Sharpe Ratio for promotion (corrects for n_trials selection).")
+    parser.add_argument("--max_pnl_correlation", type=float, default=0.70,
+        help="Maximum allowed pairwise PnL correlation between promoted strategies.")
+    parser.add_argument("--max_promoted", type=int, default=20,
+        help="Maximum number of strategies to promote after diversification filter.")
     parser.add_argument("--blueprints_path", default=None)
     parser.add_argument("--out_dir", default=None)
     parser.add_argument("--allow_fallback_evidence", type=int, default=0)
@@ -457,6 +462,8 @@ def main() -> int:
         "min_fragility_pass_rate": float(args.min_fragility_pass_rate),
         "min_psr": float(args.min_psr),
         "min_dsr": float(args.min_dsr),
+        "max_pnl_correlation": float(args.max_pnl_correlation),
+        "max_promoted": int(args.max_promoted),
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
@@ -497,6 +504,7 @@ def main() -> int:
         engine_dir = DATA_ROOT / "runs" / args.run_id / "engine"
         tested_rows: List[Dict[str, object]] = []
         survivors: List[Dict[str, object]] = []
+        removed_by_correlation: List[Dict[str, object]] = []
         evidence_mode_counts = {"walkforward_strategy": 0, "fallback": 0}
 
         for bp in blueprints:
@@ -655,6 +663,37 @@ def main() -> int:
                 promoted_row["promotion"] = tested
                 survivors.append(promoted_row)
 
+        # Post-promotion diversification: remove correlated clones
+        if survivors and (float(args.max_pnl_correlation) < 1.0 or int(args.max_promoted) < len(survivors)):
+            # Build PnL matrix for survivors
+            survivor_ids = [str(s.get("id", "")).strip() for s in survivors]
+            pnl_cols: Dict[str, pd.Series] = {}
+            for sid in survivor_ids:
+                strat_id = f"dsl_interpreter_v1__{_sanitize(sid)}"
+                ret_path = engine_dir / f"strategy_returns_{strat_id}.csv"
+                if ret_path.exists():
+                    try:
+                        ret_frame = pd.read_csv(ret_path)
+                        pnl_cols[sid] = pd.to_numeric(ret_frame.get("pnl"), errors="coerce").fillna(0.0)
+                    except Exception:
+                        pnl_cols[sid] = pd.Series(dtype=float)
+                else:
+                    pnl_cols[sid] = pd.Series(dtype=float)
+
+            if len(pnl_cols) >= 2:
+                pnl_matrix = pd.DataFrame(pnl_cols)
+                diversified_ids = greedy_diversified_subset(
+                    pnl_matrix,
+                    max_corr=float(args.max_pnl_correlation),
+                    max_n=int(args.max_promoted),
+                )
+                diversified_set = set(diversified_ids)
+                kept = [s for s in survivors if str(s.get("id", "")).strip() in diversified_set]
+                removed = [s for s in survivors if str(s.get("id", "")).strip() not in diversified_set]
+                for r in removed:
+                    removed_by_correlation.append({"blueprint_id": str(r.get("id", "")), "reason": "correlation_filter"})
+                survivors = kept
+
         lines = [json.dumps(row, sort_keys=True) for row in survivors]
         promoted_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
@@ -662,6 +701,12 @@ def main() -> int:
             "run_id": args.run_id,
             "tested_count": int(len(tested_rows)),
             "survivors_count": int(len(survivors)),
+            "removed_by_correlation": removed_by_correlation,
+            "correlation_filter": {
+                "max_pnl_correlation": float(args.max_pnl_correlation),
+                "max_promoted": int(args.max_promoted),
+                "removed_count": len(removed_by_correlation),
+            },
             "integrity_checks": {
                 "artifacts_validated": True,
                 "walkforward_strategy_evidence_required": bool(not fallback_enabled),
