@@ -17,6 +17,71 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from pipelines._lib.io_utils import choose_partition_dir, ensure_dir, list_parquet_files, read_parquet, run_scoped_lake_path
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 
+# ---------------------------------------------------------------------------
+# QC severity type alias and check functions
+# ---------------------------------------------------------------------------
+
+QCSeverity = str  # "ok" | "warning" | "critical"
+
+
+def check_return_outliers(
+    close: pd.Series,
+    z_threshold: float = 5.0,
+    critical_count: int = 5,
+) -> Dict[str, object]:
+    """Check for return outliers where |z-score| > z_threshold.
+
+    Returns a dict with keys: outlier_count, severity.
+    """
+    ret = close.pct_change().dropna()
+    if ret.empty:
+        return {"outlier_count": 0, "severity": "ok"}
+    z = (ret - ret.mean()) / (ret.std() + 1e-10)
+    outlier_count = int((z.abs() > z_threshold).sum())
+    severity: QCSeverity = "ok"
+    if outlier_count >= critical_count:
+        severity = "critical"
+    elif outlier_count > 0:
+        severity = "warning"
+    return {"outlier_count": outlier_count, "severity": severity}
+
+
+def check_duplicate_bars(timestamps: pd.Series) -> Dict[str, object]:
+    """Check for duplicate timestamps in a bar series.
+
+    Returns a dict with keys: duplicate_count, severity.
+    """
+    dup_count = int(timestamps.duplicated().sum())
+    severity: QCSeverity = (
+        "ok" if dup_count == 0 else ("critical" if dup_count > 5 else "warning")
+    )
+    return {"duplicate_count": dup_count, "severity": severity}
+
+
+def check_funding_gaps(
+    funding_ts: pd.DatetimeIndex | pd.Series,
+    expected_interval_hours: float = 8,
+) -> Dict[str, object]:
+    """Check for gaps larger than 1.5x the expected funding interval.
+
+    Returns a dict with keys: gap_count, max_gap_hours, severity.
+    """
+    ts = pd.Series(pd.to_datetime(funding_ts, utc=True)).sort_values().dropna().reset_index(drop=True)
+    if len(ts) < 2:
+        return {"gap_count": 0, "max_gap_hours": 0.0, "severity": "ok"}
+    gaps_hours = ts.diff().dropna().dt.total_seconds() / 3600.0
+    large_gaps = int((gaps_hours > expected_interval_hours * 1.5).sum())
+    max_gap = float(gaps_hours.max())
+    severity: QCSeverity = (
+        "ok" if large_gaps == 0 else ("critical" if large_gaps > 3 else "warning")
+    )
+    return {"gap_count": large_gaps, "max_gap_hours": max_gap, "severity": severity}
+
+
+# ---------------------------------------------------------------------------
+# Existing per-dataset quality helper
+# ---------------------------------------------------------------------------
+
 
 def _check_quality(df: pd.DataFrame, name: str) -> Dict[str, object]:
     if df.empty:
@@ -84,8 +149,96 @@ def main() -> int:
         report_path = report_dir / "slice1_data_integrity.json"
         report_path.write_text(json.dumps(stats, indent=2, sort_keys=True), encoding="utf-8")
 
+        # ------------------------------------------------------------------
+        # Formal QC report — written to data/reports/qc/<run_id>/qc_summary.json
+        # Fail-closed on any critical severity (contract #5).
+        # ------------------------------------------------------------------
+        qc_results: Dict[str, object] = {}
+        for symbol, sym_stats in stats["symbols"].items():
+            symbol_qc: Dict[str, object] = {}
+
+            # Return outlier check on perp bars close prices
+            perp_bars_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "bars_1m"
+            perp_bars = read_parquet(list_parquet_files(perp_bars_dir))
+            if not perp_bars.empty and "close" in perp_bars.columns:
+                close_series = pd.to_numeric(perp_bars["close"], errors="coerce").dropna()
+                symbol_qc["return_outliers"] = check_return_outliers(close_series)
+            else:
+                symbol_qc["return_outliers"] = {"outlier_count": 0, "severity": "ok", "note": "no_close_column"}
+
+            # Duplicate bars check on perp bars timestamps
+            if not perp_bars.empty and "timestamp" in perp_bars.columns:
+                ts_series = pd.to_datetime(perp_bars["timestamp"], utc=True)
+                symbol_qc["duplicate_bars"] = check_duplicate_bars(ts_series)
+            else:
+                symbol_qc["duplicate_bars"] = {"duplicate_count": 0, "severity": "ok", "note": "no_timestamp_column"}
+
+            # Missing expected partitions: reuse gap_count from existing quality check
+            perp_q = sym_stats.get("perp_bars_1m", {})
+            symbol_qc["missing_partitions"] = {
+                "gap_count": perp_q.get("gap_count", 0),
+                "is_monotonic": perp_q.get("is_monotonic", True),
+                "severity": (
+                    "critical"
+                    if not perp_q.get("is_monotonic", True)
+                    else ("warning" if perp_q.get("gap_count", 0) > 0 else "ok")
+                ),
+            }
+
+            # Funding gap check
+            funding_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "funding_rate"
+            funding_files = list_parquet_files(funding_dir)
+            if funding_files:
+                funding_df = read_parquet(funding_files)
+                if not funding_df.empty and "timestamp" in funding_df.columns:
+                    funding_ts = pd.to_datetime(funding_df["timestamp"], utc=True)
+                    symbol_qc["funding_gaps"] = check_funding_gaps(funding_ts)
+                else:
+                    symbol_qc["funding_gaps"] = {"gap_count": 0, "max_gap_hours": 0.0, "severity": "ok", "note": "no_funding_data"}
+            else:
+                symbol_qc["funding_gaps"] = {"gap_count": 0, "max_gap_hours": 0.0, "severity": "ok", "note": "no_funding_files"}
+
+            # OI discontinuities: check for large step-changes in open interest
+            oi_dir = DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "oi_1m"
+            oi_files = list_parquet_files(oi_dir)
+            if oi_files:
+                oi_df = read_parquet(oi_files)
+                if not oi_df.empty and "open_interest" in oi_df.columns:
+                    oi_series = pd.to_numeric(oi_df["open_interest"], errors="coerce").dropna()
+                    symbol_qc["oi_discontinuities"] = check_return_outliers(
+                        oi_series, z_threshold=5.0, critical_count=5
+                    )
+                else:
+                    symbol_qc["oi_discontinuities"] = {"outlier_count": 0, "severity": "ok", "note": "no_oi_column"}
+            else:
+                symbol_qc["oi_discontinuities"] = {"outlier_count": 0, "severity": "ok", "note": "no_oi_files"}
+
+            qc_results[symbol] = symbol_qc
+
+        qc_summary = {"run_id": args.run_id, "symbols": qc_results}
+
+        qc_report_dir = DATA_ROOT / "reports" / "qc" / args.run_id
+        ensure_dir(qc_report_dir)
+        qc_summary_path = qc_report_dir / "qc_summary.json"
+        qc_summary_path.write_text(json.dumps(qc_summary, indent=2, sort_keys=True), encoding="utf-8")
+        logging.info("QC summary written to %s", qc_summary_path)
+
+        # Fail-closed: raise SystemExit(1) on any critical severity
+        critical_checks: List[str] = []
+        for symbol, sym_qc in qc_results.items():
+            for check_name, check_result in sym_qc.items():
+                if isinstance(check_result, dict) and check_result.get("severity") == "critical":
+                    critical_checks.append(f"{symbol}.{check_name}")
+
+        if critical_checks:
+            logging.error("Critical QC anomalies detected: %s", critical_checks)
+            finalize_manifest(manifest, "failed", error="critical_qc_anomalies", stats=stats)
+            raise SystemExit(1)
+
         finalize_manifest(manifest, "success", stats=stats)
         return 0
+    except SystemExit:
+        raise
     except Exception as exc:
         logging.exception("QA failed")
         finalize_manifest(manifest, "failed", error=str(exc), stats=stats)
