@@ -97,9 +97,6 @@ def main() -> int:
 
         events["enter_ts"] = events["enter_ts"].astype("int64") // 10**6
         events["exit_ts"] = events["exit_ts"].astype("int64") // 10**6
-        events["phenom_enter_ts"] = events["phenom_enter_ts"].astype("int64") // 10**6
-        events["detected_ts"] = events["detected_ts"].astype("int64") // 10**6
-        events["signal_ts"] = events["signal_ts"].astype("int64") // 10**6
         EventRegistrySchema.validate(events)
 
         paths = write_event_registry_artifacts(

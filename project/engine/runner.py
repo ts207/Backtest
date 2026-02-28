@@ -377,7 +377,13 @@ def _strategy_returns(
     # --- EXECUTION LATENCY PATCH ---
     # Shift positions to simulate execution latency (default 1 bar = next open/close).
     # pos[T] generated at T becomes effective at T+lag.
-    execution_lag = int(params.get("execution_lag_bars", 1)) if isinstance(params, dict) else 1
+    # Execution latency convention:
+    # - For DSL strategies, default to 0 because candidates/blueprints already encode delay via delay_bars.
+    # - For non-DSL strategies, keep the historical default (1 bar) unless overridden.
+    if isinstance(params, dict) and "execution_lag_bars" in params:
+        execution_lag = int(params.get("execution_lag_bars", 0) or 0)
+    else:
+        execution_lag = 0 if str(strategy_name).startswith("dsl_interpreter_v1__") else 1
     if execution_lag > 0:
         # Fill with 0 (flat) for the initial bars where signal is unknown.
         positions = positions.shift(execution_lag).fillna(0).astype(int)

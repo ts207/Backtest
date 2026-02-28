@@ -325,8 +325,6 @@ def main() -> int:
                     / f"month={month_start.month:02d}"
                     / f"bars_{symbol}_5m_{month_start.year}-{month_start.month:02d}.parquet"
                 )
-                # Ensure nanosecond resolution to satisfy pandera schema
-                bars_month["timestamp"] = bars_month["timestamp"].astype("datetime64[ns, UTC]")
 
                 # Enforce Runtime Data Contract
                 Cleaned5mBarsSchema.validate(bars_month)

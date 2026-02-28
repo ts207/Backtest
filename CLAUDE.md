@@ -1,180 +1,53 @@
-# Claude Operating Instructions — Backtest
+# Backtest Assistant Context
 
-Repository type:
-Discovery-first quantitative research platform for crypto systematic trading.
+## Project Summary
+Backtest is an event-driven crypto research pipeline that discovers, filters, and compiles tradable strategy blueprints.
 
-Pipeline:
-ingest → clean → features → context → events → phase2 discovery →
-bridge evaluation → promotion → blueprint → backtest → evaluation
+Primary orchestrator: `project/pipelines/run_all.py`
 
-Claude acts as:
-- quantitative research engineer
-- pipeline debugger
-- statistical auditor
-- minimal-change code contributor
+## Current Pipeline Flow
+1. Ingest market datasets (OHLCV, optional funding/OI/liquidations, optional spot).
+2. Build cleaned 5m bars.
+3. Build `features_v1`.
+4. Build context datasets (`funding_persistence`, `market_state`) and universe snapshots.
+5. Run Phase 1 event analyzers.
+6. Build event registry (`events.parquet`, `event_flags.parquet`).
+7. Run Phase 2 candidate discovery.
+8. Run bridge tradability checks.
+9. Compile strategy blueprints and optional strategy builder artifacts.
+10. Optional backtest, walkforward, promotion, and report stages.
 
-NOT a brainstorming assistant.
+## Integrity Contracts
+- PIT joins use backward `merge_asof` with staleness limits.
+- Event registry emits both `*_event` (impulse) and `*_active` (window) flags.
+- Phase2 enforces `entry_lag_bars >= 1` to prevent same-bar fills.
+- Bridge and walkforward defaults use 1-day embargo.
+- Funding/context pipelines are fail-closed on missing critical coverage.
 
----
+## Operator Commands
 
-# Core Principles (NON-NEGOTIABLE)
+Environment:
+```bash
+export BACKTEST_DATA_ROOT=$(pwd)/data
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+```
 
-## 1. Point-In-Time Correctness (PIT)
-
-No logic may use information unavailable at timestamp t.
-
-Events MUST distinguish:
-
-- phenom_enter_ts  → descriptive phenomenon start
-- signal_ts        → first tradable timestamp
-
-Rules:
-- active flags MUST NOT begin before signal_ts
-- Phase2 joins MUST prefer signal_ts
-- never introduce retroactive signals
-
-If unsure → assume lookahead risk and investigate.
-
----
-
-## 2. Reproducibility First
-
-Experiments must be deterministic.
-
-Never:
-- edit files under `/data`
-- modify generated artifacts
-- silently change outputs
-- introduce randomness without seeds
-
-All research must be reproducible from `run_id`.
-
----
-
-## 3. Minimal Patch Philosophy
-
-Before editing:
-
-1. Trace call graph.
-2. Identify exact failure point.
-3. Modify smallest possible surface.
-
-Avoid:
-- refactors
-- renames
-- architectural changes
-
-unless explicitly requested.
-
----
-
-## 4. Repository Awareness (Read First)
-
-Primary execution entry:
-- project/pipelines/run_all.py
-
-Key systems:
-- project/pipelines/stages/*
-- project/events/registry.py
-- project/pipelines/research/phase2_candidate_discovery.py
-- project/engine/*
-- project/features/*
-
-Assume strong coupling between stages.
-
----
-
-## 5. Trading Realism Over Backtest Performance
-
-Prefer realistic results over higher metrics.
-
-Assume strategies must survive:
-
-- transaction costs
-- funding payments
-- regime shifts
-- out-of-sample evaluation
-- delayed signal execution
-
-Reject optimizations that increase Sharpe but reduce deployability.
-
----
-
-# Required Workflow For Any Change
-
-Claude MUST:
-
-1. Explain reasoning briefly.
-2. List files to change.
-3. Apply minimal patch.
-4. Add/update tests when behavior changes.
-5. Provide verification commands.
-
-Verification template:
-
-make check-hygiene
+Common runs:
+```bash
+make run
+make discover-edges
 make test-fast
-python project/pipelines/run_all.py \
-  --run_id smoke \
-  --symbols BTCUSDT \
-  --start 2024-01-01 \
-  --end 2024-01-10 \
-  --run_phase2_conditional 0 \
-  --run_backtest 1 \
-  --strategies vol_compression_v1 \
-  --cost_bps 6
+./.venv/bin/python project/pipelines/run_all.py --help
+```
 
----
+## Current Canonical Docs
+- `README.md`
+- `docs/GETTING_STARTED.md`
+- `docs/ARCHITECTURE.md`
+- `docs/CONCEPTS.md`
+- `docs/SPEC_FIRST.md`
+- `docs/AUDIT.md`
 
-# Forbidden Actions
-
-Do NOT:
-
-- edit `/data`
-- fabricate datasets
-- invent missing repo features
-- bypass pipeline stages
-- hardcode research outputs
-- introduce forward-looking features
-
----
-
-# Debugging Protocol
-
-When errors occur:
-
-1. Identify failing stage from run manifest.
-2. Trace upstream artifact dependency.
-3. Inspect schema + timestamps.
-4. Propose smallest fix.
-5. Add regression test.
-
-Never guess root causes without code evidence.
-
----
-
-# Research Mode Guidelines
-
-Goal:
-Produce statistically valid tradable strategies.
-
-Claude should prioritize:
-
-- fewer hypotheses
-- stronger statistical validation
-- stable regime performance
-- cost robustness
-- PIT safety
-
-Avoid parameter proliferation.
-
----
-
-# Success Definition
-
-Success is NOT:
-high backtest Sharpe.
-
-Success IS:
-strategy survives promotion, costs, and walk-forward evaluation
-without structural bias.
+Prefer those files for authoritative behavior and contracts.

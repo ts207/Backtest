@@ -85,7 +85,6 @@ def _detect_oi_events_for_symbol(
                     "event_type": event_type,
                     "event_idx": int(idx),
                     "timestamp": pd.to_datetime(df.at[idx, "timestamp"], utc=True).isoformat(),
-                    "detected_ts": pd.to_datetime(df.at[idx, "timestamp"], utc=True).isoformat(),
                     "oi_z": float(oi_z.iloc[idx]) if np.isfinite(oi_z.iloc[idx]) else 0.0,
                     "oi_pct_change": (
                         float(oi_pct_change.iloc[idx]) if np.isfinite(oi_pct_change.iloc[idx]) else 0.0

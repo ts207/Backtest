@@ -697,6 +697,10 @@ class DslInterpreterV1:
         target_price = np.nan
         cooldown_until = -1
 
+        # Conservative default: disable intrabar stop/target exits unless explicitly enabled.
+        # The engine PnL model is close-to-close; intrabar exits require OHLC fill simulation to be realistic.
+        allow_intrabar_exits = bool(params.get("allow_intrabar_exits", False)) if isinstance(params, dict) else False
+
         for idx, row in frame.iterrows():
             ts = row["timestamp"]
             close = _to_float(row.get("close"), default=np.nan)
@@ -751,16 +755,16 @@ class DslInterpreterV1:
                 elif invalidate:
                     should_exit = True
                     reason = "invalidation"
-                elif in_pos > 0 and not np.isnan(low) and low <= stop_price:
+                elif allow_intrabar_exits and in_pos > 0 and not np.isnan(low) and low <= stop_price:
                     should_exit = True
                     reason = "stop"
-                elif in_pos < 0 and not np.isnan(high) and high >= stop_price:
+                elif allow_intrabar_exits and in_pos < 0 and not np.isnan(high) and high >= stop_price:
                     should_exit = True
                     reason = "stop"
-                elif in_pos > 0 and not np.isnan(high) and high >= target_price:
+                elif allow_intrabar_exits and in_pos > 0 and not np.isnan(high) and high >= target_price:
                     should_exit = True
                     reason = "target"
-                elif in_pos < 0 and not np.isnan(low) and low <= target_price:
+                elif allow_intrabar_exits and in_pos < 0 and not np.isnan(low) and low <= target_price:
                     should_exit = True
                     reason = "target"
 
