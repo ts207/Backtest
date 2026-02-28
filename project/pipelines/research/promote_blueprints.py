@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import re
 import sys
@@ -10,6 +11,8 @@ from typing import Dict, List
 
 import numpy as np
 import pandas as pd
+
+LOGGER = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
@@ -665,7 +668,7 @@ def main() -> int:
 
         # Post-promotion diversification: remove correlated clones
         if survivors and (float(args.max_pnl_correlation) < 1.0 or int(args.max_promoted) < len(survivors)):
-            # Build PnL matrix for survivors
+            # Build PnL matrix only for survivors with loadable returns
             survivor_ids = [str(s.get("id", "")).strip() for s in survivors]
             pnl_cols: Dict[str, pd.Series] = {}
             for sid in survivor_ids:
@@ -674,11 +677,12 @@ def main() -> int:
                 if ret_path.exists():
                     try:
                         ret_frame = pd.read_csv(ret_path)
-                        pnl_cols[sid] = pd.to_numeric(ret_frame.get("pnl"), errors="coerce").fillna(0.0)
+                        pnl = pd.to_numeric(ret_frame.get("pnl"), errors="coerce").fillna(0.0)
+                        pnl_cols[sid] = pnl
                     except Exception:
-                        pnl_cols[sid] = pd.Series(dtype=float)
-                else:
-                    pnl_cols[sid] = pd.Series(dtype=float)
+                        LOGGER.warning("Could not load returns for %s during correlation filter, keeping.", sid)
+                        # Strategy kept in survivors — not added to pnl_cols
+                # If ret_path doesn't exist or fails, skip: strategy stays in survivors
 
             if len(pnl_cols) >= 2:
                 pnl_matrix = pd.DataFrame(pnl_cols)
@@ -688,10 +692,15 @@ def main() -> int:
                     max_n=int(args.max_promoted),
                 )
                 diversified_set = set(diversified_ids)
-                kept = [s for s in survivors if str(s.get("id", "")).strip() in diversified_set]
-                removed = [s for s in survivors if str(s.get("id", "")).strip() not in diversified_set]
+                # Strategies not in pnl_cols (missing CSVs) are always kept
+                kept = [s for s in survivors
+                        if str(s.get("id", "")).strip() not in pnl_cols
+                        or str(s.get("id", "")).strip() in diversified_set]
+                removed = [s for s in survivors
+                           if str(s.get("id", "")).strip() in pnl_cols
+                           and str(s.get("id", "")).strip() not in diversified_set]
                 for r in removed:
-                    removed_by_correlation.append({"blueprint_id": str(r.get("id", "")), "reason": "correlation_filter"})
+                    removed_by_correlation.append({"blueprint_id": str(r.get("id", "")), "reason": "correlation_or_cap_filter"})
                 survivors = kept
 
         lines = [json.dumps(row, sort_keys=True) for row in survivors]
@@ -727,6 +736,8 @@ def main() -> int:
                 "min_fragility_pass_rate": float(args.min_fragility_pass_rate),
                 "min_psr": float(args.min_psr),
                 "min_dsr": float(args.min_dsr),
+                "max_pnl_correlation": float(args.max_pnl_correlation),
+                "max_promoted": int(args.max_promoted),
             },
         }
         report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
