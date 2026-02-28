@@ -70,7 +70,7 @@ def compute_funding_pnl_event_aligned(
     Returns:
         Per-bar funding PnL series (positive = beneficial for longs receiving negative funding).
     """
-    aligned_pos = pos.reindex(funding_rate.index).fillna(0.0).astype(float)
+    aligned_pos = pos.fillna(0.0).astype(float)
     prior_pos = aligned_pos.shift(1).fillna(0.0)
 
     rate_aligned = pd.to_numeric(funding_rate.reindex(pos.index), errors="coerce").fillna(0.0)

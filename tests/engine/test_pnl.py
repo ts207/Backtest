@@ -218,6 +218,9 @@ def test_funding_only_applied_at_event_times():
     assert result[idx[12]] != 0.0
     nonzero = result[result != 0.0]
     assert len(nonzero) == 1
+    # The bar prior to 08:00 is the last bar of the "in position" sequence,
+    # prior_pos at 08:00 = 1.0, rate = 0.0001, so funding_pnl = -1.0 * 0.0001 = -0.0001
+    assert result[idx[12]] == pytest.approx(-0.0001)
 
 
 def test_no_funding_when_position_flat_at_event():
@@ -226,6 +229,34 @@ def test_no_funding_when_position_flat_at_event():
     funding_rate = pd.Series(0.0001, index=idx)
     result = compute_funding_pnl_event_aligned(pos, funding_rate, funding_hours=(0, 8, 16))
     assert (result == 0.0).all()
+
+
+def test_compute_pnl_components_event_aligned_funding():
+    """Integration: compute_pnl_components with use_event_aligned_funding=True fires only at event bars."""
+    idx = pd.date_range("2023-01-01 07:00", periods=24, freq="5min", tz="UTC")
+    close = pd.Series(100.0, index=idx)
+    pos = pd.Series(1.0, index=idx)
+    ret = compute_returns(close)
+    funding_rate = pd.Series(0.0001, index=idx)
+
+    result = compute_pnl_components(
+        pos=pos, ret=ret, cost_bps=0.0,
+        funding_rate=funding_rate,
+        use_event_aligned_funding=True,
+    )
+    # Only the 08:00 bar (idx[12]) should have nonzero funding_pnl
+    nonzero_funding = result["funding_pnl"][result["funding_pnl"] != 0.0]
+    assert len(nonzero_funding) == 1
+    assert nonzero_funding.index[0] == idx[12]
+
+    # Same inputs without event alignment should have nonzero funding at all held bars
+    result_smeared = compute_pnl_components(
+        pos=pos, ret=ret, cost_bps=0.0,
+        funding_rate=funding_rate,
+        use_event_aligned_funding=False,
+    )
+    # With constant pos=1.0 and nonzero funding_rate, smeared path has nonzero at most bars
+    assert result_smeared["funding_pnl"].abs().sum() > result["funding_pnl"].abs().sum()
 
 
 # ---------------------------------------------------------------------------
