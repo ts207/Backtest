@@ -78,3 +78,28 @@ def estimate_transaction_cost_bps(
     cost_bps = base_fee_bps + np.where(use_dynamic, dynamic_slippage, base_slippage_bps)
     
     return pd.Series(cost_bps, index=idx).clip(lower=0.0, upper=cap_bps).astype(float)
+
+
+def load_calibration_config(
+    symbol: str,
+    *,
+    calibration_dir,
+    base_config: dict,
+) -> dict:
+    """
+    Merge per-symbol calibration JSON (if present) over base_config.
+    Keys in the calibration file override base_config; absent or None-valued keys
+    are preserved from base. Returns a merged dict safe to pass to
+    estimate_transaction_cost_bps as the config argument.
+    """
+    import json
+    from pathlib import Path
+    path = Path(calibration_dir) / f"{symbol}.json"
+    merged = dict(base_config)
+    if path.exists():
+        try:
+            overrides = json.loads(path.read_text(encoding="utf-8"))
+            merged.update({k: v for k, v in overrides.items() if v is not None})
+        except Exception:
+            pass  # malformed calibration file → use base_config unchanged
+    return merged
