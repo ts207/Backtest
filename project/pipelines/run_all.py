@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -210,12 +211,37 @@ def _apply_run_terminal_audit(run_id: str, manifest: Dict[str, object]) -> None:
     manifest["late_artifact_examples"] = late_examples
 
 
+def _compute_stage_input_hash(script_path: Path, base_args: List[str], run_id: str) -> str:
+    """Hash the stage command + script mtime for cache-hit detection."""
+    try:
+        script_mtime = str(script_path.stat().st_mtime)
+    except OSError:
+        script_mtime = "unknown"
+    payload = f"{script_path}:{script_mtime}:{' '.join(base_args)}:{run_id}"
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
 def _run_stage(stage: str, script_path: Path, base_args: List[str], run_id: str) -> bool:
     runs_dir = DATA_ROOT / "runs" / run_id
     runs_dir.mkdir(parents=True, exist_ok=True)
     stage_instance_id = _CURRENT_STAGE_INSTANCE_ID or _stage_instance_base(stage, base_args)
     log_path = runs_dir / f"{stage_instance_id}.log"
     manifest_path = runs_dir / f"{stage_instance_id}.json"
+
+    # Stage output caching: skip if manifest exists with matching input_hash.
+    # Enable by setting env var BACKTEST_STAGE_CACHE=1.
+    if os.environ.get("BACKTEST_STAGE_CACHE", "0") == "1":
+        input_hash = _compute_stage_input_hash(script_path, base_args, run_id)
+        if manifest_path.exists():
+            try:
+                cached = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if cached.get("input_hash") == input_hash and cached.get("status") == "success":
+                    print(f"[CACHE HIT] {stage} (input_hash={input_hash}) — skipping.")
+                    return True
+            except Exception:
+                pass
+    else:
+        input_hash = None
 
     cmd = [sys.executable, str(script_path)] + base_args
     if _script_supports_log_path(script_path):
@@ -227,6 +253,15 @@ def _run_stage(stage: str, script_path: Path, base_args: List[str], run_id: str)
         env["BACKTEST_PIPELINE_SESSION_ID"] = _CURRENT_PIPELINE_SESSION_ID
     result = subprocess.run(cmd, env=env)
 
+    # Stamp input_hash into stage manifest on success for future cache reads.
+    if input_hash and result.returncode == 0 and manifest_path.exists():
+        try:
+            mdata = json.loads(manifest_path.read_text(encoding="utf-8"))
+            mdata["input_hash"] = input_hash
+            manifest_path.write_text(json.dumps(mdata, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
     allowed_nonzero = {}
     if not _STRICT_RECOMMENDATIONS_CHECKLIST:
         allowed_nonzero["generate_recommendations_checklist"] = {1}
@@ -237,6 +272,43 @@ def _run_stage(stage: str, script_path: Path, base_args: List[str], run_id: str)
         print(f"Stage manifest: {manifest_path}", file=sys.stderr)
         return False
     return True
+
+
+def _run_stages_parallel(
+    stages: List[Tuple[str, Path, List[str]]],
+    run_id: str,
+    max_workers: int,
+    *,
+    continue_on_failure: bool = False,
+) -> Tuple[bool, List[Tuple[str, float]]]:
+    """Run a batch of independent stages in parallel using subprocess workers.
+
+    Returns (all_ok, [(stage_name, elapsed_sec), ...]) in completion order.
+    """
+    timings: List[Tuple[str, float]] = []
+    all_ok = True
+    effective_workers = max(1, min(max_workers, len(stages)))
+
+    def _worker(args: Tuple[str, Path, List[str]]) -> Tuple[str, bool, float]:
+        stage_name, script, base_args = args
+        t0 = time.perf_counter()
+        ok = _run_stage(stage_name, script, base_args, run_id)
+        return stage_name, ok, time.perf_counter() - t0
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as pool:
+        futures = {pool.submit(_worker, s): s[0] for s in stages}
+        for fut in concurrent.futures.as_completed(futures):
+            stage_name, ok, elapsed = fut.result()
+            timings.append((stage_name, elapsed))
+            if not ok:
+                all_ok = False
+                if not continue_on_failure:
+                    # Cancel remaining — they will still be waited on but won't start
+                    for remaining in futures:
+                        remaining.cancel()
+                    break
+    return all_ok, timings
+
 
 
 def _checklist_json_path(run_id: str) -> Path:
@@ -549,6 +621,12 @@ def main() -> int:
     parser.add_argument("--bridge_validation_frac", type=float, default=0.2)
     parser.add_argument("--bridge_embargo_days", type=int, default=1)
     parser.add_argument("--run_discovery_quality_summary", type=int, default=1)
+    parser.add_argument(
+        "--max_analyzer_workers",
+        type=int,
+        default=min(os.cpu_count() or 1, 8),
+        help="Max parallel workers for Phase 1 event analyzer stages. Set to 1 for sequential (default auto).",
+    )
 
     parser.add_argument("--run_edge_candidate_universe", type=int, default=0)
     parser.add_argument("--run_naive_entry_eval", type=int, default=1)
@@ -991,6 +1069,66 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
+
+        # --- Parallel analyzer batch execution ---
+        # Event analyzer stages (build_event_registry_*, phase1_analyze_*) are
+        # independent across event types and can safely run concurrently.
+        # Group consecutive analyzer stages and dispatch them as one parallel batch,
+        # then resume sequential execution for the remaining stages.
+        max_workers = int(getattr(args, "max_analyzer_workers", 1))
+        is_analyzer = lambda s: (  # noqa: E731
+            s.startswith("build_event_registry_")
+            or s.startswith("phase1_analyze_")
+        )
+        if max_workers > 1 and is_analyzer(stage):
+            # Accumulate this and all following consecutive analyzer stages into a batch.
+            batch = [(stage, script, base_args)]
+            batch_instances = [stage_instance]
+            # Peek ahead to collect the full consecutive batch
+            lookahead = idx  # current idx is already 1-based
+            remaining_stages_iter = list(zip(stages[lookahead:], planned_stage_instances[lookahead:]))
+            for (lk_stage, lk_script, lk_base_args), lk_instance in remaining_stages_iter:
+                if is_analyzer(lk_stage):
+                    batch.append((lk_stage, lk_script, lk_base_args))
+                    batch_instances.append(lk_instance)
+                else:
+                    break
+            # Advance the outer loop by consuming these from the iterator — we
+            # reconstruct stages/instances slices so next iteration sees correct idx.
+            # Since the for-loop is over enumerate(zip(stages, planned_stage_instances))
+            # we cannot easily skip ahead; instead we place a sentinel. 
+            # Simplest approach: run the batch now and let subsequent iterations
+            # skip stages already completed (tracked in _completed_parallel set).
+            if not hasattr(_run_stages_parallel, "_completed"):
+                _run_stages_parallel._completed = set()  # type: ignore[attr-defined]
+            if stage in getattr(_run_stages_parallel, "_completed", set()):
+                continue  # already handled in a prior batch
+
+            batch_start = time.perf_counter()
+            print(
+                f"[PARALLEL] Dispatching {len(batch)} analyzer stages with {max_workers} workers: "
+                + ", ".join(s for s, _, __ in batch)
+            )
+            par_ok, par_timings = _run_stages_parallel(batch, run_id, max_workers)
+            for s_name, s_elapsed in par_timings:
+                stage_timings.append((s_name, s_elapsed))
+                stage_instance_timings.append((s_name, s_elapsed))
+                getattr(_run_stages_parallel, "_completed", set()).add(s_name)
+            print(
+                f"[PARALLEL] Batch done in {time.perf_counter()-batch_start:.1f}s "
+                f"({'OK' if par_ok else 'FAILED'})"
+            )
+            if not par_ok:
+                run_manifest["finished_at"] = _utc_now_iso()
+                run_manifest["ended_at"] = run_manifest["finished_at"]
+                run_manifest["status"] = "failed"
+                run_manifest["failed_stage"] = "parallel_analyzer_batch"
+                run_manifest["stage_timings_sec"] = _build_timing_map(stage_timings)
+                run_manifest["stage_instance_timings_sec"] = _build_timing_map(stage_instance_timings)
+                _apply_run_terminal_audit(run_id, run_manifest)
+                _write_run_manifest(run_id, run_manifest)
+                return 1
+            continue
 
         elapsed_pipeline_before = time.perf_counter() - pipeline_started
         print(

@@ -874,7 +874,10 @@ def _apply_hierarchical_shrinkage(
     p_shrunk = out["p_value_raw"].astype(float).copy()
     t_shrunk = pd.Series(0.0, index=out.index, dtype=float)
     t_shrunk.loc[valid_se] = out.loc[valid_se, "effect_shrunk_state"] / se.loc[valid_se]
-    p_shrunk.loc[valid_se] = t_shrunk.loc[valid_se].apply(_two_sided_p_from_t)
+    # Vectorized: use scipy.stats.t.sf directly instead of row-by-row .apply
+    from scipy.stats import t as _scipy_t
+    _df_vals = (out.loc[valid_se, "_n"] - 1.0).clip(lower=1.0)
+    p_shrunk.loc[valid_se] = (2.0 * _scipy_t.sf(t_shrunk.loc[valid_se].abs(), df=_df_vals)).clip(0.0, 1.0)
     out["p_value_shrunk"] = pd.to_numeric(p_shrunk, errors="coerce").fillna(out["p_value_raw"]).clip(0.0, 1.0)
     out["p_value_for_fdr"] = out["p_value_shrunk"]
 
@@ -981,39 +984,48 @@ def _refresh_phase2_metrics_after_shrinkage(
         + out["gate_state_information"].astype(float)
     ) / 4.0
     out["phase2_quality_score"] = out["robustness_score"]
-    out["phase2_quality_components"] = out.apply(
-        lambda r: json.dumps(
-            {
-                "econ": int(bool(r["gate_economic"])),
-                "econ_cons": int(bool(r["gate_economic_conservative"])),
-                "stability": int(bool(r["gate_stability"])),
-                "state_info": int(bool(r["gate_state_information"])),
-            },
-            sort_keys=True,
-        ),
-        axis=1,
+    # Vectorized: build JSON string via string concat (avoids row-by-row apply)
+    out["phase2_quality_components"] = (
+        '{"econ":' + out["gate_economic"].astype(int).astype(str)
+        + ',"econ_cons":' + out["gate_economic_conservative"].astype(int).astype(str)
+        + ',"stability":' + out["gate_stability"].astype(int).astype(str)
+        + ',"state_info":' + out["gate_state_information"].astype(int).astype(str) + '}'
     )
     out["compile_eligible_phase2_fallback"] = (
         (out["phase2_quality_score"] >= float(quality_floor_fallback))
         & (out["n_events"] >= int(min_events_fallback))
     )
 
-    def _refresh_fail_reasons(row: pd.Series) -> str:
-        prior = [s.strip() for s in str(row.get("fail_reasons", "")).split(",") if s.strip()]
-        keep = [s for s in prior if not s.startswith(known_gate_prefixes)]
-        if not bool(row.get("gate_economic", False)):
-            keep.append("ECONOMIC_GATE")
-        if not bool(row.get("gate_economic_conservative", False)):
-            keep.append("ECONOMIC_CONSERVATIVE")
-        if require_sign_stability and not bool(row.get("gate_stability", False)):
-            keep.append("STABILITY_GATE")
-        if int(min_sample_size_gate) > 0 and int(row.get("sample_size", 0)) < int(min_sample_size_gate):
-            keep.append("MIN_SAMPLE_SIZE_GATE")
-        if not bool(row.get("gate_state_information", True)):
-            keep.append("STATE_INFORMATION_WEIGHT")
-        return ",".join(dict.fromkeys(keep))
+    # Vectorized fail_reasons: strip managed gate tokens, then OR-in new failures.
+    # Strip known managed prefixes from any pre-existing fail_reasons strings.
+    _prior = out.get("fail_reasons", pd.Series("", index=out.index)).fillna("").astype(str)
 
-    out["fail_reasons"] = out.apply(_refresh_fail_reasons, axis=1)
+    def _strip_managed(s: str) -> str:
+        kept = [t.strip() for t in s.split(",") if t.strip() and not t.strip().startswith(known_gate_prefixes)]
+        return ",".join(dict.fromkeys(kept))
+
+    _prior_stripped = _prior.map(_strip_managed)
+
+    # Build one boolean column per managed gate failure
+    _gate_flags: dict[str, pd.Series] = {
+        "ECONOMIC_GATE": ~out["gate_economic"].astype(bool),
+        "ECONOMIC_CONSERVATIVE": ~out["gate_economic_conservative"].astype(bool),
+        "MIN_SAMPLE_SIZE_GATE": (out["sample_size"] < int(min_sample_size_gate)) if int(min_sample_size_gate) > 0 else pd.Series(False, index=out.index),
+        "STATE_INFORMATION_WEIGHT": ~out["gate_state_information"].astype(bool),
+    }
+    if require_sign_stability:
+        _gate_flags["STABILITY_GATE"] = ~out["gate_stability"].astype(bool)
+
+    _gate_df = pd.DataFrame(_gate_flags, index=out.index)
+    _new_reasons = _gate_df.apply(
+        lambda row: ",".join(col for col in _gate_df.columns if row[col]), axis=1
+    )
+    # Merge prior (non-managed) tokens with new gate tokens
+    out["fail_reasons"] = (
+        _prior_stripped.str.cat(_new_reasons.str.strip(","), sep=",", na_rep="")
+        .str.strip(",")
+        .str.replace(r",+", ",", regex=True)
+    )
     out["promotion_track"] = np.where(out["gate_phase2_final"], "standard", "fallback_only")
     return out
 
@@ -1995,22 +2007,31 @@ def _load_previous_lambda_maps(
             return None
         return v
 
-    for _, row in df.iterrows():
-        level = str(row.get("level", "")).strip().lower()
-        lam = _safe_float(row.get("lambda_value"))
-        if lam is None or level not in out:
+    # Vectorized: process each level as a filtered DataFrame slice
+    for _level, _key_cols in [
+        ("family", ["template_verb", "horizon"]),
+        ("event",  ["template_verb", "horizon", "canonical_family"]),
+        ("state",  ["template_verb", "horizon", "canonical_family", "canonical_event_type"]),
+    ]:
+        _sub = df[df["level"].astype(str).str.strip().str.lower() == _level].copy()
+        if _sub.empty:
             continue
-        verb = str(row.get("template_verb", "")).strip()
-        horizon = str(row.get("horizon", "")).strip()
-        family = str(row.get("canonical_family", "")).strip().upper()
-        event = str(row.get("canonical_event_type", "")).strip().upper()
-        if level == "family":
-            key = (verb, horizon)
-        elif level == "event":
-            key = (verb, horizon, family)
-        else:
-            key = (verb, horizon, family, event)
-        out[level][key] = lam
+        _sub["_lam"] = pd.to_numeric(_sub["lambda_value"], errors="coerce")
+        _sub = _sub.dropna(subset=["_lam"])
+        _sub = _sub[_sub["_lam"] > 0.0]
+        if _sub.empty:
+            continue
+        _present = [c for c in _key_cols if c in _sub.columns]
+        if not _present:
+            continue
+        # Normalise string columns
+        for _c in _present:
+            _sub[_c] = _sub[_c].fillna("").astype(str).str.strip()
+            if _c in ("canonical_family", "canonical_event_type"):
+                _sub[_c] = _sub[_c].str.upper()
+        for _rec in _sub[[*_present, "_lam"]].itertuples(index=False):
+            _key = tuple(getattr(_rec, c) for c in _present)
+            out[_level][_key] = float(_rec._lam)
     return out, source
 
 
@@ -2028,51 +2049,55 @@ def _build_lambda_snapshot(fdr_df: pd.DataFrame) -> pd.DataFrame:
             ]
         )
 
-    rows: List[Dict[str, Any]] = []
+    # Vectorized: build each level as a DataFrame slice then pd.concat
+    level_frames: List[pd.DataFrame] = []
 
     fam_cols = ["template_verb", "horizon", "lambda_family", "lambda_family_status"]
-    for _, r in fdr_df[[c for c in fam_cols if c in fdr_df.columns]].drop_duplicates().iterrows():
-        rows.append(
-            {
-                "level": "family",
-                "template_verb": str(r.get("template_verb", "")),
-                "horizon": str(r.get("horizon", "")),
-                "canonical_family": "",
-                "canonical_event_type": "",
-                "lambda_value": float(pd.to_numeric(r.get("lambda_family", 0.0), errors="coerce") or 0.0),
-                "lambda_status": str(r.get("lambda_family_status", "")),
-            }
-        )
+    _fam = fdr_df[[c for c in fam_cols if c in fdr_df.columns]].drop_duplicates().copy()
+    if not _fam.empty:
+        _fam_out = pd.DataFrame({
+            "level": "family",
+            "template_verb": _fam.get("template_verb", "").fillna("").astype(str),
+            "horizon": _fam.get("horizon", "").fillna("").astype(str),
+            "canonical_family": "",
+            "canonical_event_type": "",
+            "lambda_value": pd.to_numeric(_fam.get("lambda_family", 0.0), errors="coerce").fillna(0.0),
+            "lambda_status": _fam.get("lambda_family_status", "").fillna("").astype(str),
+        })
+        level_frames.append(_fam_out)
 
     evt_cols = ["template_verb", "horizon", "canonical_family", "lambda_event", "lambda_event_status"]
-    for _, r in fdr_df[[c for c in evt_cols if c in fdr_df.columns]].drop_duplicates().iterrows():
-        rows.append(
-            {
-                "level": "event",
-                "template_verb": str(r.get("template_verb", "")),
-                "horizon": str(r.get("horizon", "")),
-                "canonical_family": str(r.get("canonical_family", "")).upper(),
-                "canonical_event_type": "",
-                "lambda_value": float(pd.to_numeric(r.get("lambda_event", 0.0), errors="coerce") or 0.0),
-                "lambda_status": str(r.get("lambda_event_status", "")),
-            }
-        )
+    _evt = fdr_df[[c for c in evt_cols if c in fdr_df.columns]].drop_duplicates().copy()
+    if not _evt.empty:
+        _evt_out = pd.DataFrame({
+            "level": "event",
+            "template_verb": _evt.get("template_verb", "").fillna("").astype(str),
+            "horizon": _evt.get("horizon", "").fillna("").astype(str),
+            "canonical_family": _evt.get("canonical_family", "").fillna("").astype(str).str.upper(),
+            "canonical_event_type": "",
+            "lambda_value": pd.to_numeric(_evt.get("lambda_event", 0.0), errors="coerce").fillna(0.0),
+            "lambda_status": _evt.get("lambda_event_status", "").fillna("").astype(str),
+        })
+        level_frames.append(_evt_out)
 
-    st_cols = ["template_verb", "horizon", "canonical_family", "canonical_event_type", "lambda_state", "lambda_state_status"]
-    for _, r in fdr_df[[c for c in st_cols if c in fdr_df.columns]].drop_duplicates().iterrows():
-        rows.append(
-            {
-                "level": "state",
-                "template_verb": str(r.get("template_verb", "")),
-                "horizon": str(r.get("horizon", "")),
-                "canonical_family": str(r.get("canonical_family", "")).upper(),
-                "canonical_event_type": str(r.get("canonical_event_type", "")).upper(),
-                "lambda_value": float(pd.to_numeric(r.get("lambda_state", 0.0), errors="coerce") or 0.0),
-                "lambda_status": str(r.get("lambda_state_status", "")),
-            }
-        )
+    _st = fdr_df[[c for c in st_cols if c in fdr_df.columns]].drop_duplicates().copy()
+    if not _st.empty:
+        _st_out = pd.DataFrame({
+            "level": "state",
+            "template_verb": _st.get("template_verb", "").fillna("").astype(str),
+            "horizon": _st.get("horizon", "").fillna("").astype(str),
+            "canonical_family": _st.get("canonical_family", "").fillna("").astype(str).str.upper(),
+            "canonical_event_type": _st.get("canonical_event_type", "").fillna("").astype(str).str.upper(),
+            "lambda_value": pd.to_numeric(_st.get("lambda_state", 0.0), errors="coerce").fillna(0.0),
+            "lambda_status": _st.get("lambda_state_status", "").fillna("").astype(str),
+        })
+        level_frames.append(_st_out)
 
-    return pd.DataFrame(rows)
+    if not level_frames:
+        return pd.DataFrame(columns=["level", "template_verb", "horizon",
+                                     "canonical_family", "canonical_event_type",
+                                     "lambda_value", "lambda_status"])
+    return pd.concat(level_frames, ignore_index=True)
 
 
 def _populate_fail_reasons(df: pd.DataFrame) -> pd.DataFrame:
