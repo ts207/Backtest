@@ -53,12 +53,47 @@ def compute_returns_next_open(
     return blended
 
 
+def compute_funding_pnl_event_aligned(
+    pos: pd.Series,
+    funding_rate: pd.Series,
+    funding_hours: tuple[int, ...] = (0, 8, 16),
+) -> pd.Series:
+    """
+    Apply funding only on bars whose timestamp falls on a funding event hour (0, 8, 16 UTC).
+    Position is the prior-bar position (signal held going into the event timestamp).
+
+    Args:
+        pos: Position series (float, signed) indexed by UTC timestamp.
+        funding_rate: Per-event funding rate series aligned to the same index.
+        funding_hours: UTC hours at which funding is charged.
+
+    Returns:
+        Per-bar funding PnL series (positive = beneficial for longs receiving negative funding).
+    """
+    aligned_pos = pos.reindex(funding_rate.index).fillna(0.0).astype(float)
+    prior_pos = aligned_pos.shift(1).fillna(0.0)
+
+    rate_aligned = pd.to_numeric(funding_rate.reindex(pos.index), errors="coerce").fillna(0.0)
+
+    is_funding_bar = pd.Series(False, index=pos.index)
+    if hasattr(pos.index, "hour"):
+        is_funding_bar = pd.Series(
+            pos.index.hour.isin(funding_hours) & (pos.index.minute == 0),
+            index=pos.index,
+        )
+
+    # Longs pay positive funding; shorts receive it.
+    raw_funding = -prior_pos * rate_aligned
+    return raw_funding.where(is_funding_bar, 0.0)
+
+
 def compute_pnl_components(
     pos: pd.Series,
     ret: pd.Series,
     cost_bps: float | pd.Series,
     funding_rate: pd.Series | None = None,
     borrow_rate: pd.Series | None = None,
+    use_event_aligned_funding: bool = False,
 ) -> pd.DataFrame:
     """
     Compute per-bar PnL components with next-bar returns and turnover costs.
@@ -93,7 +128,13 @@ def compute_pnl_components(
         borrow_rate_aligned = pd.to_numeric(borrow_rate.reindex(ret.index), errors="coerce").fillna(0.0).astype(float)
 
     # Longs pay positive funding, shorts receive positive funding.
-    funding_pnl = -prior_pos * funding_rate_aligned
+    if use_event_aligned_funding and funding_rate is not None:
+        funding_pnl = compute_funding_pnl_event_aligned(
+            pos=pos.reindex(ret.index).fillna(0.0).astype(float),
+            funding_rate=funding_rate_aligned,
+        )
+    else:
+        funding_pnl = -prior_pos * funding_rate_aligned
     # Borrow cost only applies to short exposure magnitude.
     borrow_cost = prior_pos.clip(upper=0.0).abs() * borrow_rate_aligned
 

@@ -20,6 +20,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2] / "project"
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from engine.pnl import (
+    compute_funding_pnl_event_aligned,
     compute_pnl,
     compute_pnl_components,
     compute_returns,
@@ -196,6 +197,35 @@ class TestComputePnlComponents:
         fp = result["funding_pnl"].iloc[2]
         bc = result["borrow_cost"].iloc[2]
         assert result["pnl"].iloc[2] == pytest.approx(gross - cost + fp - bc)
+
+
+# ---------------------------------------------------------------------------
+# compute_funding_pnl_event_aligned
+# ---------------------------------------------------------------------------
+
+def _make_5m_index(start: str, periods: int) -> pd.DatetimeIndex:
+    return pd.date_range(start, periods=periods, freq="5min", tz="UTC")
+
+
+def test_funding_only_applied_at_event_times():
+    """Position held for 24 bars (2 hours). Only one funding event at 08:00 should fire."""
+    idx = _make_5m_index("2023-01-01 07:00", 24)
+    pos = pd.Series(1.0, index=idx)
+    funding_rate = pd.Series(0.0001, index=idx)  # 0.01% per event
+
+    result = compute_funding_pnl_event_aligned(pos, funding_rate, funding_hours=(0, 8, 16))
+    # Bar at 08:00 is idx[12]. Only that bar should have nonzero funding.
+    assert result[idx[12]] != 0.0
+    nonzero = result[result != 0.0]
+    assert len(nonzero) == 1
+
+
+def test_no_funding_when_position_flat_at_event():
+    idx = _make_5m_index("2023-01-01 07:00", 24)
+    pos = pd.Series(0.0, index=idx)
+    funding_rate = pd.Series(0.0001, index=idx)
+    result = compute_funding_pnl_event_aligned(pos, funding_rate, funding_hours=(0, 8, 16))
+    assert (result == 0.0).all()
 
 
 # ---------------------------------------------------------------------------
