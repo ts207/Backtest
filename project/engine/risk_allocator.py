@@ -15,6 +15,7 @@ class RiskLimits:
     max_new_exposure_per_bar: float = 1.0
     target_annual_vol: float | None = None
     max_drawdown_limit: float | None = None
+    max_correlated_gross: float | None = None  # cap on same-direction gross across all strategies
 
 
 def _as_float_series(series: pd.Series) -> pd.Series:
@@ -26,6 +27,8 @@ def allocate_position_scales(
     requested_scale_by_strategy: Dict[str, pd.Series],
     limits: RiskLimits,
     portfolio_pnl_series: pd.Series | None = None,
+    regime_series: pd.Series | None = None,
+    regime_scale_map: Dict[str, float] | None = None,
 ) -> Tuple[Dict[str, pd.Series], Dict[str, float]]:
     """
     Deterministically allocate per-bar scales under strategy/symbol/portfolio caps.
@@ -71,6 +74,31 @@ def allocate_position_scales(
     symbol_ratio_series = pd.Series(symbol_ratio, index=aligned_index).replace([np.inf, -np.inf], np.nan).fillna(1.0).clip(lower=0.0, upper=1.0)
     for key in ordered:
         allocated[key] = allocated[key] * symbol_ratio_series
+
+    # Correlated gross cap: if all strategies are pointing the same direction
+    # (all long or all short), limit the combined same-direction exposure.
+    if limits.max_correlated_gross is not None:
+        corr_cap = float(max(0.0, limits.max_correlated_gross))
+        net_direction = sum(s for s in allocated.values())  # positive = net long, negative = net short
+        same_dir_gross = sum(s.abs() for s in allocated.values())
+        # Only clip when all strategies are directionally concordant (net == gross)
+        fully_concordant = (net_direction.abs() - same_dir_gross).abs() < 1e-9
+        corr_ratio = pd.Series(1.0, index=aligned_index)
+        needs_clip = fully_concordant & (same_dir_gross > corr_cap)
+        safe_gross = same_dir_gross.replace(0.0, np.nan)
+        corr_ratio = np.where(needs_clip, corr_cap / safe_gross, 1.0)
+        corr_ratio_series = pd.Series(corr_ratio, index=aligned_index).replace([np.inf, -np.inf], np.nan).fillna(1.0).clip(lower=0.0, upper=1.0)
+        for key in ordered:
+            allocated[key] = allocated[key] * corr_ratio_series
+
+    # Regime-conditional sizing: scale positions down per-bar according to the
+    # active market regime. regime_scale_map maps regime labels to scale factors
+    # (e.g. {"HIGH_VOL": 0.6, "CHOP": 0.5}). Bars with unknown regimes default to 1.0.
+    if regime_series is not None and regime_scale_map:
+        regime_aligned = regime_series.reindex(aligned_index).astype(str)
+        regime_scale_vals = regime_aligned.map(regime_scale_map).fillna(1.0).clip(lower=0.0, upper=1.0)
+        for key in ordered:
+            allocated[key] = allocated[key] * regime_scale_vals
 
     vol_scale_series = pd.Series(1.0, index=aligned_index)
     if limits.target_annual_vol is not None and portfolio_pnl_series is not None:

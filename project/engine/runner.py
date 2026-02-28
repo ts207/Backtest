@@ -11,7 +11,7 @@ import numpy as np
 
 import pandas as pd
 
-from engine.pnl import compute_pnl_components, compute_returns
+from engine.pnl import compute_pnl_components, compute_returns, compute_returns_next_open
 from engine.execution_model import estimate_transaction_cost_bps
 from events.registry import load_registry_flags, build_event_feature_frame
 from engine.risk_allocator import RiskLimits, allocate_position_scales
@@ -185,24 +185,28 @@ def _merge_event_flags(features: pd.DataFrame, event_flags: pd.DataFrame | None)
     return merged
 
 
-def _merge_event_features(features: pd.DataFrame, event_features: pd.DataFrame | None) -> pd.DataFrame:
+def _merge_event_features(
+    features: pd.DataFrame,
+    event_features: pd.DataFrame | None,
+    ffill_limit: int = 12,
+) -> pd.DataFrame:
     if event_features is None or event_features.empty:
         return features
     out = features.copy()
     ef = event_features.copy()
     ef["timestamp"] = pd.to_datetime(ef["timestamp"], utc=True, errors="coerce")
     ef = ef.dropna(subset=["timestamp"]).drop_duplicates(subset=["timestamp"], keep="last")
-    
+
     # Merge event-specific features (e.g., stress_score, severity)
     merged = out.merge(ef, on="timestamp", how="left")
-    
-    # Forward-fill event features for a small window (e.g. 12 bars) to allow
-    # DSL strategies with decision lag to still see the event magnitude.
-    # TODO(research): Consider making this limit configurable via strategy params.
+
+    # Forward-fill event features up to ffill_limit bars so DSL strategies with
+    # a decision lag still see the event magnitude. Configurable via strategy
+    # param "event_feature_ffill_bars" (default 12, 0 = no ffill).
     event_cols = [c for c in ef.columns if c != "timestamp"]
-    if event_cols:
-        merged[event_cols] = merged[event_cols].ffill(limit=12)
-        
+    if event_cols and ffill_limit > 0:
+        merged[event_cols] = merged[event_cols].ffill(limit=ffill_limit)
+
     return merged
 
 
@@ -338,7 +342,10 @@ def _load_symbol_data(
             ef = ef[ef["timestamp"] >= start_ts].copy()
         if end_ts is not None and not ef.empty and "timestamp" in ef.columns:
             ef = ef[ef["timestamp"] <= end_ts].copy()
-        features = _merge_event_features(features, ef)
+        features = _merge_event_features(
+            features, ef,
+            ffill_limit=int(params.get("event_feature_ffill_bars", 12)) if isinstance(params, dict) else 12,
+        )
         
     return bars, features
 
@@ -427,7 +434,12 @@ def _strategy_returns(
     close = bars_indexed["close"].astype(float)
     high = bars_indexed["high"].astype(float)
     low = bars_indexed["low"].astype(float)
-    ret = compute_returns(close)
+    _exec_mode = str(execution_cfg.get("exec_mode", "close")).strip().lower()
+    if _exec_mode == "next_open" and "open" in bars_indexed.columns:
+        open_ = bars_indexed["open"].astype(float)
+        ret = compute_returns_next_open(close, open_, positions)
+    else:
+        ret = compute_returns(close)
     nan_ret_mask = ret.isna()
     forced_flat_bars = int((nan_ret_mask & (positions != 0)).sum())
     positions = positions.mask(nan_ret_mask, 0).astype(int)
@@ -595,6 +607,7 @@ def _apply_allocator_to_strategy_frames(
     alloc_cfg = dict(params.get("risk_allocator", {})) if isinstance(params.get("risk_allocator", {}), dict) else {}
     target_vol_val = alloc_cfg.get("target_annual_vol")
     max_dd_val = alloc_cfg.get("max_drawdown_limit")
+    max_corr_val = alloc_cfg.get("max_correlated_gross")
     limits = RiskLimits(
         max_portfolio_gross=float(alloc_cfg.get("max_portfolio_gross", 1.0)),
         max_symbol_gross=float(alloc_cfg.get("max_symbol_gross", 1.0)),
@@ -602,6 +615,7 @@ def _apply_allocator_to_strategy_frames(
         max_new_exposure_per_bar=float(alloc_cfg.get("max_new_exposure_per_bar", 1.0)),
         target_annual_vol=float(target_vol_val) if target_vol_val is not None else None,
         max_drawdown_limit=float(max_dd_val) if max_dd_val is not None else None,
+        max_correlated_gross=float(max_corr_val) if max_corr_val is not None else None,
     )
     if any(v <= 0.0 for v in [limits.max_portfolio_gross, limits.max_symbol_gross, limits.max_strategy_gross, limits.max_new_exposure_per_bar]):
         return strategy_frames, {"requested_gross": 0.0, "allocated_gross": 0.0, "clipped_fraction": 0.0}
@@ -641,11 +655,23 @@ def _apply_allocator_to_strategy_frames(
             req_scale_by_strategy[strategy_name] = pd.Series(requested.values, index=idx, dtype=float)
         if not pos_by_strategy:
             continue
+        # Build regime series for this symbol over the aligned index
+        regime_series_sym: pd.Series | None = None
+        regime_scale_map_cfg = dict(alloc_cfg.get("regime_scale_map", {})) if isinstance(alloc_cfg.get("regime_scale_map", {}), dict) else {}
+        if regime_scale_map_cfg and pos_by_strategy:
+            # Use vol_regime from any strategy frame for this symbol
+            sym_frame = next((out[k] for k in sorted(out) if not out[k].empty and "symbol" in out[k].columns and (out[k]["symbol"].astype(str) == symbol).any()), None)
+            if sym_frame is not None and "vol_regime" in sym_frame.columns:
+                sub = sym_frame[sym_frame["symbol"].astype(str) == symbol].sort_values("timestamp")
+                idx = pd.DatetimeIndex(pd.to_datetime(sub["timestamp"], utc=True))
+                regime_series_sym = pd.Series(sub["vol_regime"].fillna("UNKNOWN").values, index=idx, dtype=str)
         alloc_scales, diag = allocate_position_scales(
             raw_positions_by_strategy=pos_by_strategy,
             requested_scale_by_strategy=req_scale_by_strategy,
             limits=limits,
             portfolio_pnl_series=global_pnl_series,
+            regime_series=regime_series_sym,
+            regime_scale_map=regime_scale_map_cfg or None,
         )
         agg_diag["requested_gross"] += float(diag.get("requested_gross", 0.0))
         agg_diag["allocated_gross"] += float(diag.get("allocated_gross", 0.0))

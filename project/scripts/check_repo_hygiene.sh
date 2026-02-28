@@ -46,13 +46,21 @@ done
 
 rm -f /tmp/hygiene_blocked.txt "$present_tracked"
 
-echo "[hygiene] checking sidecar metadata files..."
-if find . -type f \( -name '*:Zone.Identifier' -o -name '*#Uf03aZone.Identifier' -o -name '*#Uf03aZone.Identifier:Zone.Identifier' \) | sed 's#^\./##' | tee /tmp/hygiene_sidecars.txt | rg -q '.'; then
-  echo "[hygiene] sidecar metadata files detected"
+echo "[hygiene] checking Zone.Identifier sidecar files..."
+zone_files="$(find . \
+  -not -path './.git/*' \
+  -not -path './.venv/*' \
+  -type f \( \
+    -name '*:Zone.Identifier' \
+    -o -name '*#Uf03aZone.Identifier' \
+    -o -name '*#Uf03aZone.Identifier:Zone.Identifier' \
+  \) | sed 's#^\./##' | sort)"
+if [[ -n "$zone_files" ]]; then
+  echo "[hygiene] Zone.Identifier sidecar files detected ($(echo "$zone_files" | wc -l) files):"
+  echo "$zone_files" | head -20
+  echo "[hygiene] Fix: make clean-repo   (or: find . -name '*:Zone.Identifier' -delete)"
   fail=1
 fi
-
-rm -f /tmp/hygiene_sidecars.txt
 
 echo "[hygiene] checking tracked file size limits..."
 while IFS= read -r path; do

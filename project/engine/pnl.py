@@ -2,15 +2,55 @@ from __future__ import annotations
 
 from typing import Dict
 
+import numpy as np
 import pandas as pd
 
 
 def compute_returns(close: pd.Series) -> pd.Series:
     """
-    Compute simple returns from close prices.
+    Compute simple close-to-close returns.
     Uses fill_method=None to ensure gaps resulting in NaN returns are propagated and not smoothed.
     """
     return close.pct_change(fill_method=None)
+
+
+def compute_returns_next_open(
+    close: pd.Series,
+    open_: pd.Series,
+    positions: pd.Series,
+) -> pd.Series:
+    """
+    Compute blended returns for next-open execution mode.
+
+    - At entry bars (prior_pos == 0, current pos != 0): return = open[t+1] / close[t] - 1
+      (representing fill at next bar's open rather than current close).
+    - At hold/exit bars: return = close[t] / close[t-1] - 1 (standard close-to-close).
+    - NaN propagation is preserved for gap bars.
+
+    Args:
+        close: Close price series indexed by timestamp.
+        open_: Open price series indexed by timestamp (aligned to same index).
+        positions: Position series (integer -1/0/1) indexed by timestamp.
+
+    Returns:
+        Blended returns series aligned to close.index.
+    """
+    aligned_pos = positions.reindex(close.index).fillna(0).astype(int)
+    prior_pos = aligned_pos.shift(1).fillna(0).astype(int)
+    is_entry = (prior_pos == 0) & (aligned_pos != 0)
+
+    # Close-to-close returns (standard)
+    cc_ret = close.pct_change(fill_method=None)
+
+    # Entry bar: open[t+1] / close[t] - 1
+    next_open = open_.shift(-1)
+    safe_close = close.replace(0.0, np.nan)
+    entry_ret = (next_open / safe_close - 1.0).replace([np.inf, -np.inf], np.nan)
+
+    # Blend: entry bars use next_open return; everything else uses close-to-close
+    blended = cc_ret.copy()
+    blended[is_entry] = entry_ret[is_entry]
+    return blended
 
 
 def compute_pnl_components(
@@ -99,3 +139,4 @@ def compute_pnl(
         borrow_rate=borrow_rate,
     )
     return components["pnl"]
+

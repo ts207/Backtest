@@ -122,6 +122,10 @@ test:
 test-fast:
 	$(PYTHON) -m pytest -q -m "not slow" --maxfail=1
 
+monitor:
+	$(PYTHON) project/scripts/monitor_data_freshness.py --symbols $(or $(SYMBOLS),BTCUSDT,ETHUSDT) --timeframe 5m --max_staleness_bars 3
+
+
 compile:
 	$(PYTHON_COMPILE) -m compileall $(ROOT_DIR)/project
 
