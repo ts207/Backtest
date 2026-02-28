@@ -21,7 +21,7 @@ def test_build_blueprint_records_bridge_embargo_in_lineage():
         "event": "VOL_SHOCK",
     }
 
-    bp = _build_blueprint(
+    bp, _ = _build_blueprint(
         run_id="r1",
         run_symbols=["BTCUSDT"],
         event_type="VOL_SHOCK",
@@ -53,7 +53,7 @@ def test_blueprint_contains_ontology_contract():
         "state_id": "DESYNC_PERSISTENCE_STATE",
     }
 
-    bp = _build_blueprint(
+    bp, _ = _build_blueprint(
         run_id="r1",
         run_symbols=["BTCUSDT"],
         event_type="CROSS_VENUE_DESYNC",

@@ -174,6 +174,7 @@ def build_research_stages(
                     "--min_stability_score", str(float(args.candidate_promotion_min_stability_score)),
                     "--min_sign_consistency", str(float(args.candidate_promotion_min_sign_consistency)),
                     "--min_cost_survival_ratio", str(float(args.candidate_promotion_min_cost_survival_ratio)),
+                    "--min_tob_coverage", str(float(args.candidate_promotion_min_tob_coverage)),
                     "--max_negative_control_pass_rate", str(float(args.candidate_promotion_max_negative_control_pass_rate)),
                     "--require_hypothesis_audit", str(int(args.candidate_promotion_require_hypothesis_audit)),
                     "--allow_missing_negative_controls", str(int(args.candidate_promotion_allow_missing_negative_controls)),

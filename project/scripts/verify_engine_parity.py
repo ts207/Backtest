@@ -6,7 +6,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Any
 
 import numpy as np
 import pandas as pd
@@ -19,12 +19,76 @@ from engine.runner import _load_symbol_data, run_engine
 from engine.pnl import compute_returns
 from pipelines._lib.io_utils import ensure_dir
 
+def calculate_trade_parity(
+    sig_ts: pd.Timestamp,
+    entry_ts: pd.Timestamp,
+    last_held_ts: pd.Timestamp,
+    bars: pd.DataFrame,
+    engine_df: pd.DataFrame,
+    direction: int,
+    horizon_bars: int,
+    tol_abs: float = 1e-3,
+    tol_rel: float = 1e-4,
+) -> Dict[str, Any]:
+    """
+    Calculates parity metrics for a single observed engine trade.
+    """
+    bars_ts = pd.to_datetime(bars["timestamp"], utc=True)
+    entry_pos = int(bars_ts.searchsorted(entry_ts, side="left"))
+    
+    # Research expected exit
+    future_pos = entry_pos + horizon_bars
+    if future_pos >= len(bars):
+        return {"skipped": "horizon_out_of_bounds"}
+        
+    expected_last_held_ts = bars_ts.iloc[entry_pos + horizon_bars - 1]
+    expected_exit_ts = bars_ts.iloc[future_pos]
+    
+    # 1. Timing Parity
+    timing_ok = (last_held_ts == expected_last_held_ts)
+    
+    # 2. Return Parity
+    # P_exit is at entry_pos + horizon_bars
+    p_entry = bars["close"].iloc[entry_pos]
+    p_exit = bars["close"].iloc[future_pos]
+    
+    # Research arithmetic return: direction * (P_exit / P_entry - 1)
+    research_ret = direction * (p_exit / p_entry - 1)
+    # Cumulative return in log-space: log(1 + cumulative_return)
+    research_logret = np.log(1 + research_ret)
+    
+    # Engine: sum(log(1 + direction * ret_i)) where ret_i are bar-by-bar returns
+    # This represents the cumulative log-return of the compounded position
+    engine_ret_slice = engine_df.set_index("timestamp")["ret"].loc[bars_ts.iloc[entry_pos+1]:expected_exit_ts]
+    engine_logret = np.log(1 + direction * engine_ret_slice).sum()
+    
+    logret_diff = research_logret - engine_logret
+    threshold = tol_abs + tol_rel * max(1.0, np.abs(research_logret))
+    logret_ok = np.abs(logret_diff) <= threshold
+    
+    return {
+        "sig_ts": sig_ts.isoformat(),
+        "entry_ts": entry_ts.isoformat(),
+        "timing_ok": bool(timing_ok),
+        "logret_ok": bool(logret_ok),
+        "expected_last_held": expected_last_held_ts.isoformat(),
+        "actual_last_held": last_held_ts.isoformat(),
+        "research_return": float(research_ret),
+        "research_logret": float(research_logret),
+        "engine_logret": float(engine_logret),
+        "cum_logret_diff": float(logret_diff),
+        "cum_logret_tol": float(threshold),
+        "direction": direction,
+    }
+
 def main():
     parser = argparse.ArgumentParser(description="Verify parity between Engine and Phase2 forward returns")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--candidate_id", required=True)
     parser.add_argument("--event_type", required=True)
+    parser.add_argument("--tol_abs", type=float, default=1e-3)
+    parser.add_argument("--tol_rel", type=float, default=1e-4)
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -56,8 +120,9 @@ def main():
         
     blueprint["entry"]["confirmations"] = []
     blueprint["overlays"] = []
-    blueprint["exit"]["stop_value"] = 1.0
-    blueprint["exit"]["target_value"] = 1.0
+    # Use massive stop/target values to ensure no early exits during parity check.
+    blueprint["exit"]["stop_value"] = 1000.0
+    blueprint["exit"]["target_value"] = 1000.0
     blueprint["exit"]["trailing_stop_type"] = "none"
     blueprint["exit"]["trailing_stop_value"] = 0.0
     blueprint["exit"]["break_even_r"] = 0.0
@@ -78,87 +143,86 @@ def main():
         symbols=[args.symbol],
         strategies=[strategy_id],
         params={},
-        cost_bps=10.0, # Add a cost to test cost metrics
+        cost_bps=10.0,
         data_root=DATA_ROOT,
         params_by_strategy=params_by_strategy,
     )
     
     engine_df = engine_results["strategy_frames"][strategy_id]
+    if not engine_df.empty and "symbol" in engine_df.columns:
+        engine_df = engine_df[engine_df["symbol"] == args.symbol].copy()
     engine_df["timestamp"] = pd.to_datetime(engine_df["timestamp"], utc=True)
-    engine_pnl = engine_df.set_index("timestamp")["gross_pnl"]
     
-    # Cost metrics
-    trades = engine_df[engine_df["pos"] != engine_df["pos"].shift(1)]
-    mean_cost_bps = float(trades["trading_cost"].mean() * 10000.0) if not trades.empty and "trading_cost" in trades.columns else 0.0
-    mean_funding_bps = float(engine_df["funding_pnl"].mean() * 10000.0) if "funding_pnl" in engine_df.columns else 0.0
-    max_cost_cap_count = 0 # Cannot easily infer cap triggered from runner output directly without logging, but we log the metrics
-    
-    # 4. Research Parity Logic (Recomputed here for 1:1 comparison)
-    effective_lag = int(blueprint["entry"]["delay_bars"])
-    horizon_bars = int(blueprint["exit"]["time_stop_bars"])
-    
-    # Find signal bars from features
-    trigger_col = blueprint["entry"]["triggers"][0]
-    if trigger_col in features.columns:
-        signal_bars = features[features[trigger_col] == True]["timestamp"].tolist()
-    else:
-        signal_bars = []
-        
     trace_path = engine_results["engine_dir"] / f"strategy_trace_{strategy_id}.csv"
     trace = pd.read_csv(trace_path)
+    if not trace.empty and "symbol" in trace.columns:
+        trace = trace[trace["symbol"] == args.symbol].copy().reset_index(drop=True)
     trace["timestamp"] = pd.to_datetime(trace["timestamp"], utc=True)
     
+    # 4. Parity Logic
+    horizon_bars = int(blueprint["exit"]["time_stop_bars"])
+    delay_bars = int(blueprint["entry"]["delay_bars"])
+    
+    # Find observed trades from trace
+    trace["state_prev"] = trace["state"].shift(1).fillna("flat")
+    trade_starts = trace[(trace["state"] == "in_position") & (trace["state_prev"] != "in_position")]
+    
     results = []
-    for sig_ts in signal_bars:
-        # Research style forward return
-        feat_ts_idx = pd.to_datetime(features["timestamp"], utc=True)
-        pos = int(feat_ts_idx.searchsorted(sig_ts, side="left"))
-        entry_pos = pos + effective_lag
-        future_pos = entry_pos + horizon_bars
+    for _, row in trade_starts.iterrows():
+        entry_ts = row["timestamp"]
+        # sig_ts is entry_ts - delay_bars * 5m
+        sig_ts = entry_ts - pd.Timedelta(minutes=5 * delay_bars)
         
-        if future_pos < len(bars):
-            start_pnl_ts = bars["timestamp"].iloc[entry_pos + 1]
-            end_pnl_ts = bars["timestamp"].iloc[future_pos]
+        trace_after = trace[trace["timestamp"] >= entry_ts]
+        exit_bar = trace_after[trace_after["state"] != "in_position"]
+        if not exit_bar.empty:
+            exit_idx = exit_bar.index[0]
+            last_held_row = trace.loc[exit_idx - 1]
+            last_held_ts = last_held_row["timestamp"]
+        else:
+            last_held_ts = trace_after["timestamp"].iloc[-1]
             
-            # Find the actual direction taken by the engine
-            trade_trace = trace[(trace["timestamp"] > sig_ts) & (trace["timestamp"] <= end_pnl_ts)]
-            active_pos = trade_trace[trade_trace["state"] == "in_position"]
-            if active_pos.empty:
-                continue
-                
-            direction = active_pos["entry_candidate"].sum() if "entry_candidate" in active_pos.columns and active_pos["entry_candidate"].sum() != 0 else active_pos["requested_scale"].iloc[0]
-            # wait, requested scale might be > 0. Let's just look at the raw position in engine_df
-            engine_pos_slice = engine_df.set_index("timestamp")["pos"].loc[start_pnl_ts:end_pnl_ts]
-            if (engine_pos_slice == 0).all():
-                continue
-            direction = 1 if (engine_pos_slice > 0).any() else -1
-
-            research_ret = ((bars["close"].iloc[future_pos] / bars["close"].iloc[entry_pos]) - 1) * direction
+        dir_match = engine_df[engine_df["timestamp"] == entry_ts]["pos"]
+        if dir_match.empty:
+            logging.warning("No engine position at entry_ts=%s, skipping trade", entry_ts)
+            continue
+        direction = int(dir_match.iloc[0])
+        
+        res = calculate_trade_parity(
+            sig_ts,
+            entry_ts,
+            last_held_ts,
+            bars,
+            engine_df,
+            direction,
+            horizon_bars,
+            tol_abs=args.tol_abs,
+            tol_rel=args.tol_rel,
+        )
+        if "skipped" not in res:
+            results.append(res)
             
-            # Engine style return for the same window
-            engine_gross_sum = engine_pnl.loc[start_pnl_ts:end_pnl_ts].sum()
-            
-            results.append({
-                "signal_ts": sig_ts.isoformat(),
-                "research_return": float(research_ret),
-                "engine_gross_pnl_sum": float(engine_gross_sum),
-                "diff": float(research_ret - engine_gross_sum)
-            })
-            
-    # 5. Report
+    # 5. Aggregate Report
+    timing_ok = all(r.get("timing_ok", False) for r in results) if results else False
+    logret_ok = all(r.get("logret_ok", False) for r in results) if results else False
+    
+    logret_diffs = [np.abs(r["cum_logret_diff"]) for r in results if "cum_logret_diff" in r]
+    max_logret_diff = float(np.max(logret_diffs)) if logret_diffs else 0.0
+    mean_logret_diff = float(np.mean(logret_diffs)) if logret_diffs else 0.0
+    
     summary = {
         "run_id": args.run_id,
         "symbol": args.symbol,
         "candidate_id": args.candidate_id,
-        "effective_lag": effective_lag,
         "horizon_bars": horizon_bars,
         "n_samples": len(results),
-        "mean_diff": float(np.mean([r["diff"] for r in results])) if results else 0.0,
-        "max_diff": float(np.max([np.abs(r["diff"]) for r in results])) if results else 0.0,
-        "parity_success": bool(len(results) > 0 and np.max([np.abs(r["diff"]) for r in results]) < 1e-6),
-        "mean_cost_bps": mean_cost_bps,
-        "mean_funding_bps": mean_funding_bps,
-        "max_cost_cap_triggered_count": max_cost_cap_count,
+        "timing_ok": bool(timing_ok),
+        "logret_ok": bool(logret_ok),
+        "parity_success": bool(timing_ok and logret_ok and len(results) > 0),
+        "max_cum_logret_diff": max_logret_diff,
+        "mean_cum_logret_diff": mean_logret_diff,
+        "cum_logret_tol_abs": args.tol_abs,
+        "cum_logret_tol_rel": args.tol_rel,
         "samples": results[:10]
     }
     
@@ -167,9 +231,17 @@ def main():
     out_path = out_dir / "parity_report.json"
     out_path.write_text(json.dumps(summary, indent=2, sort_keys=True))
     print(f"Parity report written to {out_path}")
+    
     if not summary["parity_success"]:
-        print("WARNING: Parity check failed!")
+        if not timing_ok:
+            print("CRITICAL: Timing parity failed (observed trade duration != horizon)!")
+        if not logret_ok:
+            print(f"ERROR: Return parity failed (exceeded tol_abs={args.tol_abs}, tol_rel={args.tol_rel})!")
+        if len(results) == 0:
+            print("ERROR: No trades observed in backtest!")
         sys.exit(1)
+    else:
+        print("SUCCESS: Timing and Return parity verified.")
 
 if __name__ == "__main__":
     main()

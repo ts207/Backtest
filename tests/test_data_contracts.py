@@ -11,7 +11,10 @@ def test_cleaned_schema_valid():
         "high": 10100.0,
         "low": 9900.0,
         "close": 10050.0,
-        "volume": 500.0
+        "volume": 500.0,
+        "quote_volume": 5000000.0,
+        "is_gap": False,
+        "funding_rate_realized": 0.0001
     }])
     Cleaned5mBarsSchema.validate(df)
 
@@ -31,7 +34,10 @@ def test_cleaned_schema_invalid_low_high():
 def test_registry_schema_valid():
     df = pd.DataFrame([{
         "symbol": "BTCUSDT",
+        "phenom_enter_ts": 1600000000000,
         "enter_ts": 1600000000000,
+        "detected_ts": 1600000000000,
+        "signal_ts": 1600000000000,
         "exit_ts": 1600000000000 + 300000,
         "event_id": "ev_1",
         "signal_column": "sig"

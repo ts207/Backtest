@@ -37,6 +37,7 @@ def _eval_row(**overrides):
         min_sign_consistency=0.60,
         min_cost_survival_ratio=0.75,
         max_negative_control_pass_rate=0.01,
+        min_tob_coverage=0.0,
         require_hypothesis_audit=True,
         allow_missing_negative_controls=False,
     )
@@ -46,11 +47,11 @@ def test_promote_candidate_happy_path():
     out = _eval_row()
     assert out["promotion_decision"] == "promoted"
     assert out["reject_reason"] == ""
-    assert out["gate_statistical"] is True
-    assert out["gate_stability"] is True
-    assert out["gate_cost_survival"] is True
-    assert out["gate_negative_control"] is True
-    assert out["gate_hypothesis_audit"] is True
+    assert out["gate_promo_statistical"] is True
+    assert out["gate_promo_stability"] is True
+    assert out["gate_promo_cost_survival"] is True
+    assert out["gate_promo_negative_control"] is True
+    assert out["gate_promo_hypothesis_audit"] is True
 
 
 def test_promote_candidate_rejects_cost_and_controls():
@@ -90,6 +91,7 @@ def test_promote_candidate_rejects_missing_hypothesis_audit():
         min_sign_consistency=0.0,
         min_cost_survival_ratio=0.75,
         max_negative_control_pass_rate=0.01,
+        min_tob_coverage=0.0,
         require_hypothesis_audit=True,
         allow_missing_negative_controls=True,
     )

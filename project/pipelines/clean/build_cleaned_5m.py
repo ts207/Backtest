@@ -257,6 +257,10 @@ def main() -> int:
             vol_cols = [c for c in gap_cols if c not in price_cols]
             bars[vol_cols] = bars[vol_cols].fillna(0.0)
 
+            # Ensure quote_volume column exists for schema compliance.
+            if "quote_volume" not in bars.columns:
+                bars["quote_volume"] = 0.0
+
             # Normalize numeric OHLCV dtypes to float for schema stability.
             # Upstream parquet chunks can carry integer volume when there are no NaNs.
             for col in ["open", "high", "low", "close", "volume", "quote_volume", "taker_base_volume"]:

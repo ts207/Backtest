@@ -147,7 +147,11 @@ def validate_input_provenance(inputs: List[Dict[str, Any]]) -> None:
 
 def feature_schema_registry_path() -> Path:
     project_root = Path(__file__).resolve().parents[2]
-    return project_root / "schemas" / "feature_schema_v1.json"
+    version = str(os.getenv("BACKTEST_FEATURE_SCHEMA_VERSION", "v1")).strip().lower()
+    if version not in ("v1", "v2"):
+        version = "v1"
+    filename = f"feature_schema_{version}.json"
+    return project_root / "schemas" / filename
 
 
 def load_feature_schema_registry() -> Dict[str, Any]:

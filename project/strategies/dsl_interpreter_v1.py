@@ -11,7 +11,7 @@ import pandas as pd
 
 LOGGER = logging.getLogger(__name__)
 
-from events.registry import REGISTRY_BACKED_SIGNALS
+from events.registry import REGISTRY_BACKED_SIGNALS, _signal_ts_column
 from strategy_dsl.schema import (
     Blueprint,
     ConditionNodeSpec,
@@ -54,6 +54,7 @@ REGISTRY_SIGNAL_COLUMNS = set()
 for signal in REGISTRY_BACKED_SIGNALS:
     REGISTRY_SIGNAL_COLUMNS.add(signal)
     REGISTRY_SIGNAL_COLUMNS.add(_active_signal_column(signal))
+    REGISTRY_SIGNAL_COLUMNS.add(_signal_ts_column(signal))
 
 MOMENTUM_BIAS_EVENTS = {
     "vol_shock",
@@ -786,6 +787,8 @@ class DslInterpreterV1:
                         state = "armed"
                         # Enforce at least one-bar decision lag: signals computed on bar t are tradable no earlier than t+1.
                         arm_remaining = max(1, int(blueprint.entry.delay_bars), int(blueprint.entry.arm_bars))
+                        positions.append(0)
+                        continue
                     else:
                         positions.append(0)
                         continue

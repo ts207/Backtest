@@ -77,6 +77,7 @@ REGISTRY_EVENT_COLUMNS = [
     "event_type",
     "signal_column",
     "timestamp",
+    "phenom_enter_ts",
     "enter_ts",
     "detected_ts",
     "signal_ts",
@@ -225,6 +226,9 @@ def normalize_phase1_events(events: pd.DataFrame, spec: EventRegistrySpec, run_i
     # signal_ts defaults to detected_ts, used for impulse snapping
     out["signal_ts"] = out["detected_ts"]
 
+    # phenom_enter_ts preserves the original phenomenological entry
+    out["phenom_enter_ts"] = out["enter_ts"]
+
     out["timestamp"] = out["signal_ts"]
     out = out.dropna(subset=["timestamp", "enter_ts", "detected_ts", "signal_ts"]).copy()
     if out.empty:
@@ -255,6 +259,7 @@ def normalize_phase1_events(events: pd.DataFrame, spec: EventRegistrySpec, run_i
             "event_type": spec.event_type,
             "signal_column": spec.signal_column,
             "timestamp": out["timestamp"],
+            "phenom_enter_ts": out["phenom_enter_ts"],
             "enter_ts": out["enter_ts"],
             "detected_ts": out["detected_ts"],
             "signal_ts": out["signal_ts"],
@@ -312,10 +317,11 @@ def _normalize_registry_events_frame(events: pd.DataFrame) -> pd.DataFrame:
     
     out["timestamp"] = ts_ns_utc(out["timestamp"])
     out["enter_ts"] = ts_ns_utc(out["enter_ts"])
+    out["phenom_enter_ts"] = ts_ns_utc(out.get("phenom_enter_ts", out["enter_ts"]))
     out["detected_ts"] = ts_ns_utc(out.get("detected_ts", out["enter_ts"]))
     out["signal_ts"] = ts_ns_utc(out.get("signal_ts", out["detected_ts"]))
     out["exit_ts"] = ts_ns_utc(out["exit_ts"])
-    
+
     out["enter_ts"] = out["enter_ts"].where(out["enter_ts"].notna(), out["timestamp"])
     out["exit_ts"] = out["exit_ts"].where(out["exit_ts"].notna(), out["enter_ts"])
     out["exit_ts"] = out["exit_ts"].where(out["exit_ts"] >= out["enter_ts"], out["enter_ts"])
@@ -378,7 +384,8 @@ def build_event_flags(
     if not symbols_clean and not events.empty:
         symbols_clean = sorted(set(events["symbol"].dropna().astype(str).str.upper().tolist()) - {"ALL"})
 
-    frames: List[pd.DataFrame] = []
+    # 1. Load grids per symbol
+    grids = []
     for symbol in symbols_clean:
         ts = _load_symbol_timestamps(data_root=data_root, run_id=run_id, symbol=symbol, timeframe=timeframe)
         if ts.empty:
@@ -387,96 +394,129 @@ def build_event_flags(
                 local = events[(events["symbol"] == symbol) | (events["symbol"] == "ALL")]
                 event_ts = pd.to_datetime(local.get("timestamp", pd.Series(dtype=object)), utc=True, errors="coerce").dropna()
             ts = pd.Series(sorted(pd.DatetimeIndex(event_ts).unique())) if not event_ts.empty else ts
-        if ts.empty:
+        
+        if not ts.empty:
+            grids.append(pd.DataFrame({"timestamp": ts_ns_utc(ts), "symbol": symbol}))
+
+    all_signals = []
+    for sig in sorted(REGISTRY_BACKED_SIGNALS):
+        all_signals.append(sig)
+        all_signals.append(_active_signal_column(sig))
+        all_signals.append(_signal_ts_column(sig))
+
+    if not grids:
+        return pd.DataFrame(columns=["timestamp", "symbol"] + all_signals)
+
+    full_grid = pd.concat(grids, ignore_index=True)
+    
+    # Fast initialization of signal columns
+    zero_data = np.zeros((len(full_grid), len(all_signals)), dtype=bool)
+    flags_part = pd.DataFrame(zero_data, columns=all_signals, index=full_grid.index)
+    full_grid = pd.concat([full_grid, flags_part], axis=1)
+
+    if events.empty:
+        return full_grid
+
+    # 2. Prepare events
+    ev = events.copy()
+    ev["timestamp"] = ts_ns_utc(ev["timestamp"])
+    ev["enter_ts"] = ts_ns_utc(ev["enter_ts"])
+    ev["exit_ts"] = ts_ns_utc(ev["exit_ts"])
+    ev["signal_ts"] = ts_ns_utc(ev.get("signal_ts", ev["timestamp"]))
+    # detected_ts: the bar where condition first confirmed; fall back to enter_ts
+    if "detected_ts" in ev.columns:
+        ev["_detected_ts"] = ts_ns_utc(ev["detected_ts"])
+    else:
+        ev["_detected_ts"] = ev["enter_ts"]
+    
+    ev = ev[ev["signal_column"].isin(REGISTRY_BACKED_SIGNALS)].copy()
+    if ev.empty:
+        return full_grid
+
+    # 3. Handle "ALL" broadcast
+    all_events = ev[ev["symbol"] == "ALL"]
+    specific_events = ev[ev["symbol"] != "ALL"]
+    
+    expanded_rows = []
+    if not all_events.empty:
+        for symbol in symbols_clean:
+            temp = all_events.copy()
+            temp["symbol"] = symbol
+            expanded_rows.append(temp)
+    
+    if expanded_rows:
+        ev = pd.concat([specific_events] + expanded_rows, ignore_index=True)
+    else:
+        ev = specific_events
+
+    # 4. Vectorized Snapping per symbol
+    for symbol, group in full_grid.groupby("symbol"):
+        sym_events = ev[ev["symbol"] == symbol]
+        if sym_events.empty:
             continue
-        frame = pd.DataFrame({"timestamp": pd.to_datetime(ts, utc=True), "symbol": symbol})
-        for signal in sorted(REGISTRY_BACKED_SIGNALS):
-            frame[signal] = False
-            frame[_active_signal_column(signal)] = False
-        frames.append(frame)
+            
+        grid_ts_naive = group["timestamp"].dt.tz_localize(None).values
+        grid_indices = group.index
+        
+        # Impulse Snapping (signal_ts)
+        sig_ts_naive = sym_events["signal_ts"].dt.tz_localize(None).values
+        idx = np.searchsorted(grid_ts_naive, sig_ts_naive)
+        
+        valid_mask = idx < len(grid_ts_naive)
+        if valid_mask.any():
+            valid_idx = idx[valid_mask]
+            target_indices = grid_indices[valid_idx]
+            target_signals = sym_events["signal_column"].values[valid_mask]
+            
+            for sig_col in np.unique(target_signals):
+                hits = target_indices[target_signals == sig_col]
+                full_grid.loc[hits, sig_col] = True
 
-    if not frames:
-        return pd.DataFrame(columns=["timestamp", "symbol", *sorted(REGISTRY_BACKED_SIGNALS)])
-
-    flags = pd.concat(frames, ignore_index=True)
-    flags["timestamp"] = ts_ns_utc(flags["timestamp"])
-    flags = flags.dropna(subset=["timestamp"]).copy()
-
-    if not events.empty:
-        events_copy = events.copy()
-        events_copy["timestamp"] = ts_ns_utc(events_copy["timestamp"])
-        events_copy["enter_ts"] = ts_ns_utc(events_copy["enter_ts"])
-        events_copy["exit_ts"] = ts_ns_utc(events_copy["exit_ts"])
-        events_copy["signal_ts"] = ts_ns_utc(events_copy.get("signal_ts", events_copy["timestamp"]))
-
-        for symbol, group in events_copy.groupby("symbol"):
-            symbol_flags = flags[flags["symbol"] == symbol]
-            if symbol_flags.empty and symbol != "ALL":
+        # Range Snapping (active flags)
+        enter_ts_naive = sym_events["enter_ts"].dt.tz_localize(None).values
+        exit_ts_naive = sym_events["exit_ts"].dt.tz_localize(None).values
+        
+        idx_enter = np.searchsorted(grid_ts_naive, enter_ts_naive)
+        idx_exit = np.searchsorted(grid_ts_naive, exit_ts_naive, side="right") - 1
+        
+        for sig_col in np.unique(sym_events["signal_column"]):
+            active_col = _active_signal_column(sig_col)
+            sig_mask = sym_events["signal_column"] == sig_col
+            
+            diff = np.zeros(len(grid_ts_naive) + 1, dtype=int)
+            enters = idx_enter[sig_mask]
+            exits = idx_exit[sig_mask]
+            
+            valid_ranges = (enters < len(grid_ts_naive)) & (exits >= 0) & (enters <= exits)
+            if not valid_ranges.any():
                 continue
-            
-            # ALL symbol handling: broadcast to all symbols in flags
-            target_symbols = [symbol] if symbol != "ALL" else symbols_clean
-            
-            for target_sym in target_symbols:
-                target_flags = flags[flags["symbol"] == target_sym]
-                if target_flags.empty:
-                    continue
                 
-                # Convert to naive for numpy searchsorted
-                sym_ts_naive = target_flags["timestamp"].dt.tz_localize(None).values
-                if len(sym_ts_naive) == 0:
-                    continue
-                
-                for row in group.itertuples(index=False):
-                    signal = str(getattr(row, "signal_column", "")).strip()
-                    if signal not in REGISTRY_BACKED_SIGNALS:
-                        continue
-                    active_signal = _active_signal_column(signal)
-                    
-                    # Snap signal_ts to first feature timestamp >= signal_ts
-                    sig_ts = getattr(row, "signal_ts", pd.NaT)
-                    if pd.isna(sig_ts):
-                        continue
-                    sig_ts_naive = sig_ts.tz_localize(None).to_datetime64()
-                    
-                    idx = np.searchsorted(sym_ts_naive, sig_ts_naive)
-                    if idx < len(sym_ts_naive):
-                        snapped_sig_ts_naive = sym_ts_naive[idx]
-                        # Need to compare with naive timestamp in loc
-                        mask = (flags["symbol"] == target_sym) & (flags["timestamp"].dt.tz_localize(None) == snapped_sig_ts_naive)
-                        flags.loc[mask, signal] = True
-                    
-                    # Snap active range [enter_ts, exit_ts]
-                    enter_ts = getattr(row, "enter_ts", pd.NaT)
-                    exit_ts = getattr(row, "exit_ts", pd.NaT)
-                    if pd.isna(enter_ts) or pd.isna(exit_ts):
-                        continue
-                        
-                    enter_ts_naive = enter_ts.tz_localize(None).to_datetime64()
-                    exit_ts_naive = exit_ts.tz_localize(None).to_datetime64()
-                    
-                    idx_enter = np.searchsorted(sym_ts_naive, enter_ts_naive)
-                    idx_exit = np.searchsorted(sym_ts_naive, exit_ts_naive, side="right") - 1
-                    
-                    if idx_enter < len(sym_ts_naive) and idx_exit >= 0 and idx_enter <= idx_exit:
-                        # Use snapped naive boundaries for mask
-                        ts_low = sym_ts_naive[idx_enter]
-                        ts_high = sym_ts_naive[idx_exit]
-                        active_mask = (
-                            (flags["symbol"] == target_sym)
-                            & (flags["timestamp"].dt.tz_localize(None) >= ts_low)
-                            & (flags["timestamp"].dt.tz_localize(None) <= ts_high)
-                        )
-                        flags.loc[active_mask, active_signal] = True
+            enters_v = np.maximum(0, enters[valid_ranges])
+            exits_v = np.minimum(len(grid_ts_naive) - 1, exits[valid_ranges])
+            
+            np.add.at(diff, enters_v, 1)
+            np.add.at(diff, exits_v + 1, -1)
+            
+            active_mask = (np.cumsum(diff)[:-1] > 0)
+            full_grid.loc[grid_indices[active_mask], active_col] = True
 
-    for signal in sorted(REGISTRY_BACKED_SIGNALS):
-        flags[signal] = flags[signal].fillna(False).astype(bool)
-        active_signal = _active_signal_column(signal)
-        if active_signal not in flags.columns:
-            flags[active_signal] = False
-        flags[active_signal] = flags[active_signal].fillna(False).astype(bool)
-    flags = flags.sort_values(["timestamp", "symbol"]).reset_index(drop=True)
-    return flags
+        # _signal flag: first bar strictly after detected_ts (PIT-safe tradable impulse)
+        detected_naive = sym_events["_detected_ts"].dt.tz_localize(None).values
+        # searchsorted with side="right" gives first index where grid > detected_ts
+        sig_idx = np.searchsorted(grid_ts_naive, detected_naive, side="right")
+
+        valid_sig = sig_idx < len(grid_ts_naive)
+        if valid_sig.any():
+            valid_positions = sig_idx[valid_sig]
+            target_grid_indices = grid_indices[valid_positions]
+            target_sig_cols = sym_events["signal_column"].values[valid_sig]
+
+            for sig_col in np.unique(target_sig_cols):
+                tradable_col = _signal_ts_column(sig_col)
+                hits = target_grid_indices[target_sig_cols == sig_col]
+                full_grid.loc[hits, tradable_col] = True
+
+    return full_grid.sort_values(["timestamp", "symbol"]).reset_index(drop=True)
 
 
 def write_event_registry_artifacts(data_root: Path, run_id: str, events: pd.DataFrame, event_flags: pd.DataFrame) -> Dict[str, str]:
@@ -515,6 +555,9 @@ def load_registry_events(
     if not events.empty:
         events["enter_ts"] = pd.to_datetime(events["enter_ts"], unit="ms", utc=True, errors="coerce")
         events["exit_ts"] = pd.to_datetime(events["exit_ts"], unit="ms", utc=True, errors="coerce")
+        for col in ("phenom_enter_ts", "detected_ts", "signal_ts"):
+            if col in events.columns:
+                events[col] = pd.to_datetime(events[col], unit="ms", utc=True, errors="coerce")
     events = _normalize_registry_events_frame(events)
     if events.empty:
         return _empty_registry_events()
@@ -532,8 +575,7 @@ def load_registry_flags(data_root: Path, run_id: str, symbol: str | None = None)
     if flags.empty:
         cols = ["timestamp", "symbol"]
         for signal in sorted(REGISTRY_BACKED_SIGNALS):
-            cols.append(signal)
-            cols.append(_active_signal_column(signal))
+            cols.extend([signal, _active_signal_column(signal), _signal_ts_column(signal)])
         return pd.DataFrame(columns=cols)
 
     flags["timestamp"] = pd.to_datetime(flags.get("timestamp"), utc=True, errors="coerce")
@@ -541,19 +583,24 @@ def load_registry_flags(data_root: Path, run_id: str, symbol: str | None = None)
     if symbol is not None:
         symbol_norm = str(symbol).strip().upper()
         flags = flags[flags["symbol"].astype(str).str.upper() == symbol_norm].copy()
-    for signal in sorted(REGISTRY_BACKED_SIGNALS):
-        if signal not in flags.columns:
-            flags[signal] = False
-        flags[signal] = flags[signal].fillna(False).astype(bool)
-        active_signal = _active_signal_column(signal)
-        if active_signal not in flags.columns:
-            flags[active_signal] = False
-        flags[active_signal] = flags[active_signal].fillna(False).astype(bool)
+
+    # Build column set and ensure all exist
     cols = ["timestamp", "symbol"]
     for signal in sorted(REGISTRY_BACKED_SIGNALS):
-        cols.append(signal)
-        cols.append(_active_signal_column(signal))
-    return flags[cols].sort_values(["timestamp", "symbol"]).reset_index(drop=True)
+        cols.extend([signal, _active_signal_column(signal), _signal_ts_column(signal)])
+
+    missing = [c for c in cols if c not in flags.columns]
+    if missing:
+        fill = pd.DataFrame({c: False for c in missing}, index=flags.index)
+        flags = pd.concat([flags, fill], axis=1)
+    flags = flags[cols].copy()  # defragment
+
+    for signal in sorted(REGISTRY_BACKED_SIGNALS):
+        flags[signal] = flags[signal].fillna(False).astype(bool)
+        flags[_active_signal_column(signal)] = flags[_active_signal_column(signal)].fillna(False).astype(bool)
+        flags[_signal_ts_column(signal)] = flags[_signal_ts_column(signal)].fillna(False).astype(bool)
+
+    return flags.sort_values(["timestamp", "symbol"]).reset_index(drop=True)
 
 
 def merge_event_flags_for_selected_event_types(
@@ -576,6 +623,7 @@ def merge_event_flags_for_selected_event_types(
             continue
         selected_signal_cols.append(spec.signal_column)
         selected_signal_cols.append(_active_signal_column(spec.signal_column))
+        selected_signal_cols.append(_signal_ts_column(spec.signal_column))
     selected_signal_cols = list(dict.fromkeys(selected_signal_cols))
 
     keys = ["timestamp", "symbol"]
@@ -608,20 +656,23 @@ def merge_event_flags_for_selected_event_types(
     merged["symbol"] = merged["symbol"].fillna("").astype(str).str.upper()
     merged = merged[merged["symbol"].str.len() > 0].copy()
 
-    for signal in sorted(REGISTRY_BACKED_SIGNALS):
-        if signal not in merged.columns:
-            merged[signal] = False
-        merged[signal] = merged[signal].fillna(False).astype(bool)
-        active_signal = _active_signal_column(signal)
-        if active_signal not in merged.columns:
-            merged[active_signal] = False
-        merged[active_signal] = merged[active_signal].fillna(False).astype(bool)
-
+    # Build all signal columns at once to avoid DataFrame fragmentation
     out_cols = ["timestamp", "symbol"]
     for signal in sorted(REGISTRY_BACKED_SIGNALS):
-        out_cols.append(signal)
-        out_cols.append(_active_signal_column(signal))
-    return merged[out_cols].sort_values(["timestamp", "symbol"]).reset_index(drop=True)
+        out_cols.extend([signal, _active_signal_column(signal), _signal_ts_column(signal)])
+
+    missing = [c for c in out_cols if c not in merged.columns]
+    if missing:
+        fill = pd.DataFrame({c: False for c in missing}, index=merged.index)
+        merged = pd.concat([merged, fill], axis=1)
+    merged = merged[out_cols].copy()  # defragment
+
+    for signal in sorted(REGISTRY_BACKED_SIGNALS):
+        merged[signal] = merged[signal].fillna(False).astype(bool)
+        merged[_active_signal_column(signal)] = merged[_active_signal_column(signal)].fillna(False).astype(bool)
+        merged[_signal_ts_column(signal)] = merged[_signal_ts_column(signal)].fillna(False).astype(bool)
+
+    return merged.sort_values(["timestamp", "symbol"]).reset_index(drop=True)
 
 
 def build_event_feature_frame(

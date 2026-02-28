@@ -35,6 +35,7 @@ def build_core_stages(
                 "--symbols", symbols,
                 "--force", force_flag,
                 "--allow_missing_funding", allow_missing_funding_flag,
+                "--feature_schema_version", str(getattr(args, "feature_schema_version", "v1")),
             ],
         ),
         (
@@ -95,6 +96,7 @@ def build_core_stages(
                     "--symbols", symbols,
                     "--market", "spot",
                     "--force", force_flag,
+                    "--feature_schema_version", str(getattr(args, "feature_schema_version", "v1")),
                 ],
             ),
         ])

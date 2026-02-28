@@ -92,6 +92,7 @@ PHASE2_EVENT_CHAIN: List[Tuple[str, str, List[str]]] = [
 _STRICT_RECOMMENDATIONS_CHECKLIST = False
 _CURRENT_PIPELINE_SESSION_ID: Optional[str] = None
 _CURRENT_STAGE_INSTANCE_ID: Optional[str] = None
+_FEATURE_SCHEMA_VERSION: str = "v1"
 
 
 def _run_id_default() -> str:
@@ -221,6 +222,7 @@ def _run_stage(stage: str, script_path: Path, base_args: List[str], run_id: str)
         cmd.extend(["--log_path", str(log_path)])
     env = os.environ.copy()
     env["BACKTEST_STAGE_INSTANCE_ID"] = stage_instance_id
+    env["BACKTEST_FEATURE_SCHEMA_VERSION"] = _FEATURE_SCHEMA_VERSION
     if _CURRENT_PIPELINE_SESSION_ID:
         env["BACKTEST_PIPELINE_SESSION_ID"] = _CURRENT_PIPELINE_SESSION_ID
     result = subprocess.run(cmd, env=env)
@@ -374,16 +376,19 @@ def _config_digest(config_paths: List[str]) -> str:
 
 
 def _feature_schema_metadata() -> tuple[str, str]:
-    schema_path = PROJECT_ROOT / "schemas" / "feature_schema_v1.json"
+    version = str(os.getenv("BACKTEST_FEATURE_SCHEMA_VERSION", "v1")).strip().lower()
+    if version not in ("v1", "v2"):
+        version = "v1"
+    schema_path = PROJECT_ROOT / "schemas" / f"feature_schema_{version}.json"
     if not schema_path.exists():
         return "unknown", _sha256_text("")
     try:
         payload = json.loads(schema_path.read_text(encoding="utf-8"))
-        version = str(payload.get("version", "feature_schema_v1"))
+        version_label = str(payload.get("version", f"feature_schema_{version}"))
     except Exception:
-        version = "feature_schema_v1"
+        version_label = f"feature_schema_{version}"
     schema_hash = hashlib.sha256(schema_path.read_bytes()).hexdigest()
-    return version, schema_hash
+    return version_label, schema_hash
 
 
 def _data_hash(symbols: List[str]) -> str:
@@ -556,6 +561,7 @@ def main() -> int:
     parser.add_argument("--candidate_promotion_min_stability_score", type=float, default=0.05)
     parser.add_argument("--candidate_promotion_min_sign_consistency", type=float, default=0.67)
     parser.add_argument("--candidate_promotion_min_cost_survival_ratio", type=float, default=0.75)
+    parser.add_argument("--candidate_promotion_min_tob_coverage", type=float, default=0.80)
     parser.add_argument("--candidate_promotion_max_negative_control_pass_rate", type=float, default=0.01)
     parser.add_argument("--candidate_promotion_require_hypothesis_audit", type=int, default=0)
     parser.add_argument("--candidate_promotion_allow_missing_negative_controls", type=int, default=1)
@@ -603,6 +609,7 @@ def main() -> int:
     parser.add_argument("--promotion_max_cost_ratio_train_validation", type=float, default=0.60)
     parser.add_argument("--report_allow_backtest_artifact_fallback", type=int, default=0)
     parser.add_argument("--run_make_report", type=int, default=0)
+    parser.add_argument("--feature_schema_version", choices=["v1", "v2"], default="v1")
     parser.add_argument("--fees_bps", type=float, default=None)
     parser.add_argument("--slippage_bps", type=float, default=None)
     parser.add_argument("--cost_bps", type=float, default=None)
@@ -665,8 +672,9 @@ def main() -> int:
             )
             return 1
 
-    global _STRICT_RECOMMENDATIONS_CHECKLIST
+    global _STRICT_RECOMMENDATIONS_CHECKLIST, _FEATURE_SCHEMA_VERSION
     _STRICT_RECOMMENDATIONS_CHECKLIST = bool(int(args.strict_recommendations_checklist))
+    _FEATURE_SCHEMA_VERSION = str(args.feature_schema_version).strip().lower()
 
     run_id = args.run_id or _run_id_default()
     parsed_symbols = _parse_symbols_csv(args.symbols)

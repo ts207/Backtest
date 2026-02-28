@@ -1,94 +1,153 @@
-# Backtest: Spec-First Crypto Research and Backtesting
+# Backtest
 
-Backtest is a discovery-first quantitative research platform for crypto markets. It is designed for reproducibility, point-in-time correctness, and auditability across the full lifecycle from event discovery to evaluation.
+Event-driven quantitative research platform for crypto perpetual markets.
+Discovers, validates, and compiles tradable strategy blueprints from raw market data
+through a multi-stage pipeline with point-in-time safety and multiplicity control.
 
-## What This Repository Does
+## What It Does
 
-- Ingests and normalizes perp/spot market data.
-- Builds cleaned 5m bars and feature/context datasets.
-- Detects event families and builds canonical event registries.
-- Runs Phase2 conditional discovery with multiplicity controls.
-- Applies bridge/economic gates and promotion filters.
-- Optionally runs backtest, walkforward, and report stages.
-
-Primary orchestrator: `project/pipelines/run_all.py`
-
-## Core Principles
-
-- Spec-first contracts in `spec/` are the source of truth.
-- No lookahead joins (PIT-safe joins and lagged entry controls).
-- Fail-closed gating for checklist/execution and protected flows.
-- Run-level provenance captured in `data/runs/<run_id>/run_manifest.json`.
-
-## Run Integrity Model
-
-Run outputs are tracked with both logical and instance-level traces.
-
-- `planned_stages`: logical stage names.
-- `planned_stage_instances`: expanded stage instances (for event-specific stages).
-- `stage_timings_sec`: timing by logical stage.
-- `stage_instance_timings_sec`: timing by stage instance.
-- `pipeline_session_id`: session token propagated into stage manifests.
-- `artifact_cutoff_utc`, `late_artifact_count`, `late_artifact_examples`: terminal audit metadata.
-
-Stage manifests use stage-instance naming when available (for example `build_event_registry_<EVENT>.json`) to prevent event trace overwrites.
+1. Ingests Binance USDT-M perpetual (and optional spot) OHLCV, funding, OI, and liquidation data.
+2. Builds cleaned 5-minute bars with gap tracking and funding alignment.
+3. Engineers features (volatility, microstructure, funding, basis, context states).
+4. Detects 56 event families across 10 analyzer categories.
+5. Runs conditional hypothesis discovery (Phase 2) with BH-FDR multiplicity control.
+6. Applies bridge tradability checks, candidate promotion, and blueprint compilation.
+7. Optionally backtests compiled blueprints through a discrete-position engine.
 
 ## Quick Start
 
-### 1) Environment
-
 ```bash
+# 1. Setup
 python3 -m venv .venv
-. .venv/bin/activate
-.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+source .venv/bin/activate
+pip install -r requirements.txt
 export BACKTEST_DATA_ROOT=$(pwd)/data
-```
 
-### 2) Baseline run
-
-```bash
-./.venv/bin/python project/pipelines/run_all.py \
-  --run_id quick_start \
+# 2. Run core pipeline (ingest + clean + features + events)
+python project/pipelines/run_all.py \
+  --run_id my_first_run \
   --symbols BTCUSDT \
   --start 2024-01-01 \
-  --end 2024-01-31
-```
+  --end 2024-06-30
 
-### 3) Discovery run (all event families)
+# 3. Run discovery for a single event family
+python project/pipelines/run_all.py \
+  --run_id discover_vol \
+  --symbols BTCUSDT,ETHUSDT \
+  --start 2022-01-01 \
+  --end 2024-12-31 \
+  --run_phase2_conditional 1 \
+  --phase2_event_type VOL_SHOCK \
+  --run_bridge_eval_phase2 1
 
-```bash
+# 4. Run discovery for all event families
 make discover-edges
-```
 
-### 4) Validation
-
-```bash
-make check-hygiene
+# 5. Run tests
 make test-fast
 ```
 
-## Standard Commands
+## Pipeline Stages
 
-- Fast tests: `make test-fast`
-- Full tests: `make test`
-- Hygiene checks: `make check-hygiene`
-- Compile check: `make compile`
-- Discovery run: `make discover-edges`
-- Baseline run: `make baseline STRATEGIES=<comma-separated>`
+```
+raw market data (Binance perp/spot)
+  |
+  v
+ingest_ohlcv_5m, ingest_funding, [ingest_spot, ingest_oi, ingest_liquidations]
+  |
+  v
+build_cleaned_5m  -->  Cleaned5mBarsSchema validation
+  |
+  v
+build_features_v1  -->  feature_schema_v1.json validation
+  |
+  v
+build_funding_persistence, build_market_state, build_universe_snapshot
+  |
+  v
+Phase 1 analyzers (analyze_*.py)  -->  raw event CSVs
+  |
+  v
+build_event_registry  -->  events.parquet + event_flags.parquet
+  |                        (_event impulse, _active window, _signal tradable)
+  v
+Phase 2 conditional discovery  -->  phase2_candidates.csv per event type
+  |                                  (BH-FDR controlled, delay-grid robust)
+  v
+bridge_evaluate_phase2  -->  bridge eval with train/validation/embargo split
+  |
+  v
+promote_candidates  -->  promoted_candidates.parquet
+  |
+  v
+compile_strategy_blueprints  -->  blueprints.jsonl + blueprints.yaml
+  |
+  v
+[backtest_strategies]  -->  engine PnL traces
+  |
+  v
+[walkforward_eval]  -->  OOS validation
+  |
+  v
+[make_report]  -->  performance reports
+```
 
-## Artifact Layout
+Stages in brackets are optional and enabled via CLI flags.
 
-- Run manifests/logs: `data/runs/<run_id>/`
-- Event registry artifacts: `data/events/<run_id>/`
-- Stage reports: `data/reports/<stage>/<run_id>/...`
-- Phase2 candidates: `data/reports/phase2/<run_id>/<event_type>/`
-- Bridge eval: `data/reports/bridge_eval/<run_id>/<event_type>/`
+## Make Targets
+
+| Target | Description |
+|--------|-------------|
+| `make run` | Ingest + clean + features + context |
+| `make discover-edges` | Full discovery chain (all 56 event families) |
+| `make discover-edges-from-raw` | Discovery using existing raw data (skip ingest) |
+| `make baseline STRATEGIES=...` | Core pipeline + backtest + report |
+| `make test-fast` | Fast tests (excludes slow markers) |
+| `make test` | Full test suite |
+| `make compile` | Byte-compile all Python modules |
+| `make check-hygiene` | Repository hygiene checks |
+| `make clean-runtime` | Remove run/report artifacts |
+
+## Output Layout
+
+All outputs are rooted at `$BACKTEST_DATA_ROOT` (default: `./data`).
+
+```
+data/
+  lake/
+    raw/binance/perp/{symbol}/ohlcv_5m/      Raw OHLCV parquet
+    raw/binance/perp/{symbol}/funding/        Raw funding rates
+    cleaned/perp/{symbol}/bars_5m/            Cleaned 5m bars
+    features/perp/{symbol}/5m/features_v1/   Engineered features
+    runs/{run_id}/                            Run-scoped datasets
+  events/{run_id}/
+    events.parquet                            Canonical event registry
+    event_flags.parquet                       Per-bar event flags
+  reports/
+    phase2/{run_id}/{event_type}/             Phase 2 candidates
+    bridge_eval/{run_id}/{event_type}/        Bridge evaluation
+    promotions/{run_id}/                      Promoted candidates
+    strategy_blueprints/{run_id}/             Compiled blueprints
+  runs/{run_id}/
+    run_manifest.json                         Run-level provenance
+    *.json                                    Stage manifests
+    *.log                                     Stage logs
+```
 
 ## Documentation
 
-- [Getting Started](docs/GETTING_STARTED.md)
-- [Core Concepts](docs/CONCEPTS.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Spec-First Development](docs/SPEC_FIRST.md)
-- [Current Audit Baseline](docs/AUDIT.md)
-- [Project Package Guide](project/README.md)
+| Document | Purpose |
+|----------|---------|
+| [Getting Started](docs/GETTING_STARTED.md) | Setup, first run, and common workflows |
+| [Architecture](docs/ARCHITECTURE.md) | Pipeline structure, data flow, and execution model |
+| [Concepts](docs/CONCEPTS.md) | PIT safety, event semantics, discovery pipeline, and data contracts |
+| [Spec-First Development](docs/SPEC_FIRST.md) | How specs govern behavior and how to extend the system |
+| [Audit Baseline](docs/AUDIT.md) | Known limitations and improvement roadmap |
+| [Runbook](RUNBOOK.md) | Operational reference for running and debugging |
+| [Research Playbook](RESEARCH_PLAYBOOK.md) | Research philosophy and methodology |
+
+## Requirements
+
+- Python 3.12+
+- Dependencies: see `requirements.txt`
+- OS: Linux / macOS / WSL

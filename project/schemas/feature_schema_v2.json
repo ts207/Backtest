@@ -1,0 +1,79 @@
+{
+  "version": "feature_schema_v2",
+  "datasets": {
+    "features_v2_5m_v1": {
+      "required_columns": [
+        "timestamp",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "quote_volume",
+        "funding_rate_scaled",
+        "funding_rate",
+        "funding_rate_realized",
+        "is_gap",
+        "oi_notional",
+        "oi_delta_1h",
+        "liquidation_notional",
+        "liquidation_count",
+        "basis_bps",
+        "basis_zscore",
+        "cross_exchange_spread_z",
+        "spread_zscore",
+        "revision_lag_bars",
+        "revision_lag_minutes",
+        "logret_1",
+        "rv_96",
+        "rv_pct_17280",
+        "high_96",
+        "low_96",
+        "range_96",
+        "range_med_2880",
+        "ms_vpin_24",
+        "ms_roll_24",
+        "ms_amihud_24",
+        "ms_kyle_24"
+      ],
+      "optional_gated_columns": [
+        "spread_bps",
+        "depth_usd",
+        "tob_coverage"
+      ]
+    },
+    "context_funding_persistence_v1": {
+      "required_columns": [
+        "timestamp",
+        "fp_def_version",
+        "fp_active",
+        "fp_age_bars",
+        "fp_event_id",
+        "fp_enter_ts",
+        "fp_exit_ts",
+        "fp_severity",
+        "fp_norm_due"
+      ]
+    },
+    "market_context_v1": {
+      "required_columns": [
+        "timestamp",
+        "symbol",
+        "trend_return_96",
+        "trend_regime",
+        "rv_pct_17280",
+        "vol_regime",
+        "compression_ratio",
+        "compression_state",
+        "funding_mean_32",
+        "funding_regime",
+        "ms_vol_state",
+        "ms_liq_state",
+        "ms_oi_state",
+        "ms_funding_state",
+        "ms_context_state_code",
+        "context_def_version"
+      ]
+    }
+  }
+}

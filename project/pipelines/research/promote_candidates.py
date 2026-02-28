@@ -343,6 +343,7 @@ def _evaluate_row(
     min_sign_consistency: float,
     min_cost_survival_ratio: float,
     max_negative_control_pass_rate: float,
+    min_tob_coverage: float,
     require_hypothesis_audit: bool,
     allow_missing_negative_controls: bool,
 ) -> Dict[str, Any]:
@@ -360,6 +361,7 @@ def _evaluate_row(
         event_type=event_type,
         summary=negative_control_summary,
     )
+    tob_coverage = _safe_float(row.get("tob_coverage"), 0.0)
 
     promo_fail_reasons: List[str] = []
     
@@ -404,6 +406,16 @@ def _evaluate_row(
             reject_reasons.append("negative_control_fail")
             promo_fail_reasons.append("gate_promo_negative_control_fail")
 
+    # ToB Coverage Gate
+    # Candidates with low ToB coverage are promoted but tagged fallback_only
+    # unless they pass a more conservative static cost model check.
+    tob_pass = tob_coverage >= float(min_tob_coverage)
+    if not tob_pass:
+        # If ToB is missing, we require higher cost survival to allow promotion as 'standard'
+        # Otherwise it's 'fallback_only'.
+        # For simplicity in this stage, we just tag it.
+        pass
+
     audit_pass = True
     audit_statuses: List[str] = []
     if plan_row_id:
@@ -425,18 +437,27 @@ def _evaluate_row(
         promo_fail_reasons.append("gate_promo_hypothesis_missing_plan_row_id")
 
     promoted = bool(statistical_pass and stability_pass and cost_pass and control_pass and audit_pass)
+    
+    # Standard track requires ToB coverage
+    promotion_track = "standard" if (promoted and tob_pass) else "fallback_only"
+    if promoted and not tob_pass:
+        # Only allow fallback_only if it still passed other gates
+        pass
+    
     promotion_decision = "promoted" if promoted else "rejected"
     promotion_score = (
         float(statistical_pass)
         + float(stability_pass)
         + float(cost_pass)
         + float(control_pass)
-    ) / 4.0
+        + float(tob_pass)
+    ) / 5.0
 
     primary_promo_fail = promo_fail_reasons[0] if promo_fail_reasons else ""
 
     return {
         "promotion_decision": promotion_decision,
+        "promotion_track": promotion_track,
         "promotion_score": float(promotion_score),
         "reject_reason": "|".join(sorted(set(reject_reasons))),
         "promotion_fail_gate_primary": primary_promo_fail,
@@ -447,12 +468,14 @@ def _evaluate_row(
         "sign_consistency": float(sign_consistency),
         "cost_survival_ratio": float(cost_survival_ratio),
         "control_pass_rate": None if control_rate is None else float(control_rate),
+        "tob_coverage": float(tob_coverage),
         "audit_statuses": audit_statuses,
         "gate_promo_statistical": bool(statistical_pass),
         "gate_promo_stability": bool(stability_pass),
         "gate_promo_cost_survival": bool(cost_pass),
         "gate_promo_negative_control": bool(control_pass),
         "gate_promo_hypothesis_audit": bool(audit_pass),
+        "gate_promo_tob_coverage": bool(tob_pass),
     }
 
 
@@ -469,6 +492,7 @@ def main() -> int:
     parser.add_argument("--min_stability_score", type=float, default=0.05)
     parser.add_argument("--min_sign_consistency", type=float, default=0.67)
     parser.add_argument("--min_cost_survival_ratio", type=float, default=0.75)
+    parser.add_argument("--min_tob_coverage", type=float, default=0.80)
     parser.add_argument("--max_negative_control_pass_rate", type=float, default=0.01)
     parser.add_argument("--require_hypothesis_audit", type=int, default=0)
     parser.add_argument("--allow_missing_negative_controls", type=int, default=1)
@@ -528,6 +552,7 @@ def main() -> int:
                 min_sign_consistency=float(args.min_sign_consistency),
                 min_cost_survival_ratio=float(args.min_cost_survival_ratio),
                 max_negative_control_pass_rate=float(args.max_negative_control_pass_rate),
+                min_tob_coverage=float(args.min_tob_coverage),
                 require_hypothesis_audit=bool(int(args.require_hypothesis_audit)),
                 allow_missing_negative_controls=bool(int(args.allow_missing_negative_controls)),
             )

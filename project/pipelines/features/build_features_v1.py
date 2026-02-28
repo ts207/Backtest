@@ -19,6 +19,7 @@ from pipelines._lib.io_utils import choose_partition_dir, ensure_dir, list_parqu
 from pipelines._lib.run_manifest import (
     feature_schema_identity,
     finalize_manifest,
+    load_feature_schema_registry,
     schema_hash_from_columns,
     start_manifest,
     validate_feature_schema_columns,
@@ -28,6 +29,11 @@ from pipelines._lib.validation import ensure_utc_timestamp, validate_columns, ts
 from pipelines._lib.sanity import assert_monotonic_utc_timestamp
 from schemas.data_contracts import Cleaned5mBarsSchema
 from features.microstructure import calculate_vpin, calculate_roll, calculate_amihud, calculate_kyle_lambda
+
+FUNDING_EVENT_HOURS = 8
+FUNDING_MAX_STALENESS = pd.Timedelta(hours=FUNDING_EVENT_HOURS)
+OI_MAX_STALENESS = pd.Timedelta(hours=4)
+LIQ_MAX_STALENESS = pd.Timedelta(hours=4)
 
 
 def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
@@ -221,10 +227,23 @@ def _merge_funding_rates(bars: pd.DataFrame, funding: pd.DataFrame, symbol: str)
     out = bars.copy()
     assert_monotonic_utc_timestamp(out, "timestamp")
 
-    funding_rates = funding[["timestamp", "funding_rate_scaled"]].copy()
+    # Accept either funding_rate_scaled or funding_rate_feature as the rate column
+    rate_col = None
+    for candidate in ["funding_rate_scaled", "funding_rate_feature", "funding_rate"]:
+        if candidate in funding.columns:
+            rate_col = candidate
+            break
+    if rate_col is None:
+        raise ValueError(f"No funding rate column found in funding frame for {symbol}")
+
+    funding_rates = funding[["timestamp", rate_col]].copy()
+    if rate_col != "funding_rate_scaled":
+        funding_rates = funding_rates.rename(columns={rate_col: "funding_rate_scaled"})
     funding_rates["timestamp"] = ts_ns_utc(funding_rates["timestamp"])
     funding_rates["funding_rate_scaled"] = pd.to_numeric(funding_rates["funding_rate_scaled"], errors="coerce")
     funding_rates = funding_rates.sort_values("timestamp").reset_index(drop=True)
+    if funding_rates["timestamp"].duplicated().any():
+        raise ValueError(f"Funding timestamps must be unique for {symbol}")
     assert_monotonic_utc_timestamp(funding_rates, "timestamp")
 
     expected_rows = int(len(out))
@@ -308,6 +327,63 @@ def _add_basis_features(frame: pd.DataFrame, symbol: str, run_id: str, market: s
     return out
 
 
+def _merge_optional_tob_aggregates(
+    bars: pd.DataFrame,
+    symbol: str,
+    market: str,
+    run_id: str,
+) -> pd.DataFrame:
+    out = bars.copy()
+    if market != "perp":
+        return out
+        
+    expected_rows = int(len(out))
+    tob_candidates = [
+        DATA_ROOT / "lake" / "cleaned" / "perp" / symbol / "tob_5m_agg",
+        DATA_ROOT / "lake" / "runs" / run_id / "cleaned" / "perp" / symbol / "tob_5m_agg",
+    ]
+    tob_dir = choose_partition_dir(tob_candidates)
+    tob_files = list_parquet_files(tob_dir) if tob_dir else []
+    
+    if not tob_files:
+        return out
+        
+    tob_frame = read_parquet(tob_files)
+    if tob_frame.empty:
+        return out
+        
+    tob_frame["timestamp"] = ts_ns_utc(tob_frame["timestamp"])
+    tob_frame = tob_frame.sort_values("timestamp").drop_duplicates(subset=["timestamp"], keep="last")
+    
+    # Calculate unified depth proxy if both sides are present
+    if "bid_depth_usd_mean" in tob_frame.columns and "ask_depth_usd_mean" in tob_frame.columns:
+        tob_frame["depth_usd"] = (tob_frame["bid_depth_usd_mean"] + tob_frame["ask_depth_usd_mean"]) / 2
+    
+    # Alias spread_bps_mean to spread_bps for schema compatibility
+    if "spread_bps_mean" in tob_frame.columns:
+        tob_frame["spread_bps"] = tob_frame["spread_bps_mean"]
+        
+    # Columns to merge
+    merge_cols = ["timestamp", "spread_bps", "depth_usd", "tob_coverage"]
+    merge_cols = [c for c in merge_cols if c in tob_frame.columns]
+    
+    if len(merge_cols) <= 1:
+        return out
+        
+    out = pd.merge_asof(
+        out.sort_values("timestamp"),
+        tob_frame[merge_cols].sort_values("timestamp"),
+        on="timestamp",
+        direction="backward",
+        tolerance=pd.Timedelta("5min"),
+    )
+    
+    if len(out) != expected_rows:
+        raise ValueError(f"Cardinality mismatch after ToB merge for {symbol}")
+        
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build features v1")
     parser.add_argument("--run_id", required=True)
@@ -319,7 +395,11 @@ def main() -> int:
     parser.add_argument("--revision_lag_bars", type=int, default=0)
     parser.add_argument("--config", action="append", default=[])
     parser.add_argument("--log_path", default=None)
+    parser.add_argument("--feature_schema_version", choices=["v1", "v2"], default="v1")
     args = parser.parse_args()
+
+    if args.feature_schema_version:
+        os.environ["BACKTEST_FEATURE_SCHEMA_VERSION"] = args.feature_schema_version
 
     run_id = args.run_id
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
@@ -434,6 +514,9 @@ def main() -> int:
                 bars = _merge_funding_rates(bars, funding_rates, symbol=symbol)
                 # Since we are re-merging older format funding here, let's just make realized 0 or mimic it
                 bars["funding_rate_realized"] = 0.0 # Simplify backfill
+            elif args.feature_schema_version == "v2":
+                # Strict mode: do not provide defaults if v2 is selected
+                pass
             else:
                 bars["funding_rate_feature"] = 0.0
                 bars["funding_rate_realized"] = 0.0
@@ -441,60 +524,80 @@ def main() -> int:
             # Backward-compatible alias for any code still reading funding_rate.
             bars["funding_rate"] = bars["funding_rate_feature"]
             bars = _merge_optional_oi_liquidation(bars, symbol=symbol, market=market, run_id=run_id)
+            bars = _merge_optional_tob_aggregates(bars, symbol=symbol, market=market, run_id=run_id)
             bars = _add_basis_features(bars, symbol=symbol, run_id=run_id, market=market)
             bars["revision_lag_bars"] = int(args.revision_lag_bars)
             bars["revision_lag_minutes"] = _revision_lag_minutes(int(args.revision_lag_bars))
 
-            features = bars[[
-                "timestamp",
-                "symbol",
-                "open",
-                "high",
-                "low",
-                "close",
-                "funding_rate_feature",
-                "funding_rate_realized",
-                "funding_rate",
-                "oi_notional",
-                "oi_delta_1h",
-                "liquidation_notional",
-                "liquidation_count",
-                "basis_bps",
-                "basis_zscore",
-                "cross_exchange_spread_z",
-                "spread_zscore",
-                "revision_lag_bars",
-                "revision_lag_minutes",
-            ]].copy()
-            features["logret_1"] = np.log(features["close"]).diff()
-            features["funding_rate_scaled"] = features["funding_rate_feature"]
+            # --- CONTRACT-DRIVEN FEATURE SELECTION ---
+            # Determine which dataset contract to use
+            dataset_key = "features_v2_5m_v1" if args.feature_schema_version == "v2" else "features_v1_5m_v1"
+            registry = load_feature_schema_registry()
+            if dataset_key not in registry["datasets"]:
+                raise ValueError(f"Unknown dataset key in registry: {dataset_key}")
+            
+            required_cols = registry["datasets"][dataset_key]["required_columns"]
+            optional_cols = registry["datasets"][dataset_key].get("optional_gated_columns", [])
+            
+            # Core columns that are always required regardless of registry
+            core_cols = ["timestamp", "symbol", "open", "high", "low", "close", "volume"]
+            
+            # Combine and deduplicate
+            target_cols = sorted(list(set(required_cols + core_cols + optional_cols)))
+            
+            # Only select columns that are actually present in bars.
+            # Missing required columns will be caught by validate_feature_schema_columns.
+            feature_cols = [col for col in target_cols if col in bars.columns]
+            
+            features = bars[feature_cols].copy()
+            # --- END SELECTION ---
+
+            if "close" in features.columns:
+                features["logret_1"] = np.log(features["close"]).diff()
+            if "funding_rate_feature" in features.columns:
+                features["funding_rate_scaled"] = features["funding_rate_feature"]
             
             # Microstructure metrics
             # VPIN proxy: using taker_base_volume if available, else approximate.
-            vol_raw = pd.to_numeric(bars["volume"], errors="coerce").fillna(0.0)
-            if "taker_base_volume" in bars.columns:
-                buy_vol_proxy = pd.to_numeric(bars["taker_base_volume"], errors="coerce").fillna(0.0)
-            else:
-                # Fallback to HLC proxy if taker volume is missing
-                h, l, c = features["high"], features["low"], features["close"]
-                buy_vol_proxy = vol_raw * (c - l) / (h - l).replace(0.0, np.nan).fillna(0.5)
-            
-            features["ms_vpin_24"] = calculate_vpin(vol_raw, buy_vol_proxy, window=24)
-            features["ms_roll_24"] = calculate_roll(features["close"], window=24)
-            features["ms_amihud_24"] = calculate_amihud(features["close"], vol_raw, window=24)
-            features["ms_kyle_24"] = calculate_kyle_lambda(
-                features["close"], 
-                buy_vol_proxy, 
-                vol_raw - buy_vol_proxy, 
-                window=24
-            )
+            if "volume" in bars.columns:
+                vol_raw = pd.to_numeric(bars["volume"], errors="coerce").fillna(0.0)
+                if "taker_base_volume" in bars.columns:
+                    buy_vol_proxy = pd.to_numeric(bars["taker_base_volume"], errors="coerce").fillna(0.0)
+                else:
+                    # Fallback to HLC proxy if taker volume is missing
+                    h, l, c = bars["high"], bars["low"], bars["close"]
+                    buy_vol_proxy = vol_raw * (c - l) / (h - l).replace(0.0, np.nan).fillna(0.5)
+                
+                if "ms_vpin_24" in target_cols:
+                    features["ms_vpin_24"] = calculate_vpin(vol_raw, buy_vol_proxy, window=24)
+                if "ms_roll_24" in target_cols:
+                    features["ms_roll_24"] = calculate_roll(bars["close"], window=24)
+                if "ms_amihud_24" in target_cols:
+                    features["ms_amihud_24"] = calculate_amihud(bars["close"], vol_raw, window=24)
+                if "ms_kyle_24" in target_cols:
+                    features["ms_kyle_24"] = calculate_kyle_lambda(
+                        bars["close"], 
+                        buy_vol_proxy, 
+                        vol_raw - buy_vol_proxy, 
+                        window=24
+                    )
 
-            features["rv_96"] = features["logret_1"].rolling(window=96, min_periods=72).std()
-            features["rv_pct_17280"] = _rolling_percentile(features["rv_96"], window=17280)
-            features["high_96"] = features["high"].rolling(window=96, min_periods=72).max()
-            features["low_96"] = features["low"].rolling(window=96, min_periods=72).min()
-            features["range_96"] = features["high_96"] - features["low_96"]
-            features["range_med_2880"] = features["range_96"].rolling(window=2880, min_periods=2160).median()
+            if "logret_1" in target_cols:
+                features["logret_1"] = np.log(features["close"]).diff()
+            
+            if "rv_96" in target_cols:
+                features["rv_96"] = features["logret_1"].rolling(window=96, min_periods=72).std()
+            if "rv_pct_17280" in target_cols:
+                features["rv_pct_17280"] = _rolling_percentile(features["rv_96"], window=17280)
+            
+            if "high_96" in target_cols:
+                features["high_96"] = bars["high"].rolling(window=96, min_periods=72).max()
+            if "low_96" in target_cols:
+                features["low_96"] = bars["low"].rolling(window=96, min_periods=72).min()
+            if "range_96" in target_cols:
+                features["range_96"] = features["high_96"] - features["low_96"]
+            if "range_med_2880" in target_cols:
+                features["range_med_2880"] = features["range_96"].rolling(window=2880, min_periods=2160).median()
 
             features["year"] = features["timestamp"].dt.year
             features["month"] = features["timestamp"].dt.month
@@ -502,7 +605,7 @@ def main() -> int:
             features_contract_check(features, symbol)
             
             validate_feature_schema_columns(
-                dataset_key="features_v1_5m_v1",
+                dataset_key=dataset_key,
                 columns=features.columns.drop(["year", "month"]).tolist(),
             )
             out_dir = run_scoped_lake_path(DATA_ROOT, run_id, "features", market, symbol, "5m", "features_v1")

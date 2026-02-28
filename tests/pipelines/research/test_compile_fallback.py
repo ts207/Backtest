@@ -32,7 +32,7 @@ def test_choose_event_rows_fallback():
         "after_cost_expectancy_per_trade": 0.0002,
         "stressed_after_cost_expectancy_per_trade": 0.0001, # Added this
         "n_events": 150,
-        "rejected": False, # NOT a discovery
+        "is_discovery": False, # NOT a discovery
                     "robustness_score": 0.8,
                     "expectancy_per_trade": 0.0003,
                     "cost_ratio": 0.1,
