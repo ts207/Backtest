@@ -22,7 +22,6 @@ from pipelines._lib.io_utils import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 
-
 @dataclass(frozen=True)
 class EventRegistrySpec:
     event_type: str
@@ -75,6 +74,9 @@ REGISTRY_EVENT_COLUMNS = [
     "signal_column",
     "timestamp",
     "enter_ts",
+    "phenom_enter_ts",
+    "detected_ts",
+    "signal_ts",
     "exit_ts",
     "symbol",
     "event_id",
@@ -113,6 +115,13 @@ def _active_signal_column(signal_column: str) -> str:
     return f"{signal}_active"
 
 
+def _signal_ts_column(signal_column: str) -> str:
+    signal = str(signal_column).strip()
+    if signal.endswith("_event"):
+        return f"{signal[:-6]}_signal"
+    return f"{signal}_signal"
+
+
 def _registry_root(data_root: Path, run_id: str) -> Path:
     return Path(data_root) / "events" / str(run_id)
 
@@ -126,6 +135,21 @@ def _first_existing_column(df: pd.DataFrame, names: Sequence[str]) -> str | None
         if name in df.columns:
             return name
     return None
+
+
+def _bulk_add_cols(df: pd.DataFrame, cols_dict: dict) -> pd.DataFrame:
+    """Bulk-add columns to df, skipping those that already exist.
+
+    Returns a new DataFrame via pd.concat to avoid repeated column insertions
+    that cause the 'DataFrame is highly fragmented' PerformanceWarning.
+    """
+    new_cols = {col: val for col, val in cols_dict.items() if col not in df.columns}
+    if not new_cols:
+        return df
+    return pd.concat(
+        [df, pd.DataFrame({col: [val] * len(df) for col, val in new_cols.items()}, index=df.index)],
+        axis=1,
+    )
 
 
 def _feature_payload(row: pd.Series) -> str:
@@ -176,6 +200,15 @@ def normalize_phase1_events(events: pd.DataFrame, spec: EventRegistrySpec, run_i
         out["exit_ts"] = out["enter_ts"]
 
     out["timestamp"] = out["enter_ts"]
+    out["phenom_enter_ts"] = out["enter_ts"]
+    _det_col = _first_existing_column(out, ["detected_ts", "confirmation_ts"])
+    out["detected_ts"] = (
+        pd.to_datetime(out[_det_col], utc=True, errors="coerce")
+        if _det_col is not None
+        else out["enter_ts"]
+    )
+    out["detected_ts"] = out["detected_ts"].where(out["detected_ts"].notna(), out["enter_ts"])
+    out["signal_ts"] = out["detected_ts"]
     out = out.dropna(subset=["timestamp", "enter_ts"]).copy()
     if out.empty:
         return _empty_registry_events()
@@ -206,6 +239,9 @@ def normalize_phase1_events(events: pd.DataFrame, spec: EventRegistrySpec, run_i
             "signal_column": spec.signal_column,
             "timestamp": out["timestamp"],
             "enter_ts": out["enter_ts"],
+            "phenom_enter_ts": out["phenom_enter_ts"],
+            "detected_ts": out["detected_ts"],
+            "signal_ts": out["signal_ts"],
             "exit_ts": out["exit_ts"],
             "symbol": out["symbol"],
             "event_id": out["event_id"],
@@ -263,6 +299,12 @@ def _normalize_registry_events_frame(events: pd.DataFrame) -> pd.DataFrame:
     out["enter_ts"] = out["enter_ts"].where(out["enter_ts"].notna(), out["timestamp"])
     out["exit_ts"] = out["exit_ts"].where(out["exit_ts"].notna(), out["enter_ts"])
     out["exit_ts"] = out["exit_ts"].where(out["exit_ts"] >= out["enter_ts"], out["enter_ts"])
+    out["phenom_enter_ts"] = pd.to_datetime(out["phenom_enter_ts"], utc=True, errors="coerce")
+    out["phenom_enter_ts"] = out["phenom_enter_ts"].where(out["phenom_enter_ts"].notna(), out["enter_ts"])
+    out["detected_ts"] = pd.to_datetime(out["detected_ts"], utc=True, errors="coerce")
+    out["detected_ts"] = out["detected_ts"].where(out["detected_ts"].notna(), out["enter_ts"])
+    out["signal_ts"] = pd.to_datetime(out["signal_ts"], utc=True, errors="coerce")
+    out["signal_ts"] = out["signal_ts"].where(out["signal_ts"].notna(), out["detected_ts"])
     out = out.dropna(subset=["timestamp"]).copy()
     out["symbol"] = out["symbol"].fillna("ALL").astype(str).str.upper().replace("", "ALL")
     out["event_id"] = out["event_id"].fillna("").astype(str)
@@ -334,9 +376,12 @@ def build_event_flags(
         if ts.empty:
             continue
         frame = pd.DataFrame({"timestamp": pd.to_datetime(ts, utc=True), "symbol": symbol})
+        cols_to_add: dict = {}
         for signal in sorted(REGISTRY_BACKED_SIGNALS):
-            frame[signal] = False
-            frame[_active_signal_column(signal)] = False
+            cols_to_add[signal] = False
+            cols_to_add[_active_signal_column(signal)] = False
+            cols_to_add[_signal_ts_column(signal)] = False
+        frame = _bulk_add_cols(frame, cols_to_add)
         frames.append(frame)
 
     if not frames:
@@ -380,6 +425,21 @@ def build_event_flags(
                 flags.loc[mask, signal] = True
             if active_mask.any():
                 flags.loc[active_mask, active_signal] = True
+            signal_col = _signal_ts_column(signal)
+            detected_ts_val = getattr(row, "detected_ts", pd.NaT)
+            if pd.isna(detected_ts_val):
+                detected_ts_val = enter_ts
+            if symbol == "ALL":
+                sig_candidates = flags[flags["timestamp"] > detected_ts_val]
+            else:
+                sig_candidates = flags[(flags["symbol"] == symbol) & (flags["timestamp"] > detected_ts_val)]
+            if not sig_candidates.empty:
+                first_sig_ts = sig_candidates["timestamp"].min()
+                if symbol == "ALL":
+                    signal_mask = flags["timestamp"] == first_sig_ts
+                else:
+                    signal_mask = (flags["symbol"] == symbol) & (flags["timestamp"] == first_sig_ts)
+                flags.loc[signal_mask, signal_col] = True
 
     for signal in sorted(REGISTRY_BACKED_SIGNALS):
         flags[signal] = flags[signal].fillna(False).astype(bool)
@@ -387,6 +447,10 @@ def build_event_flags(
         if active_signal not in flags.columns:
             flags[active_signal] = False
         flags[active_signal] = flags[active_signal].fillna(False).astype(bool)
+        signal_col = _signal_ts_column(signal)
+        if signal_col not in flags.columns:
+            flags[signal_col] = False
+        flags[signal_col] = flags[signal_col].fillna(False).astype(bool)
     flags = flags.sort_values(["timestamp", "symbol"]).reset_index(drop=True)
     return flags
 
@@ -427,6 +491,9 @@ def load_registry_events(
     if not events.empty:
         events["enter_ts"] = pd.to_datetime(events["enter_ts"], unit="ms", utc=True, errors="coerce")
         events["exit_ts"] = pd.to_datetime(events["exit_ts"], unit="ms", utc=True, errors="coerce")
+        for _col in ("phenom_enter_ts", "detected_ts", "signal_ts"):
+            if _col in events.columns:
+                events[_col] = pd.to_datetime(events[_col], unit="ms", utc=True, errors="coerce")
     events = _normalize_registry_events_frame(events)
     if events.empty:
         return _empty_registry_events()
@@ -446,6 +513,7 @@ def load_registry_flags(data_root: Path, run_id: str, symbol: str | None = None)
         for signal in sorted(REGISTRY_BACKED_SIGNALS):
             cols.append(signal)
             cols.append(_active_signal_column(signal))
+            cols.append(_signal_ts_column(signal))
         return pd.DataFrame(columns=cols)
 
     flags["timestamp"] = pd.to_datetime(flags.get("timestamp"), utc=True, errors="coerce")
@@ -461,10 +529,15 @@ def load_registry_flags(data_root: Path, run_id: str, symbol: str | None = None)
         if active_signal not in flags.columns:
             flags[active_signal] = False
         flags[active_signal] = flags[active_signal].fillna(False).astype(bool)
+        signal_col = _signal_ts_column(signal)
+        if signal_col not in flags.columns:
+            flags[signal_col] = False
+        flags[signal_col] = flags[signal_col].fillna(False).astype(bool)
     cols = ["timestamp", "symbol"]
     for signal in sorted(REGISTRY_BACKED_SIGNALS):
         cols.append(signal)
         cols.append(_active_signal_column(signal))
+        cols.append(_signal_ts_column(signal))
     return flags[cols].sort_values(["timestamp", "symbol"]).reset_index(drop=True)
 
 
@@ -488,6 +561,7 @@ def merge_event_flags_for_selected_event_types(
             continue
         selected_signal_cols.append(spec.signal_column)
         selected_signal_cols.append(_active_signal_column(spec.signal_column))
+        selected_signal_cols.append(_signal_ts_column(spec.signal_column))
     selected_signal_cols = list(dict.fromkeys(selected_signal_cols))
 
     keys = ["timestamp", "symbol"]
@@ -520,19 +594,22 @@ def merge_event_flags_for_selected_event_types(
     merged["symbol"] = merged["symbol"].fillna("").astype(str).str.upper()
     merged = merged[merged["symbol"].str.len() > 0].copy()
 
+    cols_to_add = {}
     for signal in sorted(REGISTRY_BACKED_SIGNALS):
-        if signal not in merged.columns:
-            merged[signal] = False
+        cols_to_add[signal] = False
+        cols_to_add[_active_signal_column(signal)] = False
+        cols_to_add[_signal_ts_column(signal)] = False
+    merged = _bulk_add_cols(merged, cols_to_add)
+    for signal in sorted(REGISTRY_BACKED_SIGNALS):
         merged[signal] = merged[signal].fillna(False).astype(bool)
-        active_signal = _active_signal_column(signal)
-        if active_signal not in merged.columns:
-            merged[active_signal] = False
-        merged[active_signal] = merged[active_signal].fillna(False).astype(bool)
+        merged[_active_signal_column(signal)] = merged[_active_signal_column(signal)].fillna(False).astype(bool)
+        merged[_signal_ts_column(signal)] = merged[_signal_ts_column(signal)].fillna(False).astype(bool)
 
     out_cols = ["timestamp", "symbol"]
     for signal in sorted(REGISTRY_BACKED_SIGNALS):
         out_cols.append(signal)
         out_cols.append(_active_signal_column(signal))
+        out_cols.append(_signal_ts_column(signal))
     return merged[out_cols].sort_values(["timestamp", "symbol"]).reset_index(drop=True)
 
 
