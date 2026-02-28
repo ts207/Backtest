@@ -101,13 +101,23 @@ def _align_funding(bars: pd.DataFrame, funding: pd.DataFrame) -> Tuple[pd.DataFr
 
     funding_sorted = funding.copy()
     funding_sorted["timestamp"] = pd.to_datetime(funding_sorted["timestamp"], utc=True, errors="coerce")
-    funding_sorted = funding_sorted.dropna(subset=["timestamp"]).sort_values("timestamp").drop_duplicates(
-        subset=["timestamp"], keep="last"
+    funding_sorted = funding_sorted.dropna(subset=["timestamp"]).reset_index(drop=True)
+    # Round sub-hour offsets to nearest hour (Binance archive CSVs have ms-level jitter)
+    funding_sorted, coerced_count = coerce_timestamps_to_hour(funding_sorted, "timestamp")
+    if coerced_count > 0:
+        logging.info("Coerced %s funding timestamps to nearest hour (sub-hour offsets in raw CSV data)", coerced_count)
+    funding_sorted = (
+        funding_sorted.sort_values("timestamp")
+        .drop_duplicates(subset=["timestamp"], keep="last")
+        .reset_index(drop=True)
     )
     assert_monotonic_utc_timestamp(funding_sorted, "timestamp")
     assert_funding_sane(funding_sorted, "funding_rate_scaled")
     assert_funding_event_grid(funding_sorted, "timestamp", expected_hours=FUNDING_EVENT_HOURS)
     funding_sorted = funding_sorted.rename(columns={"timestamp": "funding_event_ts"})
+    # Normalize both sides to bars timestamp dtype to avoid datetime resolution mismatch in pandas 2/3+
+    ts_dtype = bars["timestamp"].dtype
+    funding_sorted["funding_event_ts"] = funding_sorted["funding_event_ts"].astype(ts_dtype)
     merged = pd.merge_asof(
         bars.sort_values("timestamp"),
         funding_sorted[["funding_event_ts", "funding_rate_scaled"]],
@@ -171,9 +181,19 @@ def main() -> int:
     try:
         for symbol in symbols:
             raw_dir = DATA_ROOT / "lake" / "raw" / "binance" / market / symbol / "ohlcv_5m"
-            funding_dir = DATA_ROOT / "lake" / "raw" / "binance" / market / symbol / "funding"
             raw_files = list_parquet_files(raw_dir)
-            funding_files = list_parquet_files(funding_dir) if market == "perp" else []
+
+            # Accept both "funding" (new ingest) and "fundingRate" (legacy ingest path)
+            funding_files: list = []
+            funding_dir = None
+            if market == "perp":
+                for _subdir in ("funding", "fundingRate"):
+                    _candidate = DATA_ROOT / "lake" / "raw" / "binance" / market / symbol / _subdir
+                    _files = list_parquet_files(_candidate)
+                    if _files:
+                        funding_dir = _candidate
+                        funding_files = _files
+                        break
 
             raw = read_parquet(raw_files)
             funding = read_parquet(funding_files) if market == "perp" and funding_files else pd.DataFrame()
@@ -244,7 +264,7 @@ def main() -> int:
                     bars[col] = pd.to_numeric(bars[col], errors="coerce").astype(float)
 
             if market == "perp" and not funding.empty:
-                funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True)
+                funding["timestamp"] = pd.to_datetime(funding["timestamp"], utc=True, format="ISO8601")
                 funding = funding.dropna(subset=["timestamp"]).sort_values("timestamp").drop_duplicates(
                     subset=["timestamp"], keep="last"
                 )
@@ -268,6 +288,14 @@ def main() -> int:
                         },
                     }
                 )
+                # Normalize legacy column names from old ingest (fundingRate/ path)
+                if "funding_rate" not in funding.columns and "funding_rate_scaled" in funding.columns:
+                    funding = funding.rename(columns={"funding_rate_scaled": "funding_rate"})
+                # Provide source hint so scale inference uses the known-decimal path
+                if "source" not in funding.columns:
+                    funding = funding.copy()
+                    funding["source"] = "archive_monthly"
+
                 explicit_scale = None
                 if str(args.funding_scale).strip().lower() != "auto":
                     explicit_scale = float(FUNDING_SCALE_NAME_TO_MULTIPLIER[str(args.funding_scale).strip().lower()])

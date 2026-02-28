@@ -2,9 +2,9 @@ import pandera as pa
 import pandas as pd
 from pandera.typing import DataFrame, Series
 
-class Cleaned5mBarsSchema(pa.SchemaModel):
+class Cleaned5mBarsSchema(pa.DataFrameModel):
     symbol: Series[str] = pa.Field(coerce=True)
-    timestamp: Series[pd.DatetimeTZDtype] = pa.Field(dtype_kwargs={"unit": "ns", "tz": "UTC"})
+    timestamp: Series[pd.DatetimeTZDtype] = pa.Field(dtype_kwargs={"unit": "us", "tz": "UTC"})
     open: Series[float] = pa.Field(ge=0.0, nullable=True)
     high: Series[float] = pa.Field(ge=0.0, nullable=True)
     low: Series[float] = pa.Field(ge=0.0, nullable=True)
@@ -18,7 +18,7 @@ class Cleaned5mBarsSchema(pa.SchemaModel):
     class Config:
         strict = False  # Allow other columns like quote_volume or taker_buy_volume
 
-class EventRegistrySchema(pa.SchemaModel):
+class EventRegistrySchema(pa.DataFrameModel):
     symbol: Series[str] = pa.Field(coerce=True)
     enter_ts: Series[int] = pa.Field(ge=1577836800000)
     exit_ts: Series[int] = pa.Field(ge=1577836800000)
@@ -32,7 +32,7 @@ class EventRegistrySchema(pa.SchemaModel):
     class Config:
         strict = False
 
-class Phase2CandidateSchema(pa.SchemaModel):
+class Phase2CandidateSchema(pa.DataFrameModel):
     symbol: Series[str] = pa.Field(coerce=True)
     enter_ts: Series[int] = pa.Field(ge=1577836800000)
     exit_ts: Series[int] = pa.Field(ge=1577836800000)

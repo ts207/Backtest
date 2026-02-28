@@ -190,7 +190,10 @@ def main() -> int:
 
             funding_dupes = 0
             funding_input_path = str(bars_dir) if bars_dir else ""
-            if "funding_rate_scaled" not in bars.columns:
+            if (
+                "funding_rate_scaled" not in bars.columns
+                or pd.to_numeric(bars["funding_rate_scaled"], errors="coerce").isna().all()
+            ):
                 funding_candidates = [
                     run_scoped_lake_path(
                         DATA_ROOT,
