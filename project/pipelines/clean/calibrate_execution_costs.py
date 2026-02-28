@@ -22,10 +22,10 @@ from pipelines._lib.io_utils import choose_partition_dir, ensure_dir, list_parqu
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 
 
-def _calibrate_symbol(symbol: str, run_id: str) -> dict | None:
+def _calibrate_symbol(symbol: str, run_id: str) -> tuple[dict, Path] | None:
     """
     Load tob_5m_agg for a symbol and compute calibration coefficients.
-    Returns None if insufficient data.
+    Returns (calib_dict, tob_dir) on success, or None if insufficient data.
     """
     tob_dir = choose_partition_dir(
         [
@@ -53,13 +53,13 @@ def _calibrate_symbol(symbol: str, run_id: str) -> dict | None:
     median_spread = float(spread.median())
     p75_spread = float(spread.quantile(0.75))
 
-    return {
+    calib = {
         "base_slippage_bps": round(median_spread / 2.0, 4),  # half-spread as slippage proxy
-        "spread_weight": 0.5,
         "p75_spread_bps": round(p75_spread, 4),
         "calibration_source": "tob_5m_agg",
         "n_bars": int(len(spread)),
     }
+    return calib, tob_dir
 
 
 def main() -> int:
@@ -88,9 +88,11 @@ def main() -> int:
 
         calibrated = 0
         for symbol in symbols:
-            calib = _calibrate_symbol(symbol, args.run_id)
-            if calib is None:
+            result = _calibrate_symbol(symbol, args.run_id)
+            if result is None:
                 continue
+            calib, tob_dir = result
+            inputs.append({"path": str(tob_dir)})
             out_path = out_dir / f"{symbol}.json"
             out_path.write_text(json.dumps(calib, indent=2), encoding="utf-8")
             outputs.append({"path": str(out_path), "rows": 1, "start_ts": None, "end_ts": None})

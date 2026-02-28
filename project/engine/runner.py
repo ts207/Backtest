@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from engine.pnl import compute_pnl_components, compute_returns, compute_returns_next_open
-from engine.execution_model import estimate_transaction_cost_bps
+from engine.execution_model import estimate_transaction_cost_bps, load_calibration_config
 from engine.exchange_constraints import load_symbol_constraints, apply_constraints
 from events.registry import load_registry_flags, build_event_feature_frame
 from engine.risk_allocator import RiskLimits, allocate_position_scales
@@ -369,6 +369,7 @@ def _strategy_returns(
     params: Dict[str, object],
     cost_bps: float,
     eligibility_mask: pd.Series | None = None,
+    calibration_dir: Optional[Path] = None,
 ) -> StrategyResult:
     strategy = get_strategy(strategy_name)
     required_features = getattr(strategy, "required_features", []) or []
@@ -437,6 +438,8 @@ def _strategy_returns(
     high = bars_indexed["high"].astype(float)
     low = bars_indexed["low"].astype(float)
     execution_cfg = dict(params.get("execution_model", {})) if isinstance(params, dict) and isinstance(params.get("execution_model", {}), dict) else {}
+    if calibration_dir is not None:
+        execution_cfg = load_calibration_config(symbol, calibration_dir=calibration_dir, base_config=execution_cfg)
     _exec_mode = str(execution_cfg.get("exec_mode", "close")).strip().lower()
     if _exec_mode == "next_open" and "open" in bars_indexed.columns:
         open_ = bars_indexed["open"].astype(float)
@@ -925,6 +928,7 @@ def run_engine(
                 event_feature_ffill_bars=int(strategy_params.get("event_feature_ffill_bars", 12)) if isinstance(strategy_params, dict) else 12,
             )
             eligibility_mask = _symbol_eligibility_mask(bars["timestamp"], symbol, universe_snapshots)
+            _calibration_dir = data_root / "reports" / "cost_calibration" / run_id
             result = _strategy_returns(
                 symbol,
                 bars,
@@ -933,6 +937,7 @@ def run_engine(
                 strategy_params,
                 cost_bps,
                 eligibility_mask=eligibility_mask,
+                calibration_dir=_calibration_dir,
             )
             symbol_results.append(result)
 

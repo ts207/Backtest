@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import json
+import logging
+from pathlib import Path
 from typing import Dict
 
 import numpy as np
 import pandas as pd
+
+_LOG = logging.getLogger(__name__)
 
 
 def estimate_transaction_cost_bps(
@@ -92,14 +97,15 @@ def load_calibration_config(
     are preserved from base. Returns a merged dict safe to pass to
     estimate_transaction_cost_bps as the config argument.
     """
-    import json
-    from pathlib import Path
     path = Path(calibration_dir) / f"{symbol}.json"
     merged = dict(base_config)
     if path.exists():
         try:
-            overrides = json.loads(path.read_text(encoding="utf-8"))
-            merged.update({k: v for k, v in overrides.items() if v is not None})
-        except Exception:
-            pass  # malformed calibration file → use base_config unchanged
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                _LOG.warning("Calibration file %s is not a JSON object; ignoring.", path)
+            else:
+                merged.update({k: v for k, v in raw.items() if v is not None})
+        except json.JSONDecodeError as exc:
+            _LOG.warning("Malformed calibration JSON at %s: %s; using base_config.", path, exc)
     return merged

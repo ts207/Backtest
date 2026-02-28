@@ -25,3 +25,9 @@ def test_load_calibration_ignores_none_values(tmp_path):
     result = load_calibration_config("ETHUSDT", calibration_dir=tmp_path, base_config=base)
     assert result["spread_weight"] == 0.5   # None in calib should NOT override
     assert result["base_slippage_bps"] == 2.0
+
+def test_load_calibration_ignores_malformed_json(tmp_path):
+    (tmp_path / "BTCUSDT.json").write_text("{not valid json", encoding="utf-8")
+    base = {"base_fee_bps": 5.0}
+    result = load_calibration_config("BTCUSDT", calibration_dir=tmp_path, base_config=base)
+    assert result["base_fee_bps"] == 5.0
