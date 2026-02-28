@@ -20,3 +20,9 @@ def test_fragility_gate_fails_fragile_strategy():
 
 def test_fragility_gate_empty_series():
     assert _fragility_gate(pd.Series([], dtype=float), min_pass_rate=0.60) is False
+
+
+def test_fragility_gate_constant_pnl_returns_false():
+    # std=0 case: simulate_parameter_perturbation returns {} → gate returns False
+    pnl = pd.Series([0.0] * 100)
+    assert _fragility_gate(pnl, min_pass_rate=0.60) is False

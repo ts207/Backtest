@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Tuple
+from typing import Dict
 
 import numpy as np
 import pandas as pd
@@ -86,7 +86,8 @@ def simulate_parameter_perturbation(
         "perturbation_return_p05": float(np.percentile(annualized_returns, 5)),
         "perturbation_return_p50": float(np.percentile(annualized_returns, 50)),
         "perturbation_return_p95": float(np.percentile(annualized_returns, 95)),
-        "perturbation_degradation_pct": float(np.percentile(annualized_returns, 5) / (np.mean(pnl) * 105120) - 1.0) if np.mean(pnl) > 0 else 0.0
+        "perturbation_degradation_pct": float(np.percentile(annualized_returns, 5) / (np.mean(pnl) * 105120) - 1.0) if np.mean(pnl) > 0 else 0.0,
+        "fraction_positive": float(np.mean([r > 0.0 for r in annualized_returns])),
     }
 
 

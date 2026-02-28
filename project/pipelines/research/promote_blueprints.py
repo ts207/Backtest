@@ -236,18 +236,8 @@ def _fragility_gate(
     )
     if not stats:
         return False
-    p05 = stats.get("perturbation_return_p05", float("-inf"))
-    p50 = stats.get("perturbation_return_p50", 0.0)
-    # Estimate pass rate: assume normal distribution of perturbation returns
-    # p05 is 5th percentile → infer σ from (p50 - p05) / 1.645
-    if p50 <= 0.0:
-        return False
-    sigma = (p50 - p05) / 1.645 if p50 > p05 else p50
-    if sigma <= 0.0:
-        return bool(p05 > 0.0)
-    from scipy import stats as scipy_stats
-    pass_rate = float(1.0 - scipy_stats.norm.cdf(0.0, loc=p50, scale=sigma))
-    return pass_rate >= float(min_pass_rate)
+    fraction_positive = stats.get("fraction_positive", 0.0)
+    return float(fraction_positive) >= float(min_pass_rate)
 
 
 def _load_strategy_returns(engine_dir: Path, strategy_id: str) -> pd.DataFrame:
