@@ -561,6 +561,13 @@ def main() -> int:
 
             val_pnl = pd.to_numeric(frame.loc[frame["split_label"] == "validation", "pnl"], errors="coerce").dropna()
 
+            # Use full PnL series for SR estimation
+            all_pnl = pd.to_numeric(frame.get("pnl"), errors="coerce").dropna()
+            n_trials_for_dsr = max(1, len(blueprints))
+
+            psr_value = probabilistic_sharpe_ratio(all_pnl)
+            dsr_value = deflated_sharpe_ratio(all_pnl, n_trials=n_trials_for_dsr)
+
             gates = {
                 "min_trades": bool(trades >= int(args.min_trades)),
                 "parameter_neighborhood_stability": bool(_parameter_neighborhood_stability(bp, split_pnl)),
@@ -613,6 +620,8 @@ def main() -> int:
                     val_pnl,
                     min_pass_rate=float(args.min_fragility_pass_rate),
                 ),
+                "psr": bool(psr_value >= float(args.min_psr)),
+                "dsr": bool(dsr_value >= float(args.min_dsr)),
             }
             promote = all(gates.values())
             fail_reasons = [name for name, passed in gates.items() if not passed]
@@ -632,6 +641,8 @@ def main() -> int:
                 "drawdown_cluster_metrics": drawdown_wf if drawdown_wf is not None else {},
                 "drawdown_evidence_source": drawdown_source,
                 "realized_cost_ratio_by_split": realized_cost_ratio_by_split,
+                "psr": float(psr_value),
+                "dsr": float(dsr_value),
                 "gates": gates,
                 "fail_reasons": fail_reasons,
                 "evidence_mode": evidence_mode,
@@ -668,6 +679,8 @@ def main() -> int:
                 "max_cost_ratio_train_validation": float(args.max_cost_ratio_train_validation),
                 "cost_stress_rule": "2x trading_cost on train+validation must stay positive",
                 "min_fragility_pass_rate": float(args.min_fragility_pass_rate),
+                "min_psr": float(args.min_psr),
+                "min_dsr": float(args.min_dsr),
             },
         }
         report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
