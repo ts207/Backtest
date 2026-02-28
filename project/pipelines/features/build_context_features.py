@@ -90,6 +90,13 @@ def _align_funding_to_bars(bars: pd.DataFrame, funding: pd.DataFrame, *, symbol:
     if funding_rates["timestamp"].duplicated(keep=False).any():
         raise ValueError(f"Funding timestamps must be unique for {symbol}")
 
+    # Normalize bar timestamps to ns to match funding_rates (parquet may load as us in pandas 2.x)
+    bars = bars.copy()
+    bars["timestamp"] = bars["timestamp"].astype("datetime64[ns, UTC]")
+    # Drop stale funding column if present — merge_asof would suffix-collide it otherwise
+    if "funding_rate_scaled" in bars.columns:
+        bars = bars.drop(columns=["funding_rate_scaled"])
+
     expected_rows = int(len(bars))
     aligned = pd.merge_asof(
         bars.sort_values("timestamp"),

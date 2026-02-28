@@ -76,9 +76,11 @@ def _normalize_funding_df(df: pd.DataFrame, *, symbol: str) -> pd.DataFrame:
 
     df = df.rename(columns={c: c.strip() for c in df.columns})
 
-    # Binance fundingRate files typically have: fundingTime, fundingRate, markPrice
+    # Binance Vision schema variants:
+    #   classic: fundingTime, fundingRate, markPrice
+    #   newer:   calc_time, last_funding_rate, funding_interval_hours
     ts_col = None
-    for c in ("timestamp", "fundingTime", "funding_time", "time"):
+    for c in ("timestamp", "fundingTime", "funding_time", "time", "calc_time", "calcTime"):
         if c in df.columns:
             ts_col = c
             break
@@ -86,7 +88,7 @@ def _normalize_funding_df(df: pd.DataFrame, *, symbol: str) -> pd.DataFrame:
         raise ValueError(f"Funding CSV missing timestamp column for {symbol}. cols={list(df.columns)}")
 
     rate_col = None
-    for c in ("funding_rate_scaled", "fundingRate", "funding_rate", "funding"):
+    for c in ("funding_rate_scaled", "fundingRate", "funding_rate", "last_funding_rate", "funding"):
         if c in df.columns:
             rate_col = c
             break
@@ -97,12 +99,15 @@ def _normalize_funding_df(df: pd.DataFrame, *, symbol: str) -> pd.DataFrame:
     ts_unit = _infer_ts_unit(ts_raw.dropna())
     ts = pd.to_datetime(ts_raw, unit=ts_unit, utc=True, errors="coerce").astype("datetime64[ns, UTC]")
 
-    out = pd.DataFrame(
-        {
-            "timestamp": ts,
-            "funding_rate_scaled": pd.to_numeric(df[rate_col], errors="coerce"),
-        }
-    ).dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+    build: dict = {
+        "timestamp": ts,
+        "funding_rate_scaled": pd.to_numeric(df[rate_col], errors="coerce"),
+    }
+    # Preserve interval column when present (interval can vary on Binance)
+    if "funding_interval_hours" in df.columns:
+        build["funding_interval_hours"] = pd.to_numeric(df["funding_interval_hours"], errors="coerce")
+
+    out = pd.DataFrame(build).dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
 
     # Drop duplicate timestamps (keep last)
     if out["timestamp"].duplicated(keep=False).any():
