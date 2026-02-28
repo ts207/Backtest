@@ -31,3 +31,9 @@ def test_load_calibration_ignores_malformed_json(tmp_path):
     base = {"base_fee_bps": 5.0}
     result = load_calibration_config("BTCUSDT", calibration_dir=tmp_path, base_config=base)
     assert result["base_fee_bps"] == 5.0
+
+def test_load_calibration_ignores_non_dict_json(tmp_path):
+    (tmp_path / "BTCUSDT.json").write_text("[1, 2, 3]", encoding="utf-8")
+    base = {"base_fee_bps": 5.0}
+    result = load_calibration_config("BTCUSDT", calibration_dir=tmp_path, base_config=base)
+    assert result["base_fee_bps"] == 5.0
