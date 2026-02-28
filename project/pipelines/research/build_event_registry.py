@@ -22,6 +22,7 @@ from events.registry import (
     merge_event_flags_for_selected_event_types,
     merge_registry_events,
     write_event_registry_artifacts,
+    registry_contract_check,
 )
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from schemas.data_contracts import EventRegistrySchema
@@ -94,6 +95,9 @@ def main() -> int:
                 recomputed_flags=selected_flags,
                 selected_event_types=selected_event_types,
             )
+
+        for symbol in symbols:
+            registry_contract_check(events, flags, symbol)
 
         events["enter_ts"] = events["enter_ts"].astype("int64") // 10**6
         events["exit_ts"] = events["exit_ts"].astype("int64") // 10**6

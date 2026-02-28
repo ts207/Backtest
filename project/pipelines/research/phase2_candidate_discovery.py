@@ -27,6 +27,9 @@ from pipelines._lib.io_utils import (
     choose_partition_dir,
 )
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from pipelines._lib.validation import ts_ns_utc
+from pipelines._lib.sanity import assert_monotonic_utc_timestamp
+from research.candidate_schema import ensure_candidate_schema
 from pipelines._lib.ontology_contract import (
     bool_field,
     compare_hash_fields,
@@ -2072,6 +2075,50 @@ def _build_lambda_snapshot(fdr_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _populate_fail_reasons(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    
+    gate_cols = [
+        "gate_economic",
+        "gate_economic_conservative",
+        "gate_stability",
+        "gate_state_information",
+        "gate_cost_model_valid",
+        "gate_cost_ratio"
+    ]
+    
+    df["fail_gate_primary"] = ""
+    df["fail_reason_primary"] = ""
+    
+    for idx, row in df.iterrows():
+        if not bool(row["gate_phase2_final"]):
+            for gate in gate_cols:
+                if gate in df.columns and not bool(row[gate]):
+                    df.at[idx, "fail_gate_primary"] = gate
+                    df.at[idx, "fail_reason_primary"] = f"failed_{gate}"
+                    break
+    return df
+
+def _write_gate_summary(df: pd.DataFrame, out_path: Path):
+    if df.empty:
+        return
+    
+    gate_cols = [c for c in df.columns if c.startswith("gate_")]
+    summary = {
+        "candidates_total": int(len(df)),
+        "pass_all_gates": int(df["gate_phase2_final"].sum()),
+        "per_gate_pass_count": {c: int(df[c].sum()) for c in gate_cols if df[c].dtype == bool or df[c].dtype == int},
+        "per_gate_fail_count": {c: int((~df[c].astype(bool)).sum()) for c in gate_cols if df[c].dtype == bool or df[c].dtype == int},
+    }
+    
+    if "fail_gate_primary" in df.columns:
+        top_fails = df[df["fail_gate_primary"] != ""]["fail_gate_primary"].value_counts().head(5).to_dict()
+        summary["top_5_primary_fail_gates"] = {str(k): int(v) for k, v in top_fails.items()}
+    
+    with open(out_path, "w") as f:
+        json.dump(summary, f, indent=2)
+
 def main():
     parser = _make_parser()
     args = parser.parse_args()
@@ -2523,6 +2570,8 @@ def main():
                 "source_claim_ids": ",".join(plan_row.get("source_claim_ids", [])),
                 "source_concept_ids": ",".join(plan_row.get("source_concept_ids", [])),
                 "candidate_plan_hash": candidate_plan_hash,
+                "effective_lag_bars": int(args.entry_lag_bars),
+                "run_id": str(args.run_id),
             })
     else:
         # Default fallback discovery (original loop)
@@ -2759,6 +2808,8 @@ def main():
                             "fee_bps_resolved": float(cost_estimate.fee_bps_per_side),
                             "slippage_bps_resolved": float(cost_estimate.slippage_bps_per_fill),
                             "candidate_plan_hash": "",
+                            "effective_lag_bars": int(args.entry_lag_bars),
+                            "run_id": str(args.run_id),
                         })
 
                     _add_res(
@@ -3011,8 +3062,18 @@ def main():
         if col not in fdr_df.columns:
             fdr_df[col] = ""
 
+    # Populate explainability fields
+    fdr_df = _populate_fail_reasons(fdr_df)
+    
+    # Write gate summary
+    _write_gate_summary(fdr_df, reports_root / "gate_summary.json")
+
+    # Canonical outputs
     fdr_df.to_parquet(reports_root / "phase2_candidates_raw.parquet", index=False)
-    fdr_df.to_csv(reports_root / "phase2_candidates.csv", index=False)
+    
+    canonical_df = ensure_candidate_schema(fdr_df)
+    canonical_df.to_parquet(reports_root / "phase2_candidates.parquet", index=False)
+    canonical_df.to_csv(reports_root / "phase2_candidates.csv", index=False)
 
     fdr_df[["candidate_id", "family_id", "p_value", "sign"]].to_parquet(
         reports_root / "phase2_pvals.parquet", index=False

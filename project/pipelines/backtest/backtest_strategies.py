@@ -261,7 +261,20 @@ def _load_blueprints(path: Path) -> List[Blueprint]:
         raise ValueError(f"Blueprint file not found: {path}")
     text = path.read_text(encoding="utf-8")
     blueprints: List[Blueprint] = []
-    if path.suffix.lower() == ".json":
+    if path.suffix.lower() in (".yaml", ".yml"):
+        import yaml
+        payload = yaml.safe_load(text)
+        if not isinstance(payload, list):
+            raise ValueError("Blueprint YAML must be an array")
+        for idx, row in enumerate(payload, start=1):
+            if not isinstance(row, dict):
+                raise ValueError(f"Invalid blueprint at index {idx}: expected object")
+            try:
+                blueprints.append(_blueprint_from_dict(row))
+            except Exception as exc:
+                bp_id = row.get("id", "<unknown>")
+                raise ValueError(f"Invalid blueprint at index {idx} (id={bp_id}): {exc}") from exc
+    elif path.suffix.lower() == ".json":
         payload = json.loads(text)
         if not isinstance(payload, list):
             raise ValueError("Blueprint JSON must be an array")
@@ -1109,6 +1122,7 @@ def main() -> int:
                 "strategy_spec_path": str(args.strategy_spec_path or "") if manual_spec_mode else "",
                 "blueprint_filter_event_type": str(args.blueprints_filter_event_type) if blueprint_mode else "",
                 "blueprint_top_k": int(args.blueprints_top_k) if blueprint_mode else 0,
+                "strategy_metadata": engine_results["metrics"].get("strategy_metadata", {}),
             },
             "cost_decomposition": _aggregate_cost_components(
                 engine_results["strategy_frames"],

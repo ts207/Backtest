@@ -24,6 +24,7 @@ from pipelines._lib.io_utils import ensure_dir, read_parquet, write_parquet
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.url_utils import join_url
 from pipelines._lib.validation import ensure_utc_timestamp
+from pipelines._lib.sanity import assert_monotonic_utc_timestamp
 
 ARCHIVE_BASE = "https://data.binance.vision/data/futures/um"
 DEFAULT_API_BASE = "https://fapi.binance.com"
@@ -500,6 +501,7 @@ def main() -> int:
                 if not args.force and _partition_complete(out_path, expected_ts_month):
                     partitions_skipped.append(str(out_path))
                     continue
+                assert_monotonic_utc_timestamp(month_data, "timestamp")
                 ensure_dir(out_path.parent)
                 written_path, storage = write_parquet(month_data, out_path)
                 outputs.append(

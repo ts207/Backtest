@@ -374,20 +374,34 @@ def _strategy_returns(
     if not np.isfinite(requested_position_scale) or requested_position_scale < 0.0:
         raise ValueError(f"Invalid position_scale for {strategy_name}: {requested_position_scale}")
 
-    # --- EXECUTION LATENCY PATCH ---
-    # Shift positions to simulate execution latency (default 1 bar = next open/close).
-    # pos[T] generated at T becomes effective at T+lag.
-    # Execution latency convention:
-    # - For DSL strategies, default to 0 because candidates/blueprints already encode delay via delay_bars.
-    # - For non-DSL strategies, keep the historical default (1 bar) unless overridden.
+    # --- EXECUTION LATENCY HARDENING ---
+    # Shift positions to simulate execution latency.
+    # pos[T] generated at T becomes effective at T + execution_lag.
+    
+    blueprint_delay = int(params.get("delay_bars", 0)) if isinstance(params, dict) else 0
+    
     if isinstance(params, dict) and "execution_lag_bars" in params:
         execution_lag = int(params.get("execution_lag_bars", 0) or 0)
     else:
+        # Default policy: DSL strategies already have lag in blueprint.
+        # Non-DSL strategies default to 1 bar.
         execution_lag = 0 if str(strategy_name).startswith("dsl_interpreter_v1__") else 1
+        
+    # INVARIANT: Prevent "double lag" unless explicitly allowed.
+    if blueprint_delay > 0 and execution_lag > 0 and not int(params.get("allow_double_lag", 0)):
+        raise ValueError(
+            f"Double lag detected for {strategy_name}: blueprint.delay_bars={blueprint_delay}, "
+            f"execution_lag_bars={execution_lag}. One must be 0 unless allow_double_lag=1."
+        )
+        
     if execution_lag > 0:
-        # Fill with 0 (flat) for the initial bars where signal is unknown.
         positions = positions.shift(execution_lag).fillna(0).astype(int)
-    # --- END PATCH ---
+        
+    # Record effective lag for diagnostics
+    strategy_effective_lag_bars = blueprint_delay + execution_lag
+    strategy_metadata["engine_execution_lag_bars_used"] = execution_lag
+    strategy_metadata["strategy_effective_lag_bars"] = strategy_effective_lag_bars
+    # --- END HARDENING ---
 
     entry_reason_map: Dict[pd.Timestamp, str] = {}
     exit_reason_map: Dict[pd.Timestamp, str] = {}

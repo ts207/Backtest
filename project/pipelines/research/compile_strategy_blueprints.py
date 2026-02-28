@@ -27,6 +27,7 @@ from pipelines._lib.ontology_contract import (
     ontology_spec_hash,
     ontology_spec_paths,
 )
+from research.candidate_schema import ensure_candidate_schema
 from events.registry import EVENT_REGISTRY_SPECS, filter_phase1_rows_for_event_type
 from strategy_dsl.policies import event_policy, overlay_defaults
 from strategy_dsl.schema import (
@@ -46,7 +47,7 @@ DETERMINISTIC_TS = "1970-01-01T00:00:00Z"
 QUALITY_MIN_ROBUSTNESS = 0.60
 QUALITY_MIN_EVENTS = 100
 QUALITY_MAX_COST_RATIO = 0.60
-TRIM_WF_WORST_K = 1
+TRIM_WF_WORST_K = 0
 
 SESSION_CONDITION_MAP: Dict[str, Tuple[int, int]] = {
     "session_asia": (0, 7),
@@ -406,11 +407,14 @@ def _entry_from_row(
     time_stop_bars: int,
     run_symbols: List[str],
     candidate_id: str,
-) -> Tuple[EntrySpec, str | None]:
+) -> Tuple[EntrySpec, str | None, int]:
     policy = event_policy(event_type)
     robustness = _safe_float(row.get("robustness_score"), 0.0)
-    action = str(row.get("action", "no_action"))
-    delay = _derive_delay(action=action, robustness=robustness, time_stop_bars=time_stop_bars)
+    
+    # Use effective_lag_bars from research as the authoritative delay
+    effective_lag = _safe_int(row.get("effective_lag_bars"), 1)
+    delay = effective_lag
+    
     cooldown = max(8, delay * 3, int(round(time_stop_bars / 3.0)))
     if robustness < 0.75:
         cooldown = max(cooldown, 12)
@@ -440,6 +444,7 @@ def _entry_from_row(
             reentry_lockout_bars=max(cooldown, delay),
         ),
         condition_symbol,
+        delay,
     )
 
 
@@ -699,7 +704,7 @@ def _choose_event_rows(
         reason = ""
         
         # Mode-based filtering
-        is_disc = _as_bool(row.get("rejected", False)) or _as_bool(row.get("is_discovery", False))
+        is_disc = _as_bool(row.get("is_discovery", True))
         is_fall = _passes_fallback_gate(row, gates)
         
         if mode == "discovery" and not is_disc:
@@ -977,7 +982,7 @@ def _build_blueprint(
     cost_config_digest: str = "",
     ontology_spec_hash_value: str = "",
     operator_registry: Dict[str, Dict[str, Any]] | None = None,
-) -> Blueprint:
+) -> Tuple[Blueprint, int]:
     candidate_id = str(row.get("candidate_id", "")).strip() or _candidate_id(row, 0)
     detail = phase2_lookup.get(candidate_id, {})
     merged = dict(row)
@@ -985,7 +990,7 @@ def _build_blueprint(
 
     time_stop_bars = _derive_time_stop(stats.get("half_life", np.array([])), merged)
     stop_value, target_value = _derive_stop_target(stats=stats, row=merged)
-    entry, condition_symbol_override = _entry_from_row(
+    entry, condition_symbol_override, effective_lag_used = _entry_from_row(
         merged,
         event_type=event_type,
         time_stop_bars=time_stop_bars,
@@ -1069,11 +1074,17 @@ def _build_blueprint(
                 "gate_after_cost_positive": _as_bool(merged.get("gate_after_cost_positive", False)),
                 "gate_after_cost_stressed_positive": _as_bool(merged.get("gate_after_cost_stressed_positive", False)),
                 "gate_bridge_tradable": _as_bool(merged.get("gate_bridge_tradable", False)),
+                "blueprint_effective_lag_bars_used": int(effective_lag_used),
             },
         ),
     )
     blueprint.validate()
-    return blueprint
+    
+    # Executability Hardening: Validate feature references
+    from strategy_dsl.contract_v1 import validate_feature_references
+    validate_feature_references(blueprint.to_dict())
+    
+    return blueprint, effective_lag_used
 
 
 def _load_walkforward_strategy_metrics(run_id: str) -> Tuple[Dict[str, Dict[str, object]], str]:
@@ -1301,12 +1312,14 @@ def main() -> int:
             else:
                 edge_df = pd.DataFrame()
         else:
+            # Canonical input: promoted_candidates.parquet only
             edge_path = DATA_ROOT / "reports" / "promotions" / args.run_id / "promoted_candidates.parquet"
             inputs.append({"path": str(edge_path), "rows": None, "start_ts": None, "end_ts": None})
             if edge_path.exists():
                 edge_df = pd.read_parquet(edge_path)
             else:
                 edge_df = pd.DataFrame()
+        
         if edge_df.empty:
             if Path(edge_path).exists():
                 raise ValueError(
@@ -1318,7 +1331,32 @@ def main() -> int:
                 f"Missing promoted candidates artifact for compile: {edge_path}. "
                 "Run promote_candidates stage first."
             )
+            
+        # Canonical schema enforcement
+        edge_df = ensure_candidate_schema(edge_df)
+        
+        # Require essential columns
+        required_cols = ["candidate_id", "event_type", "effective_lag_bars", "condition", "action", "direction_rule", "horizon"]
+        missing_essential = [c for c in required_cols if c not in edge_df.columns]
+        if missing_essential:
+            raise ValueError(f"Promoted candidates missing essential columns for compilation: {missing_essential}")
+
         edge_df = _validate_promoted_candidates_frame(edge_df, source_label=str(edge_path))
+        
+        # Deterministic sorting of candidates
+        sort_by = []
+        ascending = []
+        for c, asc in [
+            ("selection_score", False),
+            ("robustness_score", False),
+            ("n_events", False),
+            ("candidate_id", True)
+        ]:
+            if c in edge_df.columns:
+                sort_by.append(c)
+                ascending.append(asc)
+        edge_df = edge_df.sort_values(sort_by, ascending=ascending).reset_index(drop=True)
+
         if "gate_bridge_tradable" not in edge_df.columns:
             _msg = (
                 "gate_bridge_tradable column missing from promoted candidates — bridge stage may not have run "
@@ -1356,6 +1394,7 @@ def main() -> int:
         if not event_types and phase2_root.exists():
             event_types = sorted([p.name for p in phase2_root.iterdir() if p.is_dir()])
 
+        print(f"DEBUG: event_types={event_types}", file=sys.stderr)
         blueprints: List[Blueprint] = []
         fallback_count = 0
         rejected_non_executable_condition_count = 0
@@ -1421,14 +1460,16 @@ def main() -> int:
 
             # Selection is already filtered by naive_entry in _choose_event_rows
             selected_for_build_count += len(selected)
+            print(f"DEBUG: selected count for {event_type}={len(selected)}", file=sys.stderr)
             stats = _event_stats(run_id=args.run_id, event_type=event_type)
             event_non_exec_errors: List[str] = []
             event_blueprint_count_before = len(blueprints)
+            print(f"DEBUG: selected length for {event_type}={len(selected)}", file=sys.stderr)
             
             for row in selected:
                 cid = str(row.get("candidate_id", "")).strip() or _candidate_id(row, 0)
                 try:
-                    bp = _build_blueprint(
+                    bp, effective_lag_used = _build_blueprint(
                         run_id=args.run_id,
                         run_symbols=run_symbols,
                         event_type=event_type,
@@ -1473,9 +1514,16 @@ def main() -> int:
                 pass
             if (len(selected) == 0) and (not int(args.allow_naive_entry_fail)):
                 pass
+
         # Write attempts artifact
         if attempt_records:
             pd.DataFrame(attempt_records).to_parquet(out_dir / "compile_attempts.parquet", index=False)
+
+        print(f"DEBUG: blueprints after loop={len(blueprints)}", file=sys.stderr)
+        # Ensure we have a list of Blueprint objects, not tuples from _build_blueprint
+        if blueprints and isinstance(blueprints[0], tuple):
+            blueprints = [bp[0] for bp in blueprints]
+        print(f"DEBUG: blueprints after tuple unpack={len(blueprints)}", file=sys.stderr)
 
         # Global budget enforcement
         max_total = int(args.max_total_compiles_per_run)
@@ -1541,8 +1589,32 @@ def main() -> int:
             raise ValueError("No blueprints remained after compile filters.")
 
         out_jsonl = out_dir / "blueprints.jsonl"
+        out_yaml = out_dir / "blueprints.yaml"
+        
+        # Deterministic sorting before write
+        def bp_sort_key(bp: Blueprint):
+            match = next((r for r in selection_records if r["candidate_id"] == bp.candidate_id), {})
+            # Use after_cost_expectancy as primary selection score
+            return (
+                -float(match.get("after_cost_expectancy", 0.0)),
+                -float(match.get("robustness_score", 0.0)),
+                -int(match.get("n_events", 0)),
+                str(bp.candidate_id)
+            )
+        blueprints = sorted(blueprints, key=bp_sort_key)
+
+        # Atomic write JSONL
+        tmp_jsonl = out_jsonl.with_suffix(".jsonl.tmp")
         lines = [json.dumps(bp.to_dict(), sort_keys=True) for bp in blueprints]
-        out_jsonl.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        tmp_jsonl.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        tmp_jsonl.replace(out_jsonl)
+        
+        # Atomic write YAML
+        tmp_yaml = out_yaml.with_suffix(".yaml.tmp")
+        yaml_payload = [bp.to_dict() for bp in blueprints]
+        with open(tmp_yaml, "w", encoding="utf-8") as f:
+            yaml.dump(yaml_payload, f, sort_keys=True)
+        tmp_yaml.replace(out_yaml)
 
         active_count = sum(1 for bp in blueprints if not bp.lineage.wf_status.startswith("trimmed"))
         trimmed_count = len(blueprints) - active_count
@@ -1551,6 +1623,9 @@ def main() -> int:
             "run_id": args.run_id,
             "compiler_version": COMPILER_VERSION,
             "event_types": event_types,
+            "candidates_in": int(len(edge_rows)),
+            "candidates_compiled": int(len(blueprints)),
+            "candidates_rejected": int(max(0, len(edge_rows) - len(blueprints))),
             "blueprint_count": int(len(blueprints)),
             "fallback_event_count": int(fallback_count),
             "quality_floor": {
@@ -1576,6 +1651,12 @@ def main() -> int:
                 "written_active": int(active_count),
                 "written_trimmed": int(trimmed_count),
             },
+            "blueprint_effective_lag_bars_used": int(np.mean([bp.lineage.constraints.get("blueprint_effective_lag_bars_used", 1) for bp in blueprints])) if blueprints else 0,
+            "top_10_reject_reasons": (
+                pd.DataFrame(attempt_records)["fail_reason"].value_counts().head(10).to_dict()
+                if attempt_records else {}
+            ),
+            "thresholds": vars(args),
             "wf_evidence_hash": str(wf_evidence_hash),
             "wf_evidence_source": str(DATA_ROOT / "reports" / "eval" / args.run_id / "walkforward_summary.json"),
             "min_events_threshold_used": int(args.min_events_floor),
@@ -1592,7 +1673,7 @@ def main() -> int:
                 event_type: int(sum(1 for bp in blueprints if bp.event_type == event_type)) for event_type in event_types
             },
         }
-        out_summary = out_dir / "blueprints_summary.json"
+        out_summary = out_dir / "blueprint_summary.json"
         out_summary.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
         
         # Write selection ledger

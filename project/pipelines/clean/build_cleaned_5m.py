@@ -357,6 +357,10 @@ def main() -> int:
                 # Enforce Runtime Data Contract
                 Cleaned5mBarsSchema.validate(bars_month)
 
+                assert_monotonic_utc_timestamp(bars_month, "timestamp")
+                if bars_month["is_gap"].isna().any():
+                    raise ValueError("is_gap column must be strictly boolean without NaNs.")
+
                 logging.info("Writing cleaned data to out_path: %s", out_path)
                 ensure_dir(out_path.parent)
                 written, storage = write_parquet(bars_month.reset_index(drop=True), out_path)

@@ -15,8 +15,10 @@ DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from eval.splits import build_time_splits
-from pipelines._lib.io_utils import ensure_dir
+from pipelines._lib.io_utils import ensure_dir, read_parquet, write_parquet
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from pipelines._lib.execution_costs import resolve_execution_costs
+from research.candidate_schema import ensure_candidate_schema, CANONICAL_CANDIDATE_COLUMNS
 
 BRIDGE_FIELDS = [
     "candidate_type",
@@ -40,6 +42,9 @@ BRIDGE_FIELDS = [
     "gate_bridge_turnover_controls",
     "gate_bridge_tradable",
     "selection_score_executed",
+    "bridge_fail_gate_primary",
+    "bridge_fail_reason_primary",
+    "bridge_effective_lag_bars_used",
 ]
 
 
@@ -89,13 +94,32 @@ def _add_reason(existing: str, reason: str) -> str:
     return ",".join(reasons)
 
 
-def _load_candidates(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        return pd.DataFrame()
-    try:
-        return pd.read_csv(path)
-    except Exception:
-        return pd.DataFrame()
+def _load_candidates(path_csv: Path) -> pd.DataFrame:
+    path_parquet = path_csv.with_suffix(".parquet")
+    df = pd.DataFrame()
+    if path_parquet.exists():
+        try:
+            df = pd.read_parquet(path_parquet)
+        except Exception:
+            pass
+    
+    if df.empty and path_csv.exists():
+        try:
+            df = pd.read_csv(path_csv)
+        except Exception:
+            pass
+            
+    if df.empty:
+        return df
+        
+    df = ensure_candidate_schema(df)
+    
+    required = ["candidate_id", "event_type", "effective_lag_bars", "horizon", "gate_phase2_final"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"Candidates missing required columns: {missing}")
+        
+    return df
 
 
 def _resolve_overlay_bases(df: pd.DataFrame, event_type: str) -> pd.DataFrame:
@@ -265,6 +289,9 @@ def _evaluate_bridge_row(
         fail_reasons.append("gate_bridge_turnover_controls")
 
     status = "tradable" if gate_tradable else ("rejected:" + ",".join(fail_reasons))
+    
+    primary_fail = fail_reasons[0] if fail_reasons else ""
+    
     return (
         {
             "candidate_id": candidate_id,
@@ -280,6 +307,9 @@ def _evaluate_bridge_row(
             "gate_bridge_tradable": bool(gate_tradable),
             "selection_score_executed": float(metrics["bridge_validation_after_cost_bps"]),
             "bridge_fail_reasons": ",".join(fail_reasons),
+            "bridge_fail_gate_primary": primary_fail,
+            "bridge_fail_reason_primary": f"failed_{primary_fail}" if primary_fail else "",
+            "bridge_effective_lag_bars_used": int(row.get("effective_lag_bars", 1)),
         },
         overlay_delta,
     )
@@ -359,6 +389,14 @@ def main() -> int:
     inputs: List[Dict[str, object]] = [{"path": str(phase2_candidates_path), "rows": len(full_candidates), "start_ts": None, "end_ts": None}]
     outputs: List[Dict[str, object]] = []
     manifest = start_manifest("bridge_evaluate_phase2", args.run_id, params, inputs, outputs)
+
+    costs = resolve_execution_costs(
+        project_root=PROJECT_ROOT,
+        config_paths=[],
+        fees_bps=None,
+        slippage_bps=None,
+        cost_bps=None,
+    )
 
     try:
         windows = []
@@ -456,11 +494,12 @@ def main() -> int:
 
         updated = full_candidates.copy()
         updated = updated.merge(metrics_df, on="candidate_id", how="left", suffixes=("", "_bridge"))
-        # If bridge_fail_reasons clashed with an existing column, consolidate.
+        
+        # Consolidate bridge fail reasons and fields
         if "bridge_fail_reasons_bridge" in updated.columns:
             updated["bridge_fail_reasons"] = updated["bridge_fail_reasons_bridge"]
             updated = updated.drop(columns=["bridge_fail_reasons_bridge"])
-        # Keep merged bridge columns canonical.
+            
         for col in BRIDGE_FIELDS:
             bridge_col = f"{col}_bridge"
             if bridge_col in updated.columns:
@@ -469,14 +508,18 @@ def main() -> int:
             if col not in updated.columns:
                 updated[col] = np.nan
 
+        # Final composite gate
         if "gate_all" in updated.columns:
-            updated["gate_all"] = updated["gate_all"].astype(bool) & updated["gate_bridge_tradable"].astype(bool)
+            updated["gate_all"] = updated["gate_all"].astype(bool) & updated["gate_bridge_tradable"].fillna(False).astype(bool)
         else:
-            updated["gate_all"] = updated["gate_bridge_tradable"].astype(bool)
+            updated["gate_all"] = updated["gate_bridge_tradable"].fillna(False).astype(bool)
+            
+        # Fail reasons update
         if "fail_reasons" not in updated.columns:
             updated["fail_reasons"] = ""
         else:
             updated["fail_reasons"] = updated["fail_reasons"].fillna("").astype(str)
+            
         fail_lookup = {str(row.get("candidate_id", "")): str(row.get("bridge_fail_reasons", "")) for row in metrics_rows}
         for idx, row in updated.iterrows():
             cid = str(row.get("candidate_id", "")).strip()
@@ -485,7 +528,18 @@ def main() -> int:
                 for token in [x for x in bridge_fail.split(",") if x]:
                     updated.at[idx, "fail_reasons"] = _add_reason(str(updated.at[idx, "fail_reasons"]), token)
 
-        updated.to_csv(phase2_candidates_path, index=False)
+        # Atomic writes for canonical artifacts
+        updated_canonical = ensure_candidate_schema(updated)
+        
+        # Save Parquet first
+        tmp_parquet = phase2_candidates_path.with_suffix(".parquet.tmp")
+        updated_canonical.to_parquet(tmp_parquet, index=False)
+        tmp_parquet.replace(phase2_candidates_path.with_suffix(".parquet"))
+        
+        # Save CSV second
+        tmp_csv = phase2_candidates_path.with_suffix(".csv.tmp")
+        updated_canonical.to_csv(tmp_csv, index=False)
+        tmp_csv.replace(phase2_candidates_path)
 
         promoted_path = phase2_dir / "promoted_candidates.json"
         if promoted_path.exists():
@@ -494,7 +548,7 @@ def main() -> int:
             except Exception:
                 payload = {}
             if isinstance(payload, dict):
-                tradable_ids = set(updated[updated["gate_bridge_tradable"].astype(bool)]["candidate_id"].astype(str).tolist())
+                tradable_ids = set(updated[updated["gate_bridge_tradable"].fillna(False).astype(bool)]["candidate_id"].astype(str).tolist())
                 candidates_list = payload.get("candidates", [])
                 if isinstance(candidates_list, list):
                     payload["candidates"] = [
@@ -505,15 +559,35 @@ def main() -> int:
                     payload["decision"] = "promote" if payload["promoted_count"] > 0 else "freeze"
                 promoted_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
-        tradable_count = int(metrics_df["gate_bridge_tradable"].astype(bool).sum()) if not metrics_df.empty else 0
+        tradable_count = int(metrics_df["gate_bridge_tradable"].fillna(False).astype(bool).sum()) if not metrics_df.empty else 0
+        
+        # Enhanced Bridge Summary
+        top_fails = {}
+        if not metrics_df.empty and "bridge_fail_gate_primary" in metrics_df.columns:
+            top_fails = metrics_df[metrics_df["bridge_fail_gate_primary"] != ""]["bridge_fail_gate_primary"].value_counts().head(5).to_dict()
+            top_fails = {str(k): int(v) for k, v in top_fails.items()}
+
         summary_payload = {
             "run_id": args.run_id,
             "event_type": event_type,
-            "candidate_count": int(len(metrics_df)),
-            "tradable_count": int(tradable_count),
-            "overlay_candidate_count": int((metrics_df["candidate_type"].astype(str) == "overlay").sum()) if not metrics_df.empty else 0,
+            "n_candidates_in": int(len(metrics_df)),
+            "n_candidates_tradable": int(tradable_count),
+            "top_5_bridge_fail_reasons": top_fails,
+            "distribution_stats": {
+                "bridge_validation_after_cost_bps": {
+                    "mean": float(metrics_df["bridge_validation_after_cost_bps"].mean()) if not metrics_df.empty else 0.0,
+                    "median": float(metrics_df["bridge_validation_after_cost_bps"].median()) if not metrics_df.empty else 0.0,
+                },
+                "bridge_effective_cost_bps_per_trade": {
+                    "mean": float(metrics_df["bridge_effective_cost_bps_per_trade"].mean()) if not metrics_df.empty else 0.0,
+                },
+                "bridge_validation_trades": {
+                    "mean": float(metrics_df["bridge_validation_trades"].mean()) if not metrics_df.empty else 0.0,
+                }
+            },
             "edge_cost_k": float(args.edge_cost_k),
             "min_validation_trades": int(args.min_validation_trades),
+            "execution_costs_digest": costs.config_digest,
             "windows": windows,
         }
         out_summary_json.write_text(json.dumps(summary_payload, indent=2, sort_keys=True), encoding="utf-8")

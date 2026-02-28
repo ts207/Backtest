@@ -22,6 +22,7 @@ from pipelines._lib.io_utils import ensure_dir, read_parquet, write_parquet
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.url_utils import join_url
 from pipelines._lib.validation import ensure_utc_timestamp
+from pipelines._lib.sanity import assert_monotonic_utc_timestamp
 
 
 ARCHIVE_BASE = "https://data.binance.vision/data/futures/um"
@@ -271,6 +272,7 @@ def main() -> int:
                         raise ValueError(f"Timestamps not sorted for {symbol} {month_start:%Y-%m}")
 
                 if not data.empty:
+                    assert_monotonic_utc_timestamp(data, "timestamp")
                     ensure_dir(out_dir)
                     written_path, storage = write_parquet(data, out_path)
                     logging.info("Wrote %s rows to %s", len(data), written_path)

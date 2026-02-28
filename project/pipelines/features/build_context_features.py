@@ -30,6 +30,8 @@ from pipelines._lib.run_manifest import (
     validate_feature_schema_columns,
     validate_input_provenance,
 )
+from pipelines._lib.validation import ts_ns_utc
+from pipelines._lib.sanity import assert_monotonic_utc_timestamp
 
 FUNDING_MAX_STALENESS = pd.Timedelta("8h")
 
@@ -37,22 +39,27 @@ FUNDING_MAX_STALENESS = pd.Timedelta("8h")
 def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
     if df.empty:
         return {"rows": 0, "start_ts": None, "end_ts": None}
+    ts = ts_ns_utc(df["timestamp"])
     return {
         "rows": int(len(df)),
-        "start_ts": df["timestamp"].min().isoformat(),
-        "end_ts": df["timestamp"].max().isoformat(),
+        "start_ts": ts.min().isoformat(),
+        "end_ts": ts.max().isoformat(),
     }
 
 
 def _dedupe_timestamp_rows(df: pd.DataFrame, label: str) -> tuple[pd.DataFrame, int]:
     if "timestamp" not in df.columns or df.empty:
         return df, 0
-    out = df.sort_values("timestamp").copy()
+    out = df.copy()
+    out["timestamp"] = ts_ns_utc(out["timestamp"])
+    out = out.sort_values("timestamp")
     dupes = int(out["timestamp"].duplicated(keep="last").sum())
     if dupes > 0:
         logging.warning("Dropping %s duplicate timestamp rows for %s (keeping last).", dupes, label)
         out = out.drop_duplicates(subset=["timestamp"], keep="last")
-    return out.reset_index(drop=True), dupes
+    out = out.reset_index(drop=True)
+    assert_monotonic_utc_timestamp(out, "timestamp")
+    return out, dupes
 
 
 def _align_funding_to_bars(bars: pd.DataFrame, funding: pd.DataFrame, *, symbol: str) -> pd.DataFrame:
@@ -60,15 +67,14 @@ def _align_funding_to_bars(bars: pd.DataFrame, funding: pd.DataFrame, *, symbol:
     missing = required - set(funding.columns)
     if missing:
         raise ValueError(f"Funding data missing required columns for {symbol}: {sorted(missing)}")
-    if bars["timestamp"].duplicated(keep=False).any():
-        raise ValueError(f"Bar timestamps must be unique for funding alignment ({symbol})")
+    
+    assert_monotonic_utc_timestamp(bars, "timestamp")
 
     funding_rates = funding[["timestamp", "funding_rate_scaled"]].copy()
-    funding_rates["timestamp"] = pd.to_datetime(funding_rates["timestamp"], utc=True, errors="coerce")
+    funding_rates["timestamp"] = ts_ns_utc(funding_rates["timestamp"])
     funding_rates["funding_rate_scaled"] = pd.to_numeric(funding_rates["funding_rate_scaled"], errors="coerce")
-    funding_rates = funding_rates.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
-    if funding_rates["timestamp"].duplicated(keep=False).any():
-        raise ValueError(f"Funding timestamps must be unique for {symbol}")
+    funding_rates = funding_rates.sort_values("timestamp").reset_index(drop=True)
+    assert_monotonic_utc_timestamp(funding_rates, "timestamp")
 
     expected_rows = int(len(bars))
     aligned = pd.merge_asof(

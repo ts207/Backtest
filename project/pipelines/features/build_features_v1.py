@@ -24,22 +24,44 @@ from pipelines._lib.run_manifest import (
     validate_feature_schema_columns,
     validate_input_provenance,
 )
-from pipelines._lib.validation import ensure_utc_timestamp, validate_columns
+from pipelines._lib.validation import ensure_utc_timestamp, validate_columns, ts_ns_utc
+from pipelines._lib.sanity import assert_monotonic_utc_timestamp
+from schemas.data_contracts import Cleaned5mBarsSchema
 from features.microstructure import calculate_vpin, calculate_roll, calculate_amihud, calculate_kyle_lambda
-
-FUNDING_MAX_STALENESS = pd.Timedelta("8h")
-OI_MAX_STALENESS = pd.Timedelta("2h")
-LIQ_MAX_STALENESS = pd.Timedelta("30min")
 
 
 def _collect_stats(df: pd.DataFrame) -> Dict[str, object]:
     if df.empty:
         return {"rows": 0, "start_ts": None, "end_ts": None}
+    ts = ts_ns_utc(df["timestamp"])
     return {
         "rows": int(len(df)),
-        "start_ts": df["timestamp"].min().isoformat(),
-        "end_ts": df["timestamp"].max().isoformat(),
+        "start_ts": ts.min().isoformat(),
+        "end_ts": ts.max().isoformat(),
     }
+
+
+def features_contract_check(df: pd.DataFrame, symbol: str) -> None:
+    """
+    Assert that features output preserves bar count, grid, and schema.
+    """
+    if df.empty:
+        return
+    required = ["timestamp", "symbol", "close"]
+    validate_columns(df, required)
+    
+    ts = ts_ns_utc(df["timestamp"])
+    assert_monotonic_utc_timestamp(df, "timestamp")
+    
+    if len(ts) > 1:
+        diffs = ts.diff().dropna()
+        # 5m bars = 300s = 300,000,000,000 ns
+        expected_ns = 300 * 10**9
+        if not (diffs.view("int64") == expected_ns).all():
+            # Allow first bar to be off-grid if it's a partial start, 
+            # but middle bars must be exactly 5m.
+            if not (diffs.view("int64")[1:] == expected_ns).all():
+                raise ValueError(f"Features for {symbol} do not follow 5m grid")
 
 
 def _revision_lag_minutes(revision_lag_bars: int) -> int:
@@ -92,8 +114,9 @@ def _read_optional_time_series(path: Path) -> pd.DataFrame:
         return pd.DataFrame()
         
     frame = frame.rename(columns={ts_col: "timestamp"})
-    frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
-    frame = frame.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+    frame["timestamp"] = ts_ns_utc(frame["timestamp"])
+    frame = frame.sort_values("timestamp").reset_index(drop=True)
+    assert_monotonic_utc_timestamp(frame, "timestamp")
     return frame
 
 
@@ -196,16 +219,13 @@ def _merge_optional_oi_liquidation(
 
 def _merge_funding_rates(bars: pd.DataFrame, funding: pd.DataFrame, symbol: str) -> pd.DataFrame:
     out = bars.copy()
-    if out["timestamp"].duplicated(keep=False).any():
-        raise ValueError(f"Bar timestamps must be unique for {symbol}")
+    assert_monotonic_utc_timestamp(out, "timestamp")
 
     funding_rates = funding[["timestamp", "funding_rate_scaled"]].copy()
-    funding_rates["timestamp"] = pd.to_datetime(funding_rates["timestamp"], utc=True, errors="coerce")
+    funding_rates["timestamp"] = ts_ns_utc(funding_rates["timestamp"])
     funding_rates["funding_rate_scaled"] = pd.to_numeric(funding_rates["funding_rate_scaled"], errors="coerce")
-    funding_rates = funding_rates.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
-
-    if funding_rates["timestamp"].duplicated(keep=False).any():
-        raise ValueError(f"Funding timestamps must be unique for {symbol}")
+    funding_rates = funding_rates.sort_values("timestamp").reset_index(drop=True)
+    assert_monotonic_utc_timestamp(funding_rates, "timestamp")
 
     expected_rows = int(len(out))
     merged = pd.merge_asof(
@@ -361,8 +381,8 @@ def main() -> int:
                 raise ValueError(f"No cleaned bars for {symbol}")
 
             validate_columns(bars, ["timestamp", "open", "high", "low", "close"])
-            bars["timestamp"] = pd.to_datetime(bars["timestamp"], utc=True)
-            ensure_utc_timestamp(bars["timestamp"], "timestamp")
+            bars["timestamp"] = ts_ns_utc(bars["timestamp"])
+            assert_monotonic_utc_timestamp(bars, "timestamp")
             bars = bars.sort_values("timestamp").reset_index(drop=True)
 
             bars_stats = _collect_stats(bars)
@@ -427,6 +447,7 @@ def main() -> int:
 
             features = bars[[
                 "timestamp",
+                "symbol",
                 "open",
                 "high",
                 "low",
@@ -477,6 +498,9 @@ def main() -> int:
 
             features["year"] = features["timestamp"].dt.year
             features["month"] = features["timestamp"].dt.month
+            
+            features_contract_check(features, symbol)
+            
             validate_feature_schema_columns(
                 dataset_key="features_v1_5m_v1",
                 columns=features.columns.drop(["year", "month"]).tolist(),

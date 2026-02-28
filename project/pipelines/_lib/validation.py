@@ -40,6 +40,16 @@ def ensure_utc_timestamp(series: pd.Series, name: str) -> pd.Series:
     return series
 
 
+def ts_ns_utc(series: pd.Series) -> pd.Series:
+    """
+    Convert a series to datetime64[ns, UTC] with strict validation.
+    """
+    ts = pd.to_datetime(series, utc=True, errors="coerce")
+    if ts.isna().any():
+        raise ValueError("Timestamp series contains NaT or unparseable values")
+    return ts.dt.as_unit("ns")
+
+
 def validate_columns(df: pd.DataFrame, required: Iterable[str]) -> None:
     """
     Ensure that a DataFrame contains the required columns.

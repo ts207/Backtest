@@ -790,14 +790,13 @@ class DslInterpreterV1:
                         positions.append(0)
                         continue
                 if state == "armed":
-                    if not is_eligible:
-                        state = "flat"
-                        positions.append(0)
-                        continue
                     if arm_remaining > 0:
                         arm_remaining -= 1
-                        positions.append(0)
-                        continue
+                        # If we just reached 0, we can evaluate entry on THIS bar,
+                        # or do we wait for the next? The logic continues below to enter.
+                        if arm_remaining > 0:
+                            positions.append(0)
+                            continue
 
                     side = _entry_side(row, blueprint)
                     for overlay in blueprint.overlays:

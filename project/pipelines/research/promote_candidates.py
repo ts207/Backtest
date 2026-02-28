@@ -18,6 +18,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.ontology_contract import load_run_manifest_hashes
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from research.candidate_schema import ensure_candidate_schema
 
 
 def _safe_float(value: object, default: float = 0.0) -> float:
@@ -170,15 +171,22 @@ def _load_phase2_candidates(phase2_root: Path) -> pd.DataFrame:
     if not phase2_root.exists():
         return pd.DataFrame()
     for event_dir in sorted(path for path in phase2_root.iterdir() if path.is_dir()):
-        csv_path = event_dir / "phase2_candidates.csv"
-        if not csv_path.exists():
-            continue
-        try:
-            df = pd.read_csv(csv_path)
-        except Exception:
-            continue
+        parquet_path = event_dir / "phase2_candidates.parquet"
+        
+        df = pd.DataFrame()
+        source_path = ""
+        if parquet_path.exists():
+            try:
+                df = pd.read_parquet(parquet_path)
+                source_path = str(parquet_path)
+            except Exception as e:
+                logging.warning(f"Failed to read {parquet_path}: {e}")
+                
         if df.empty:
             continue
+            
+        df = ensure_candidate_schema(df)
+        
         event_name = event_dir.name
         if "event" not in df.columns:
             df["event"] = event_name
@@ -188,7 +196,7 @@ def _load_phase2_candidates(phase2_root: Path) -> pd.DataFrame:
             df["candidate_id"] = [
                 f"{event_name}_{idx}" for idx in range(len(df))
             ]
-        df["source_phase2_path"] = str(csv_path)
+        df["source_phase2_path"] = source_path
         rows.append(df)
     if not rows:
         return pd.DataFrame()
@@ -207,7 +215,8 @@ def _load_hypothesis_audit(path: Path) -> pd.DataFrame:
         if path.suffix == ".parquet":
             df = pd.read_parquet(path)
         else:
-            df = pd.read_csv(path)
+            logging.warning(f"Expected .parquet for hypothesis audit, got {path.suffix}")
+            return pd.DataFrame()
     except Exception:
         return pd.DataFrame()
     if df.empty:
@@ -352,12 +361,16 @@ def _evaluate_row(
         summary=negative_control_summary,
     )
 
+    promo_fail_reasons: List[str] = []
+    
     statistical_pass = (q_value <= float(max_q_value)) and (n_events >= int(min_events))
     if not statistical_pass:
         if q_value > float(max_q_value):
             reject_reasons.append("statistical_q_value")
+            promo_fail_reasons.append("gate_promo_statistical_q_value")
         if n_events < int(min_events):
             reject_reasons.append("statistical_min_events")
+            promo_fail_reasons.append("gate_promo_statistical_min_events")
 
     stability_pass = (
         gate_stability
@@ -367,23 +380,29 @@ def _evaluate_row(
     if not stability_pass:
         if not gate_stability:
             reject_reasons.append("stability_gate")
+            promo_fail_reasons.append("gate_promo_stability_gate")
         if stability_score < float(min_stability_score):
             reject_reasons.append("stability_score")
+            promo_fail_reasons.append("gate_promo_stability_score")
         if sign_consistency < float(min_sign_consistency):
             reject_reasons.append("stability_sign_consistency")
+            promo_fail_reasons.append("gate_promo_stability_sign_consistency")
 
     cost_pass = cost_survival_ratio >= float(min_cost_survival_ratio)
     if not cost_pass:
         reject_reasons.append("cost_survival")
+        promo_fail_reasons.append("gate_promo_cost_survival")
 
     if control_rate is None:
         control_pass = bool(allow_missing_negative_controls)
         if not control_pass:
             reject_reasons.append("negative_control_missing")
+            promo_fail_reasons.append("gate_promo_negative_control_missing")
     else:
         control_pass = control_rate <= float(max_negative_control_pass_rate)
         if not control_pass:
             reject_reasons.append("negative_control_fail")
+            promo_fail_reasons.append("gate_promo_negative_control_fail")
 
     audit_pass = True
     audit_statuses: List[str] = []
@@ -394,13 +413,16 @@ def _evaluate_row(
             audit_pass = bool(audit_info.get("executed", False))
             if not audit_pass:
                 reject_reasons.append("hypothesis_not_executed")
+                promo_fail_reasons.append("gate_promo_hypothesis_not_executed")
         else:
             if require_hypothesis_audit:
                 audit_pass = False
                 reject_reasons.append("hypothesis_missing_audit")
+                promo_fail_reasons.append("gate_promo_hypothesis_missing_audit")
     elif require_hypothesis_audit:
         audit_pass = False
         reject_reasons.append("hypothesis_missing_plan_row_id")
+        promo_fail_reasons.append("gate_promo_hypothesis_missing_plan_row_id")
 
     promoted = bool(statistical_pass and stability_pass and cost_pass and control_pass and audit_pass)
     promotion_decision = "promoted" if promoted else "rejected"
@@ -411,10 +433,14 @@ def _evaluate_row(
         + float(control_pass)
     ) / 4.0
 
+    primary_promo_fail = promo_fail_reasons[0] if promo_fail_reasons else ""
+
     return {
         "promotion_decision": promotion_decision,
         "promotion_score": float(promotion_score),
         "reject_reason": "|".join(sorted(set(reject_reasons))),
+        "promotion_fail_gate_primary": primary_promo_fail,
+        "promotion_fail_reason_primary": f"failed_{primary_promo_fail}" if primary_promo_fail else "",
         "q_value": float(q_value),
         "n_events": int(n_events),
         "stability_score": float(stability_score),
@@ -422,11 +448,11 @@ def _evaluate_row(
         "cost_survival_ratio": float(cost_survival_ratio),
         "control_pass_rate": None if control_rate is None else float(control_rate),
         "audit_statuses": audit_statuses,
-        "gate_statistical": bool(statistical_pass),
-        "gate_stability": bool(stability_pass),
-        "gate_cost_survival": bool(cost_pass),
-        "gate_negative_control": bool(control_pass),
-        "gate_hypothesis_audit": bool(audit_pass),
+        "gate_promo_statistical": bool(statistical_pass),
+        "gate_promo_stability": bool(stability_pass),
+        "gate_promo_cost_survival": bool(cost_pass),
+        "gate_promo_negative_control": bool(control_pass),
+        "gate_promo_hypothesis_audit": bool(audit_pass),
     }
 
 
@@ -520,33 +546,62 @@ def main() -> int:
         audit_df = pd.DataFrame(audit_rows)
         promoted_df = pd.DataFrame(promoted_rows)
 
-        audit_path = out_dir / "promotion_audit.parquet"
-        promoted_path = out_dir / "promoted_candidates.parquet"
-        audit_df.to_parquet(audit_path, index=False)
-        promoted_df.to_parquet(promoted_path, index=False)
+        # Deterministic sorting
+        if not audit_df.empty:
+            sort_cols = []
+            for c in ["promotion_score", "robustness_score", "n_events", "candidate_id"]:
+                if c in audit_df.columns:
+                    sort_cols.append(c)
+            audit_df = audit_df.sort_values(sort_cols, ascending=[False]*len(sort_cols)).reset_index(drop=True)
+            
+        if not promoted_df.empty:
+            sort_cols = []
+            for c in ["promotion_score", "robustness_score", "n_events", "candidate_id"]:
+                if c in promoted_df.columns:
+                    sort_cols.append(c)
+            promoted_df = promoted_df.sort_values(sort_cols, ascending=[False]*len(sort_cols)).reset_index(drop=True)
 
-        audit_df.to_csv(out_dir / "promotion_audit.csv", index=False)
-        promoted_df.to_csv(out_dir / "promoted_candidates.csv", index=False)
+        # Atomic writes via tmp + replace
+        audit_path_parquet = out_dir / "promotion_audit.parquet"
+        promoted_path_parquet = out_dir / "promoted_candidates.parquet"
+        
+        tmp_audit = audit_path_parquet.with_suffix(".parquet.tmp")
+        audit_df.to_parquet(tmp_audit, index=False)
+        tmp_audit.replace(audit_path_parquet)
+        
+        tmp_promoted = promoted_path_parquet.with_suffix(".parquet.tmp")
+        promoted_df.to_parquet(tmp_promoted, index=False)
+        tmp_promoted.replace(promoted_path_parquet)
 
+        audit_df.to_parquet(out_dir / "promotion_audit.parquet", index=False)
+
+        # Enhanced Summary
         summary = {
             "run_id": args.run_id,
-            "phase2_candidates_total": int(len(audit_df)),
-            "promoted_total": int(len(promoted_df)),
+            "candidates_in_total": int(len(audit_df)),
+            "candidates_after_phase2": int(audit_df["gate_phase2_final"].map(_as_bool).sum()) if "gate_phase2_final" in audit_df.columns else 0,
+            "candidates_after_bridge": int(audit_df["gate_bridge_tradable"].map(_as_bool).sum()) if "gate_bridge_tradable" in audit_df.columns else 0,
+            "candidates_promoted_final": int(len(promoted_df)),
             "rejected_total": int(max(0, len(audit_df) - len(promoted_df))),
             "gate_pass_counts": {
-                "gate_statistical": int(audit_df.get("gate_statistical", pd.Series(dtype=bool)).sum()) if not audit_df.empty else 0,
-                "gate_stability": int(audit_df.get("gate_stability", pd.Series(dtype=bool)).sum()) if not audit_df.empty else 0,
-                "gate_cost_survival": int(audit_df.get("gate_cost_survival", pd.Series(dtype=bool)).sum()) if not audit_df.empty else 0,
-                "gate_negative_control": int(audit_df.get("gate_negative_control", pd.Series(dtype=bool)).sum()) if not audit_df.empty else 0,
+                "gate_promo_statistical": int(audit_df.get("gate_promo_statistical", pd.Series(dtype=bool)).sum()) if not audit_df.empty else 0,
+                "gate_promo_stability": int(audit_df.get("gate_promo_stability", pd.Series(dtype=bool)).sum()) if not audit_df.empty else 0,
+                "gate_promo_cost_survival": int(audit_df.get("gate_promo_cost_survival", pd.Series(dtype=bool)).sum()) if not audit_df.empty else 0,
+                "gate_promo_negative_control": int(audit_df.get("gate_promo_negative_control", pd.Series(dtype=bool)).sum()) if not audit_df.empty else 0,
             },
-            "reject_reason_counts": (
-                {
-                    str(k): int(v)
-                    for k, v in audit_df["reject_reason"].value_counts(dropna=False).to_dict().items()
-                }
-                if (not audit_df.empty and "reject_reason" in audit_df.columns)
-                else {}
+            "top_10_fail_reasons_phase2": (
+                audit_df[audit_df["fail_gate_primary"] != ""]["fail_gate_primary"].value_counts().head(10).to_dict()
+                if "fail_gate_primary" in audit_df.columns else {}
             ),
+            "top_10_fail_reasons_bridge": (
+                audit_df[audit_df["bridge_fail_gate_primary"] != ""]["bridge_fail_gate_primary"].value_counts().head(10).to_dict()
+                if "bridge_fail_gate_primary" in audit_df.columns else {}
+            ),
+            "top_10_fail_reasons_promotion": (
+                audit_df[audit_df["promotion_fail_gate_primary"] != ""]["promotion_fail_gate_primary"].value_counts().head(10).to_dict()
+                if "promotion_fail_gate_primary" in audit_df.columns else {}
+            ),
+            "thresholds": vars(args),
             "inputs": {
                 "phase2_root": str(phase2_root),
                 "hypothesis_audit_path": str(hypothesis_audit_path),
@@ -554,6 +609,11 @@ def main() -> int:
                 "manual_spec_path": str(args.manual_spec_path or ""),
             },
         }
+        # Final formatting for JSON
+        summary["top_10_fail_reasons_phase2"] = {str(k): int(v) for k, v in summary["top_10_fail_reasons_phase2"].items()}
+        summary["top_10_fail_reasons_bridge"] = {str(k): int(v) for k, v in summary["top_10_fail_reasons_bridge"].items()}
+        summary["top_10_fail_reasons_promotion"] = {str(k): int(v) for k, v in summary["top_10_fail_reasons_promotion"].items()}
+
         (out_dir / "promotion_summary.json").write_text(
             json.dumps(summary, indent=2, sort_keys=True),
             encoding="utf-8",
@@ -570,8 +630,8 @@ def main() -> int:
             stats={
                 "phase2_candidates_total": int(len(audit_df)),
                 "promoted_total": int(len(promoted_df)),
-                "promotion_audit_path": str(audit_path.relative_to(PROJECT_ROOT.parent)),
-                "promoted_candidates_path": str(promoted_path.relative_to(PROJECT_ROOT.parent)),
+                "promotion_audit_path": str(audit_path_parquet.relative_to(PROJECT_ROOT.parent)),
+                "promoted_candidates_path": str(promoted_path_parquet.relative_to(PROJECT_ROOT.parent)),
                 "manual_spec_hash": manual_spec_hash,
             },
         )

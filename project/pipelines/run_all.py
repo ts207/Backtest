@@ -709,6 +709,14 @@ def main() -> int:
         )
         return 1
 
+    if int(args.run_strategy_builder) and not int(args.run_candidate_promotion):
+        print(
+            "run_strategy_builder requires promoted candidates. "
+            "Enable --run_candidate_promotion 1.",
+            file=sys.stderr,
+        )
+        return 1
+
     cross_venue_requested = bool(
         int(args.run_phase2_conditional)
         and args.phase2_event_type in {"all", "CROSS_VENUE_DESYNC"}
