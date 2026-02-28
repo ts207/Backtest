@@ -779,6 +779,16 @@ def _build_backtest_cmd(
     return cmd
 
 
+def _timeframe_to_minutes(tf: str) -> int:
+    """Convert timeframe string like '5m', '15m', '1h' to minutes."""
+    tf = tf.strip().lower()
+    if tf.endswith("m"):
+        return int(tf[:-1])
+    if tf.endswith("h"):
+        return int(tf[:-1]) * 60
+    return 5  # fallback
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run deterministic walk-forward backtest evaluation")
     parser.add_argument("--run_id", required=True)
@@ -786,7 +796,9 @@ def main() -> int:
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
     parser.add_argument("--embargo_days", type=int, default=1)  # B2: default 1, never 0
-    parser.add_argument("--purge_bars", type=int, default=0)
+    parser.add_argument("--purge_bars", type=int, default=0,
+        help="Bars to purge from split tail to prevent horizon leakage. "
+             "Set to max(horizon_bars, entry_lag_bars) + max_feature_lookback_bars.")
     parser.add_argument("--allow_zero_trigger_coverage", type=int, default=0)
     parser.add_argument("--train_frac", type=float, default=0.6)
     parser.add_argument("--validation_frac", type=float, default=0.2)
@@ -853,6 +865,7 @@ def main() -> int:
         "start": args.start,
         "end": args.end,
         "embargo_days": int(args.embargo_days),
+        "purge_bars": int(args.purge_bars),
         "train_frac": float(args.train_frac),
         "validation_frac": float(args.validation_frac),
         "strategies": str(args.strategies or ""),
@@ -877,6 +890,7 @@ def main() -> int:
             validation_frac=float(args.validation_frac),
             embargo_days=int(args.embargo_days),
             purge_bars=int(args.purge_bars),
+            bar_duration_minutes=_timeframe_to_minutes(args.timeframe),
         )
         split_labels = [str(window.label) for window in windows]
         if "test" not in split_labels:

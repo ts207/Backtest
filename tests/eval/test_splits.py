@@ -1,6 +1,6 @@
 import pytest
 import pandas as pd
-from eval.splits import build_time_splits, SplitWindow, _normalize_ts
+from eval.splits import build_time_splits, build_time_splits_with_purge, SplitWindow, _normalize_ts
 
 def test_normalize_ts():
     ts = pd.Timestamp("2024-01-01")
@@ -59,8 +59,6 @@ def test_build_time_splits_invalid():
 
 # --- Tests for build_time_splits_with_purge ---
 
-from eval.splits import build_time_splits_with_purge
-
 def test_purge_shortens_train_end():
     windows = build_time_splits_with_purge(
         start="2023-01-01", end="2023-12-31",
@@ -102,3 +100,19 @@ def test_purge_raises_on_negative():
             embargo_days=1, purge_bars=-1,
             bar_duration_minutes=5,
         )
+
+def test_purge_shortens_validation_end():
+    windows = build_time_splits_with_purge(
+        start="2023-01-01", end="2023-12-31",
+        train_frac=0.6, validation_frac=0.2,
+        embargo_days=1, purge_bars=12,
+        bar_duration_minutes=5,
+    )
+    standard = build_time_splits(
+        start="2023-01-01", end="2023-12-31",
+        train_frac=0.6, validation_frac=0.2, embargo_days=1,
+    )
+    val_purged = next(w for w in windows if w.label == "validation")
+    val_std = next(w for w in standard if w.label == "validation")
+    # purged validation must end strictly before standard validation
+    assert val_purged.end < val_std.end
