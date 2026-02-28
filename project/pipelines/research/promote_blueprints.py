@@ -16,6 +16,7 @@ DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from eval.robustness import simulate_parameter_perturbation
+from eval.selection_bias import probabilistic_sharpe_ratio, deflated_sharpe_ratio
 
 from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
@@ -422,6 +423,10 @@ def main() -> int:
     parser.add_argument("--max_regime_dominance_share", type=float, default=0.999)
     parser.add_argument("--min_fragility_pass_rate", type=float, default=0.60,
         help="Minimum fraction of perturbation scenarios yielding positive return for promotion.")
+    parser.add_argument("--min_psr", type=float, default=0.75,
+        help="Minimum Probabilistic Sharpe Ratio for promotion.")
+    parser.add_argument("--min_dsr", type=float, default=0.60,
+        help="Minimum Deflated Sharpe Ratio for promotion (corrects for n_trials selection).")
     parser.add_argument("--blueprints_path", default=None)
     parser.add_argument("--out_dir", default=None)
     parser.add_argument("--allow_fallback_evidence", type=int, default=0)
@@ -450,6 +455,8 @@ def main() -> int:
         "blueprints_path": str(blueprints_path),
         "allow_fallback_evidence": int(args.allow_fallback_evidence),
         "min_fragility_pass_rate": float(args.min_fragility_pass_rate),
+        "min_psr": float(args.min_psr),
+        "min_dsr": float(args.min_dsr),
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
