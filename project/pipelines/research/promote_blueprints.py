@@ -15,6 +15,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from eval.robustness import simulate_parameter_perturbation
+
 from pipelines._lib.io_utils import ensure_dir
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines.research.analyze_conditional_expectancy import build_walk_forward_split_labels
@@ -216,6 +218,38 @@ def _parameter_neighborhood_stability(blueprint: Dict[str, object], split_pnl: D
     return bool(relative_drift <= 0.75)
 
 
+def _fragility_gate(
+    pnl_series: pd.Series,
+    *,
+    min_pass_rate: float = 0.60,
+    n_iterations: int = 200,
+    noise_std_dev: float = 0.05,
+) -> bool:
+    """
+    Return True if >= min_pass_rate fraction of perturbation scenarios yield positive
+    annualized return. Uses simulate_parameter_perturbation as the perturbation proxy.
+    """
+    if pnl_series.empty:
+        return False
+    stats = simulate_parameter_perturbation(
+        pnl_series, noise_std_dev=noise_std_dev, n_iterations=n_iterations
+    )
+    if not stats:
+        return False
+    p05 = stats.get("perturbation_return_p05", float("-inf"))
+    p50 = stats.get("perturbation_return_p50", 0.0)
+    # Estimate pass rate: assume normal distribution of perturbation returns
+    # p05 is 5th percentile → infer σ from (p50 - p05) / 1.645
+    if p50 <= 0.0:
+        return False
+    sigma = (p50 - p05) / 1.645 if p50 > p05 else p50
+    if sigma <= 0.0:
+        return bool(p05 > 0.0)
+    from scipy import stats as scipy_stats
+    pass_rate = float(1.0 - scipy_stats.norm.cdf(0.0, loc=p50, scale=sigma))
+    return pass_rate >= float(min_pass_rate)
+
+
 def _load_strategy_returns(engine_dir: Path, strategy_id: str) -> pd.DataFrame:
     path = engine_dir / f"strategy_returns_{strategy_id}.csv"
     if not path.exists():
@@ -396,6 +430,8 @@ def main() -> int:
     parser.add_argument("--max_cost_ratio_train_validation", type=float, default=0.60)
     # Backward-compatible alias; if provided, overrides regime_max_share.
     parser.add_argument("--max_regime_dominance_share", type=float, default=0.999)
+    parser.add_argument("--min_fragility_pass_rate", type=float, default=0.60,
+        help="Minimum fraction of perturbation scenarios yielding positive return for promotion.")
     parser.add_argument("--blueprints_path", default=None)
     parser.add_argument("--out_dir", default=None)
     parser.add_argument("--allow_fallback_evidence", type=int, default=0)
@@ -423,6 +459,7 @@ def main() -> int:
         "max_regime_dominance_share": float(args.max_regime_dominance_share),
         "blueprints_path": str(blueprints_path),
         "allow_fallback_evidence": int(args.allow_fallback_evidence),
+        "min_fragility_pass_rate": float(args.min_fragility_pass_rate),
     }
     inputs: List[Dict[str, object]] = []
     outputs: List[Dict[str, object]] = []
@@ -525,6 +562,8 @@ def main() -> int:
             robust_flags = eval_spec.get("robustness_flags", {}) if isinstance(eval_spec.get("robustness_flags"), dict) else {}
             regime_required = _as_bool(robust_flags.get("regime_stability_required", True))
 
+            val_pnl = pd.to_numeric(frame.loc[frame["split_label"] == "validation", "pnl"], errors="coerce").dropna()
+
             gates = {
                 "min_trades": bool(trades >= int(args.min_trades)),
                 "parameter_neighborhood_stability": bool(_parameter_neighborhood_stability(bp, split_pnl)),
@@ -572,6 +611,10 @@ def main() -> int:
                         _to_float(realized_cost_ratio_by_split["validation"]["realized_cost_ratio"]),
                     )
                     <= float(args.max_cost_ratio_train_validation)
+                ),
+                "fragility": _fragility_gate(
+                    val_pnl,
+                    min_pass_rate=float(args.min_fragility_pass_rate),
                 ),
             }
             promote = all(gates.values())
@@ -627,6 +670,7 @@ def main() -> int:
                 "min_tail_conditional_drawdown_95": float(args.min_tail_conditional_drawdown_95),
                 "max_cost_ratio_train_validation": float(args.max_cost_ratio_train_validation),
                 "cost_stress_rule": "2x trading_cost on train+validation must stay positive",
+                "min_fragility_pass_rate": float(args.min_fragility_pass_rate),
             },
         }
         report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
