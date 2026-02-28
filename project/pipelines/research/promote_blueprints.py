@@ -561,8 +561,9 @@ def main() -> int:
 
             val_pnl = pd.to_numeric(frame.loc[frame["split_label"] == "validation", "pnl"], errors="coerce").dropna()
 
-            # Use full PnL series for SR estimation
-            all_pnl = pd.to_numeric(frame.get("pnl"), errors="coerce").dropna()
+            # Use only OOS splits for SR estimation — training data inflates SR
+            oos_mask = frame["split_label"].isin(("validation", "test"))
+            all_pnl = pd.to_numeric(frame.loc[oos_mask, "pnl"], errors="coerce").dropna()
             n_trials_for_dsr = max(1, len(blueprints))
 
             psr_value = probabilistic_sharpe_ratio(all_pnl)

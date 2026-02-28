@@ -27,9 +27,8 @@ def probabilistic_sharpe_ratio(
     skew = float(stats.skew(pnl_arr))
     kurt = float(stats.kurtosis(pnl_arr, fisher=True))  # excess kurtosis
     # Standard error of SR (Lo 2002 adjusted for non-normality)
-    se = np.sqrt(
-        (1.0 + 0.5 * sr ** 2 - skew * sr + ((kurt + 3.0) / 4.0) * sr ** 2) / (n - 1)
-    )
+    radicand = (1.0 + 0.5 * sr ** 2 - skew * sr + ((kurt + 3.0) / 4.0) * sr ** 2) / (n - 1)
+    se = np.sqrt(max(0.0, radicand))
     if se <= 0.0:
         return 1.0 if sr > benchmark_sr else 0.0
     z = (sr - benchmark_sr) / se
