@@ -1,70 +1,80 @@
 # Getting Started
 
-This guide covers the supported local workflow for running and validating the pipeline.
+This guide details the standard local workflows utilized to test hypotheses or evaluate changes against the pipeline.
 
 ## Prerequisites
 
-- Python 3.12 recommended
+- Python 3.12 (Strict minimum)
 - POSIX shell (`bash`)
-- Optional: `make`
+- `make` utility
 
-## Setup
+## Primary Setup
 
 ```bash
 python3 -m venv .venv
-. .venv/bin/activate
-.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+source .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+
+# Designate external or local storage paths for massive artifact arrays
 export BACKTEST_DATA_ROOT=$(pwd)/data
 ```
 
-## First Run (Core Pipeline)
+## Exploratory Research Runs
 
 ```bash
-./.venv/bin/python project/pipelines/run_all.py \
-  --run_id first_run \
+# Core pipeline without combinatorial hypothesis engine
+python project/pipelines/run_all.py \
+  --run_id base_run \
   --symbols BTCUSDT \
   --start 2024-01-01 \
   --end 2024-01-31
+
+# Targeted Multi-Phase Discovery (Expectancy Evaluation enabled via make)
+make discover-hybrid \
+  RUN_ID=quick_discovery \
+  SYMBOLS=BTCUSDT \
+  START=2024-01-01 \
+  END=2024-06-30
 ```
 
-## Run Discovery (Single Event)
+## Large Scale Discovery & Execution
+
+Run full Phase 2 discovery spanning across all declared architectures and eventually compile + backtest validated blueprint strategies.
 
 ```bash
-./.venv/bin/python project/pipelines/run_all.py \
-  --run_id first_discovery \
-  --symbols BTCUSDT \
-  --start 2024-01-01 \
-  --end 2024-01-31 \
-  --run_hypothesis_generator 0 \
-  --run_phase2_conditional 1 \
-  --phase2_event_type LIQUIDITY_VACUUM \
-  --run_bridge_eval_phase2 1
+# Broad hypothesis mining and structural checks
+make discover-edges RUN_ID=universal_discovery SYMBOLS=BTCUSDT,ETHUSDT
+
+# Unified pipeline execution testing promoted strategies
+make discover-hybrid-backtest \
+  RUN_ID=backtest_demo \
+  SYMBOLS=BTCUSDT \
+  STRATEGIES=candidate_1
 ```
 
-## Run Discovery (All Events)
+## Validating Integrations before Commit
+
+Ensure changes haven't structurally invalidated the schema boundaries or core unit testing behavior.
 
 ```bash
-make discover-edges
-```
-
-## Validate Before Claims
-
-```bash
+# Pre-flight repo integrity checks and ontology validation
 make check-hygiene
+
+# Quick deterministic validation suite 
 make test-fast
 ```
 
-## Where to Inspect Outputs
+## Navigating Pipeline Artifacts
 
-- Run manifest: `data/runs/<run_id>/run_manifest.json`
-- Stage manifests/logs: `data/runs/<run_id>/*.json`, `data/runs/<run_id>/*.log`
-- Event registry: `data/events/<run_id>/`
-- Phase2: `data/reports/phase2/<run_id>/<event_type>/`
-- Bridge: `data/reports/bridge_eval/<run_id>/<event_type>/`
+Since operations span hundreds of multi-process outputs, use `data/` to track states:
+- Pipeline structural footprints: `data/runs/<run_id>/run_manifest.json`
+- Low-level executor logs: `data/runs/<run_id>/*.log`
+- Registered Phase 1 events: `data/events/<run_id>/...`
+- Strategy compilation details: `data/reports/strategy_builder/<run_id>/...`
+- Evaluated performance matrices: `data/reports/bridge_eval/` and walk-forward evaluations locally under respective namespaces.
 
-## Common Fail-Closed Stops
+## Fail-Closed Blocks
 
-- Checklist gate: decision `KEEP_RESEARCH` with execution requested.
-- Missing/empty promotion artifacts when compile/builder require promoted candidates.
-- Funding/context integrity gates in context and market-state stages.
-- Protected evaluation guard violations (fallback blueprint path in measurement flow).
+The pipeline defends statistical integrity aggressively:
+- **`KEEP_RESEARCH` blocks:** By default, stages testing naive execution will fail back to research states unless explicit checklist promotion conditions are satisfied.
+- **Funding or Price Integrity Gaps:** Data layers containing unresolved inconsistencies will immediately panic to block cascading issues from propagating toward the execution phases.

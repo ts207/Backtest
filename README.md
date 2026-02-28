@@ -2,17 +2,18 @@
 
 Event-driven quantitative research platform for crypto perpetual markets.
 Discovers, validates, and compiles tradable strategy blueprints from raw market data
-through a multi-stage pipeline with point-in-time safety and multiplicity control.
+through a multi-stage pipeline with point-in-time safety, multiplicity control, and walk-forward evaluation.
 
 ## What It Does
 
 1. Ingests Binance USDT-M perpetual (and optional spot) OHLCV, funding, OI, and liquidation data.
-2. Builds cleaned 5-minute bars with gap tracking and funding alignment.
+2. Builds cleaned 5-minute bars with rigorous gap tracking and exact funding timestamp alignment (no smearing).
 3. Engineers features (volatility, microstructure, funding, basis, context states).
 4. Detects 56 event families across 10 analyzer categories.
-5. Runs conditional hypothesis discovery (Phase 2) with BH-FDR multiplicity control.
-6. Applies bridge tradability checks, candidate promotion, and blueprint compilation.
-7. Optionally backtests compiled blueprints through a discrete-position engine.
+5. Runs unified conditional hypothesis discovery (Phase 2) with BH-FDR multiplicity control, stratified by symbol.
+6. Applies bridge tradability checks, candidate promotion, and edge registry tracking.
+7. Executes expectancy analysis, recommendations profiling, and strategy builder / blueprint compilation.
+8. Backtests compiled blueprints through a discrete-position engine and runs out-of-sample walk-forward evaluation regimes.
 
 ## Quick Start
 
@@ -30,20 +31,13 @@ python project/pipelines/run_all.py \
   --start 2024-01-01 \
   --end 2024-06-30
 
-# 3. Run discovery for a single event family
-python project/pipelines/run_all.py \
-  --run_id discover_vol \
-  --symbols BTCUSDT,ETHUSDT \
-  --start 2022-01-01 \
-  --end 2024-12-31 \
-  --run_phase2_conditional 1 \
-  --phase2_event_type VOL_SHOCK \
-  --run_bridge_eval_phase2 1
+# 3. Run full hybrid discovery (Phase 1 + 2 + Expectancy Analysis)
+make discover-hybrid RUN_ID=discover_all SYMBOLS=BTCUSDT,ETHUSDT START=2024-01-01 END=2024-12-31
 
-# 4. Run discovery for all event families
-make discover-edges
+# 4. Run discovery + backtesting
+make discover-hybrid-backtest RUN_ID=test_run SYMBOLS=BTCUSDT STRATEGIES=candidate_1
 
-# 5. Run tests
+# 5. Run tests (Fast profile available)
 make test-fast
 ```
 
@@ -56,7 +50,7 @@ raw market data (Binance perp/spot)
 ingest_ohlcv_5m, ingest_funding, [ingest_spot, ingest_oi, ingest_liquidations]
   |
   v
-build_cleaned_5m  -->  Cleaned5mBarsSchema validation
+build_cleaned_5m  -->  Cleaned5mBarsSchema validation (gap masked, flat prices avoided)
   |
   v
 build_features_v1  -->  feature_schema_v1.json validation
@@ -69,30 +63,30 @@ Phase 1 analyzers (analyze_*.py)  -->  raw event CSVs
   |
   v
 build_event_registry  -->  events.parquet + event_flags.parquet
-  |                        (_event impulse, _active window, _signal tradable)
-  v
-Phase 2 conditional discovery  -->  phase2_candidates.csv per event type
-  |                                  (BH-FDR controlled, delay-grid robust)
-  v
-bridge_evaluate_phase2  -->  bridge eval with train/validation/embargo split
   |
   v
-promote_candidates  -->  promoted_candidates.parquet
+Phase 2 conditional discovery  -->  BH-FDR controlled, symbol-stratified candidate hypotheses
   |
   v
-compile_strategy_blueprints  -->  blueprints.jsonl + blueprints.yaml
+[expectancy_analysis], [bridge_evaluate_phase2]  -->  Economic viability & robustness scoring
   |
   v
-[backtest_strategies]  -->  engine PnL traces
+promote_candidates, update_edge_registry  -->  promoted_candidates.parquet
   |
   v
-[walkforward_eval]  -->  OOS validation
+compile_strategy_blueprints, build_strategies  -->  blueprints.jsonl + blueprints.yaml
   |
   v
-[make_report]  -->  performance reports
+[backtest_strategies]  -->  discrete engine PnL traces
+  |
+  v
+[walkforward_eval]  -->  OOS validation & drawdown regime clustering
+  |
+  v
+[make_report]  -->  performance attribution reports
 ```
 
-Stages in brackets are optional and enabled via CLI flags.
+Stages in brackets are optional and enabled via orchestrator CLI flags.
 
 ## Make Targets
 
@@ -101,6 +95,8 @@ Stages in brackets are optional and enabled via CLI flags.
 | `make run` | Ingest + clean + features + context |
 | `make discover-edges` | Full discovery chain (all 56 event families) |
 | `make discover-edges-from-raw` | Discovery using existing raw data (skip ingest) |
+| `make discover-hybrid` | Discover edges + expectancy checks (research-speed mode) |
+| `make discover-hybrid-backtest` | Discover hybrid + backtest + report |
 | `make baseline STRATEGIES=...` | Core pipeline + backtest + report |
 | `make test-fast` | Fast tests (excludes slow markers) |
 | `make test` | Full test suite |
@@ -126,7 +122,7 @@ data/
   reports/
     phase2/{run_id}/{event_type}/             Phase 2 candidates
     bridge_eval/{run_id}/{event_type}/        Bridge evaluation
-    promotions/{run_id}/                      Promoted candidates
+    strategy_builder/{run_id}/                Built strategies
     strategy_blueprints/{run_id}/             Compiled blueprints
   runs/{run_id}/
     run_manifest.json                         Run-level provenance
@@ -140,9 +136,9 @@ data/
 |----------|---------|
 | [Getting Started](docs/GETTING_STARTED.md) | Setup, first run, and common workflows |
 | [Architecture](docs/ARCHITECTURE.md) | Pipeline structure, data flow, and execution model |
-| [Concepts](docs/CONCEPTS.md) | PIT safety, event semantics, discovery pipeline, and data contracts |
+| [Concepts](docs/CONCEPTS.md) | PIT safety, event semantics, discovery pipeline, robustness |
 | [Spec-First Development](docs/SPEC_FIRST.md) | How specs govern behavior and how to extend the system |
-| [Audit Baseline](docs/AUDIT.md) | Known limitations and improvement roadmap |
+| [Audit Baseline](docs/AUDIT.md) | Resolved and remaining audit findings |
 | [Runbook](RUNBOOK.md) | Operational reference for running and debugging |
 | [Research Playbook](RESEARCH_PLAYBOOK.md) | Research philosophy and methodology |
 

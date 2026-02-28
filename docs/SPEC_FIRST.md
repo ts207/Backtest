@@ -1,37 +1,37 @@
 # Spec-First Development
 
-Specs are the source of truth for event logic, gating, and ontology-aligned discovery behavior.
+Specs are the ultimate source of truth for event logic, deterministic gating, and ontology-aligned discovery behavior across the entirety of the pipeline. Implementations simply interpret what the specs demand.
 
 ## Authoritative Spec Areas
 
-- `spec/events/*.yaml`: event families and registry-facing contracts
-- `spec/events/canonical_event_registry.yaml`: canonical family/event constraints
-- `spec/gates.yaml`: discovery/promotion/evaluation thresholds
-- `spec/multiplicity/*`: taxonomy, families, multiplicity controls
-- `spec/states/state_registry.yaml`: state definitions and source linkage
-- `spec/hypotheses/template_verb_lexicon.yaml`: template verb/operator controls
-- `project/schemas/feature_schema_v1.json`: feature output schema contract
+- `spec/events/*.yaml`: Event families and registry-facing output contracts.
+- `spec/events/canonical_event_registry.yaml`: Canonical family/event constraints and hierarchy mapping.
+- `spec/gates.yaml`: Discovery, promotion, and evaluation thresholds determining candidate viability.
+- `spec/multiplicity/*`: Taxonomy mapping and combinatorial multiplicity bounding.
+- `spec/states/state_registry.yaml`: Market state regimes linking structural conditions.
+- `spec/hypotheses/template_verb_lexicon.yaml`: DSL verb/operator controls mapping actionable strategy parameters.
+- `project/schemas/feature_schema_v1.json` & `v2.json`: Evolving data contracts enforcing structural typing on engineered feature stages.
 
 ## Change Workflow
 
-1. Update relevant spec(s) first.
-2. Update implementation to match spec contracts.
-3. Update tests for new/changed behavior.
-4. Run validation (`make check-hygiene`, `make test-fast`).
+1. Update the relevant spec files first to outline intent.
+2. Implement backend systems to parse and validate against the new spec contracts.
+3. Update specific testing matrices for handling parsing limits.
+4. Execute validation architectures (`make check-hygiene`, `python scripts/ontology_consistency_audit.py`).
 
 ## Event Family Additions
 
-1. Add `spec/events/<EVENT>.yaml`.
-2. Ensure analyzer support in `project/pipelines/research/`.
-3. Keep `PHASE2_EVENT_CHAIN` aligned with registry support.
-4. Validate event registry outputs and Phase2 candidate outputs.
+1. Define topology internally via `spec/events/<EVENT>.yaml`.
+2. Add corresponding isolated analyzers in `project/pipelines/research/analyze_*.py`
+3. Guarantee `PHASE2_EVENT_CHAIN` in the core pipeline orchestrator `run_all.py` includes the explicit target.
+4. Verify event outputs translate to correct artifact registers (`events.parquet`).
 
 ## Run Manifest Binding
 
-Each run records spec and ontology hashes in manifest fields, enabling traceability between artifacts and the exact spec snapshot used.
+Every system execution binds the exact spec snapshot utilized via the orchestrator to its final artifacts. Hashed fields track mutations dynamically linking exactly what code/specs ran to generation artifacts, guaranteeing deep structural reproducibility.
 
-## Non-Negotiable Invariants
+## Non-Negotiable Pipeline Invariants
 
-- No lookahead leakage.
-- No hidden runtime behavior that bypasses spec contracts.
-- No silent fallback paths in protected evaluation flows.
+- **No Future Data Leakage:** Lookahead biases are structurally invalid.
+- **Spec Subservience:** Hidden runtime behavior that bypasses explicitly written spec rules constitutes a critical break.
+- **Fail-Closed Execution:** The execution flow securely defaults to `KEEP_RESEARCH`, shielding production evaluation workflows against non-promoted experimental artifacts.
