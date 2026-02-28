@@ -113,6 +113,13 @@ def _active_signal_column(signal_column: str) -> str:
     return f"{signal}_active"
 
 
+def _signal_ts_column(signal_column: str) -> str:
+    signal = str(signal_column).strip()
+    if signal.endswith("_event"):
+        return f"{signal[:-6]}_signal"
+    return f"{signal}_signal"
+
+
 def _registry_root(data_root: Path, run_id: str) -> Path:
     return Path(data_root) / "events" / str(run_id)
 

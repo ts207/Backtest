@@ -4,7 +4,7 @@ from pandera.typing import DataFrame, Series
 
 class Cleaned5mBarsSchema(pa.DataFrameModel):
     symbol: Series[str] = pa.Field(coerce=True)
-    timestamp: Series[pd.DatetimeTZDtype] = pa.Field(dtype_kwargs={"unit": "us", "tz": "UTC"})
+    timestamp: Series[pd.DatetimeTZDtype] = pa.Field(dtype_kwargs={"unit": "ns", "tz": "UTC"})
     open: Series[float] = pa.Field(ge=0.0, nullable=True)
     high: Series[float] = pa.Field(ge=0.0, nullable=True)
     low: Series[float] = pa.Field(ge=0.0, nullable=True)
