@@ -11,7 +11,8 @@ def test_feature_schema_v2_enforcement():
     # Mock columns matching a typical v1 output (missing v2 specific fields)
     v1_cols = [
         "timestamp", "open", "high", "low", "close", "volume",
-        "funding_rate_scaled", "funding_rate", "oi_notional", "oi_delta_1h",
+        "quote_volume", "taker_base_volume", "funding_rate_scaled", 
+        "funding_rate", "oi_notional", "oi_delta_1h",
         "liquidation_notional", "liquidation_count", "basis_bps", "basis_zscore",
         "cross_exchange_spread_z", "spread_zscore", "revision_lag_bars",
         "revision_lag_minutes", "logret_1", "rv_96", "rv_pct_17280",
@@ -35,12 +36,11 @@ def test_feature_schema_v2_enforcement():
         error_msg = str(e)
         assert "funding_rate_realized" in error_msg
         assert "is_gap" in error_msg
-        assert "quote_volume" in error_msg
         # spread_bps etc are now optional_gated, so not strictly required by validate_feature_schema_columns
         assert "spread_bps" not in error_msg
 
     # 4. Adding hard-required critical columns should make it pass for v2
-    v2_cols = v1_cols + ["funding_rate_realized", "is_gap", "quote_volume"]
+    v2_cols = v1_cols + ["funding_rate_realized", "is_gap"]
     validate_feature_schema_columns(dataset_key="features_v2_5m_v1", columns=v2_cols)
 
 if __name__ == "__main__":

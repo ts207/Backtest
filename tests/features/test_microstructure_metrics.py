@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import pytest
-from features.microstructure import calculate_vpin, calculate_roll, calculate_amihud, calculate_kyle_lambda
+from features.microstructure import calculate_vpin_score as calculate_vpin, calculate_roll, calculate_amihud_illiquidity as calculate_amihud, calculate_kyle_lambda
 
 def test_calculate_amihud_basic():
     # Amihud = |Ret| / (Close * Vol)

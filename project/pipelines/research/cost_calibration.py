@@ -78,8 +78,8 @@ class ToBRegimeCostCalibrator:
         if matched.empty or coverage < self.min_tob_coverage:
             return self._static(source="fallback:low_tob_coverage", valid=False, coverage=coverage)
 
-        event_spread = float(pd.to_numeric(matched["spread_bps"], errors="coerce").dropna().median())
-        event_depth = float(pd.to_numeric(matched["depth_usd"], errors="coerce").dropna().median())
+        event_spread = float(pd.to_numeric(matched["spread_bps"], errors="coerce").dropna().quantile(0.90))
+        event_depth = float(pd.to_numeric(matched["depth_usd"], errors="coerce").dropna().quantile(0.10))
         base_spread = float(profile["base_spread_bps"])
         base_depth = float(profile["base_depth_usd"])
         if not np.isfinite(event_spread) or event_spread <= 0.0:
@@ -91,14 +91,18 @@ class ToBRegimeCostCalibrator:
         depth_mult = float(np.sqrt(max(base_depth, 1e-6) / max(event_depth, 1e-6)))
         regime_mult = float(np.clip((0.7 * spread_mult) + (0.3 * depth_mult), 0.5, 4.0))
 
-        slippage = float(max(0.0, self.base_slippage_bps * regime_mult))
+        timespan_days = float((event_ts.max() - event_ts.min()).total_seconds() / 86400.0)
+        daily_events = float(len(event_ts) / max(timespan_days, 1.0))
+        turnover_proxy = float(max(1.0, np.sqrt(daily_events / 5.0)))
+
+        slippage = float(max(0.0, self.base_slippage_bps * regime_mult * turnover_proxy))
         cost = float(max(0.0, self.base_fee_bps + slippage))
         return CandidateCostEstimate(
             cost_bps=cost,
             fee_bps_per_side=self.base_fee_bps,
             slippage_bps_per_fill=slippage,
             avg_dynamic_cost_bps=cost,
-            turnover_proxy_mean=1.0,
+            turnover_proxy_mean=turnover_proxy,
             cost_input_coverage=coverage,
             cost_model_valid=True,
             cost_model_source="tob_regime",

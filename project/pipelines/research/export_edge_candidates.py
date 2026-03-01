@@ -568,7 +568,7 @@ def main() -> int:
 
         out_dir = DATA_ROOT / "reports" / "edge_candidates" / args.run_id
         ensure_dir(out_dir)
-        out_csv = out_dir / "edge_candidates_normalized.csv"
+        out_csv = out_dir / "edge_candidates_normalized.parquet"
         out_json = out_dir / "edge_candidates_normalized.json"
 
         df = pd.DataFrame(
@@ -629,7 +629,7 @@ def main() -> int:
                 ["selection_score_executed", "profit_density_score", "edge_score", "stability_proxy"],
                 ascending=[False, False, False, False],
             ).reset_index(drop=True)
-        df.to_csv(out_csv, index=False)
+        df.to_parquet(out_csv, index=False)
         out_json.write_text(df.to_json(orient="records", indent=2), encoding="utf-8")
 
         outputs.append({"path": str(out_csv), "rows": int(len(df)), "start_ts": None, "end_ts": None})

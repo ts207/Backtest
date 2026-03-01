@@ -379,6 +379,7 @@ def _evaluate_row(
         gate_stability
         and (stability_score >= float(min_stability_score))
         and (sign_consistency >= float(min_sign_consistency))
+        and _as_bool(row.get("gate_delay_robustness", False))
     )
     if not stability_pass:
         if not gate_stability:
@@ -390,6 +391,9 @@ def _evaluate_row(
         if sign_consistency < float(min_sign_consistency):
             reject_reasons.append("stability_sign_consistency")
             promo_fail_reasons.append("gate_promo_stability_sign_consistency")
+        if not _as_bool(row.get("gate_delay_robustness", False)):
+            reject_reasons.append("delay_robustness_fail")
+            promo_fail_reasons.append("gate_promo_delay_robustness_fail")
 
     cost_pass = cost_survival_ratio >= float(min_cost_survival_ratio)
     if not cost_pass:
@@ -402,6 +406,7 @@ def _evaluate_row(
             reject_reasons.append("negative_control_missing")
             promo_fail_reasons.append("gate_promo_negative_control_missing")
     else:
+        # Strict enforcement
         control_pass = control_rate <= float(max_negative_control_pass_rate)
         if not control_pass:
             reject_reasons.append("negative_control_fail")
@@ -520,6 +525,7 @@ def main() -> int:
     manifest = start_manifest("promote_candidates", args.run_id, vars(args), [], [])
     try:
         from pipelines._lib.ontology_contract import ontology_spec_hash as compute_ontology_hash
+        from pipelines.research.phase2_statistical_gates import gate_redundancy_correlation
         
         run_manifest_hashes = load_run_manifest_hashes(DATA_ROOT, args.run_id)
         ontology_hash = str(run_manifest_hashes.get("ontology_spec_hash", "") or "").strip()
@@ -591,7 +597,28 @@ def main() -> int:
                 if c in promoted_df.columns:
                     sort_cols.append(c)
             promoted_df = promoted_df.sort_values(sort_cols, ascending=[False]*len(sort_cols)).reset_index(drop=True)
-
+            
+            # Apply Redundancy Gate
+            if len(promoted_df) > 1:
+                logging.info(f"Applying redundancy gate to {len(promoted_df)} promoted candidates...")
+                promoted_df["expectancy_after_multiplicity"] = promoted_df.get("expectancy_after_multiplicity", promoted_df["expectancy"])
+                promoted_df = gate_redundancy_correlation(promoted_df, redundancy_threshold=0.85)
+                # Filter out redundant
+                redundant_mask = ~promoted_df["gate_redundancy"]
+                if redundant_mask.any():
+                    num_redundant = int(redundant_mask.sum())
+                    logging.info(f"Filtered out {num_redundant} highly correlated redundant candidates.")
+                    
+                    # Log them back into the audit DF as rejected
+                    redundant_ids = promoted_df[redundant_mask]["candidate_id"].tolist()
+                    promoted_df = promoted_df[~redundant_mask].copy()
+                    
+                    # Update audit_df to mark these as rejected by redundancy
+                    audit_idx = audit_df["candidate_id"].isin(redundant_ids)
+                    audit_df.loc[audit_idx, "promotion_decision"] = "rejected"
+                    audit_df.loc[audit_idx, "reject_reason"] += "|redundancy_gate"
+                    audit_df.loc[audit_idx, "gate_promo_redundancy"] = False
+                    
         # Atomic writes via tmp + replace
         audit_path_parquet = out_dir / "promotion_audit.parquet"
         promoted_path_parquet = out_dir / "promoted_candidates.parquet"
@@ -604,7 +631,7 @@ def main() -> int:
         promoted_df.to_parquet(tmp_promoted, index=False)
         tmp_promoted.replace(promoted_path_parquet)
 
-        audit_df.to_parquet(out_dir / "promotion_audit.parquet", index=False)
+        # Removed redundant duplicate write of audit_df
 
         # Enhanced Summary
         summary = {

@@ -49,11 +49,11 @@ def test_engine_smoke_test(mock_data_root):
     bp = Blueprint(
         id="smoke_dsl", run_id="test", event_type="mock_event", candidate_id="mock_candidate", 
         direction="long",
-        symbol_scope=SymbolScopeSpec("single_symbol", ["BTCUSDT"], "BTCUSDT"),
-        entry=EntrySpec(["event_detected"], [], [], 0, 0, "all", [], 0, 0),
-        exit=ExitSpec(5, {"metric": "", "operator": "", "value": 0.0}, "percent", 0.05, "percent", 0.05, "none", 0.0, 0.0),
-        sizing=SizingSpec("fixed_risk", 0.01, None, 1.0, 1.0, 1.0, 1.0),
-        overlays=[], evaluation=EvaluationSpec(0, {"fees_bps": 5.0, "slippage_bps": 0.0, "funding_included": True}, {"oos_required": False, "multiplicity_required": False, "regime_stability_required": False}), lineage=LineageSpec("mock", "mock", "mock")
+        symbol_scope=SymbolScopeSpec(mode="single_symbol", symbols=["BTCUSDT"], candidate_symbol="BTCUSDT"),
+        entry=EntrySpec(triggers=["event_detected"], conditions=[], confirmations=[], delay_bars=0, cooldown_bars=0, condition_logic="all", condition_nodes=[], arm_bars=0, reentry_lockout_bars=0),
+        exit=ExitSpec(time_stop_bars=5, invalidation={"metric": "test", "operator": "==", "value": 0.0}, stop_type="percent", stop_value=0.05, target_type="percent", target_value=0.05, trailing_stop_type="none", trailing_stop_value=0.0, break_even_r=0.0),
+        sizing=SizingSpec(mode="fixed_risk", risk_per_trade=0.01, target_vol=None, max_gross_leverage=1.0, max_position_scale=1.0, portfolio_risk_budget=1.0, symbol_risk_budget=1.0),
+        overlays=[], evaluation=EvaluationSpec(min_trades=0, cost_model={"fees_bps": 5.0, "slippage_bps": 0.0, "funding_included": True}, robustness_flags={"oos_required": False, "multiplicity_required": False, "regime_stability_required": False}), lineage=LineageSpec(source_path="mock", compiler_version="mock", generated_at_utc="mock")
     )
     
     result = run_engine(
@@ -61,7 +61,7 @@ def test_engine_smoke_test(mock_data_root):
         run_id="test_run",
         symbols=["BTCUSDT"],
         strategies=["dsl_interpreter_v1__smoke_dsl"],
-        params_by_strategy={"dsl_interpreter_v1__smoke_dsl": {"dsl_blueprint": dataclasses.asdict(bp)}},
+        params_by_strategy={"dsl_interpreter_v1__smoke_dsl": {"dsl_blueprint": bp.model_dump()}},
         params={},
         cost_bps=5.0,
         start_ts=pd.Timestamp("2024-01-01", tz="UTC"),

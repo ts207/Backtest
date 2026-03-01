@@ -94,7 +94,7 @@ def test_book_ticker_collects_all_symbol_outcomes_before_manifest(monkeypatch):
     assert "BTCUSDT" in stats["symbols"]
     assert "ETHUSDT" in stats["symbols"]
     assert stats["symbols"]["ETHUSDT"]["status"] == "failed"
-    assert "eth failed" in stats["symbols"]["ETHUSDT"]["error_message"]
+    assert "eth failed" in stats["symbols"]["ETHUSDT"]["error"]
 
 
 def test_book_ticker_success_when_all_symbols_succeed(monkeypatch):

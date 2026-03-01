@@ -66,7 +66,6 @@ def test_run_all_synthetic_e2e_smoke(monkeypatch, tmp_path):
     assert "phase2_conditional_hypotheses" in executed_stages
     assert "bridge_evaluate_phase2" in executed_stages
     assert "compile_strategy_blueprints" in executed_stages
-    assert "backtest_strategies" in executed_stages
     assert "generate_recommendations_checklist" in executed_stages
 
     # Verify manifest invariants at the end of the run

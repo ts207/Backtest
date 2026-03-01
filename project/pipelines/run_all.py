@@ -218,6 +218,12 @@ def _run_stage(stage: str, script_path: Path, base_args: List[str], run_id: str)
     return True
 
 
+def _parallel_worker(args: Tuple[str, Path, List[str], str]) -> Tuple[str, bool, float]:
+    stage_name, script, base_args, run_id = args
+    t0 = time.perf_counter()
+    ok = _run_stage(stage_name, script, base_args, run_id)
+    return stage_name, ok, time.perf_counter() - t0
+
 def _run_stages_parallel(
     stages: List[Tuple[str, Path, List[str]]],
     run_id: str,
@@ -233,14 +239,9 @@ def _run_stages_parallel(
     all_ok = True
     effective_workers = max(1, min(max_workers, len(stages)))
 
-    def _worker(args: Tuple[str, Path, List[str]]) -> Tuple[str, bool, float]:
-        stage_name, script, base_args = args
-        t0 = time.perf_counter()
-        ok = _run_stage(stage_name, script, base_args, run_id)
-        return stage_name, ok, time.perf_counter() - t0
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as pool:
-        futures = {pool.submit(_worker, s): s[0] for s in stages}
+    with concurrent.futures.ProcessPoolExecutor(max_workers=effective_workers) as pool:
+        args_list = [(s[0], s[1], s[2], run_id) for s in stages]
+        futures = {pool.submit(_parallel_worker, a): a[0] for a in args_list}
         for fut in concurrent.futures.as_completed(futures):
             stage_name, ok, elapsed = fut.result()
             timings.append((stage_name, elapsed))
@@ -296,7 +297,7 @@ def _print_artifact_summary(run_id: str) -> None:
         ("phase2", DATA_ROOT / "reports" / "phase2" / run_id),
         ("phase2_quality_summary", DATA_ROOT / "reports" / "phase2" / run_id / "discovery_quality_summary.json"),
         ("bridge_eval", DATA_ROOT / "reports" / "bridge_eval" / run_id),
-        ("edge_candidates", DATA_ROOT / "reports" / "edge_candidates" / run_id / "edge_candidates_normalized.csv"),
+        ("edge_candidates", DATA_ROOT / "reports" / "edge_candidates" / run_id / "edge_candidates_normalized.parquet"),
         ("promotions", DATA_ROOT / "reports" / "promotions" / run_id / "promotion_report.json"),
         ("edge_registry", DATA_ROOT / "runs" / run_id / "research" / "edge_registry.parquet"),
         ("strategy_builder", DATA_ROOT / "reports" / "strategy_builder" / run_id),
@@ -627,6 +628,16 @@ def main() -> int:
     parser.add_argument("--blueprints_filter_event_type", default="all")
     parser.add_argument("--atlas_mode", type=int, default=0)
     parser.add_argument("--mode", choices=["research", "production", "certification"], default="research")
+    parser.add_argument("--feature_schema_version", default="")
+    parser.add_argument("--strategies", default="")
+    parser.add_argument("--run_backtest", type=int, default=0)
+    parser.add_argument("--run_walkforward_eval", type=int, default=0)
+    parser.add_argument("--run_make_report", type=int, default=0)
+    parser.add_argument("--run_blueprint_promotion", type=int, default=0)
+    parser.add_argument("--backtest_timeframe", default="5m")
+    parser.add_argument("--cost_bps", type=float, default=None)
+    parser.add_argument("--fees_bps", type=float, default=None)
+    parser.add_argument("--slippage_bps", type=float, default=None)
 
     args = parser.parse_args()
 

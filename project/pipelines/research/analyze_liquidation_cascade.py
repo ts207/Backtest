@@ -68,82 +68,72 @@ def detect_cascades(
     df["liq_median"] = df["liquidation_notional"].rolling(window=liq_median_window, min_periods=min_p).median().fillna(0.0)
     df["liq_th"] = df["liq_median"] * liq_multiplier
     
-    # Handle extremely low liquidity periods by enforcing a floor if needed, 
-    # but spec says > 3.0 * median.
+    cond_mask = (
+        (df["liquidation_notional"].to_numpy() > df["liq_th"].to_numpy()) &
+        (df["liquidation_notional"].to_numpy() > liq_vol_th) &
+        (df["oi_delta_1h"].to_numpy() < oi_drop_th)
+    )
+    
+    hit_indices = np.where(cond_mask)[0]
     
     events = []
-    n = len(df)
-    i = 0
+    if len(hit_indices) == 0:
+        return pd.DataFrame()
+
     cooldown_until = -1
     event_num = 0
     
-    while i < n:
+    liq_arr = df["liquidation_notional"].to_numpy()
+    oi_notional_arr = df["oi_notional"].to_numpy()
+    close_arr = df["close"].to_numpy()
+    low_arr = df["low"].to_numpy()
+    timestamp_arr = df["timestamp"].to_numpy()
+    vol_regime_arr = df["vol_regime"].to_numpy() if "vol_regime" in df.columns else None
+    
+    n = len(df)
+    
+    for i in hit_indices:
         if i <= cooldown_until:
-            i += 1
             continue
             
-        liq = float(df["liquidation_notional"].iat[i])
-        oi_delta = float(df["oi_delta_1h"].iat[i])
-        threshold = float(df["liq_th"].iat[i])
+        start_idx = i
+        end_idx = i
         
-        # Rule: Liquidation spike AND OI drop (both relative and absolute thresholds)
-        if liq > threshold and liq > liq_vol_th and oi_delta < oi_drop_th:
-            # Found a cascade start
-            start_idx = i
-            end_idx = i
+        while end_idx + 1 < n and cond_mask[end_idx + 1]:
+            end_idx += 1
             
-            # Aggregate multi-bar cascades (simple lookahead for continuation)
-            # If the next bar also meets criteria, include it.
-            # We'll allow a small gap or just strict sequence? 
-            # Let's do sequence for now.
-            while end_idx + 1 < n:
-                next_liq = float(df["liquidation_notional"].iat[end_idx + 1])
-                next_oi_delta = float(df["oi_delta_1h"].iat[end_idx + 1])
-                next_threshold = float(df["liq_th"].iat[end_idx + 1])
-
-                if next_liq > next_threshold and next_liq > liq_vol_th and next_oi_delta < oi_drop_th:
-                    end_idx += 1
-                else:
-                    break
-            
-            event_num += 1
-            event_id = f"lc_v1_{symbol}_{event_num:06d}"
-            
-            # Calculate metadata
-            window = df.iloc[start_idx : end_idx + 1]
-            total_liq = window["liquidation_notional"].sum()
-            
-            # OI Reduction: from before the cascade to the end
-            # We use oi_notional. oi_delta_1h is a flow, we want stock change.
-            oi_before = df["oi_notional"].iat[max(0, start_idx - 1)]
-            oi_after = df["oi_notional"].iat[end_idx]
-            oi_reduction = oi_before - oi_after
-            oi_reduction_pct = (oi_reduction / oi_before) if oi_before > 0 else 0.0
-            
-            # Price Drawdown: from high in window to low in window
-            price_start = df["close"].iat[max(0, start_idx - 1)]
-            price_low = window["low"].min()
-            price_drawdown = (price_start - price_low) / price_start if price_start > 0 else 0.0
-            
-            events.append({
-                "event_id": event_id,
-                "symbol": symbol,
-                "timestamp": df["timestamp"].iat[start_idx],
-                "enter_idx": start_idx,
-                "exit_idx": end_idx,
-                "duration_bars": end_idx - start_idx + 1,
-                "severity": total_liq,
-                "total_liquidation_notional": total_liq,
-                "oi_reduction_pct": oi_reduction_pct,
-                "price_drawdown": price_drawdown,
-                "vol_regime": df["vol_regime"].iat[start_idx] if "vol_regime" in df.columns else "unknown",
-                "severity_bucket": "base"
-            })
-            
-            cooldown_until = end_idx + cooldown_bars
-            i = end_idx + 1
-            continue
-        i += 1
+        event_num += 1
+        event_id = f"lc_v1_{symbol}_{event_num:06d}"
+        
+        # Calculate metadata
+        total_liq = float(np.sum(liq_arr[start_idx : end_idx + 1]))
+        
+        oi_before_idx = max(0, start_idx - 1)
+        oi_before = float(oi_notional_arr[oi_before_idx])
+        oi_after = float(oi_notional_arr[end_idx])
+        oi_reduction = float(oi_before - oi_after)
+        oi_reduction_pct = float(oi_reduction / oi_before) if oi_before > 0 else 0.0
+        
+        price_start = float(close_arr[oi_before_idx])
+        price_low = float(np.min(low_arr[start_idx : end_idx + 1]))
+        price_drawdown = float((price_start - price_low) / price_start) if price_start > 0 else 0.0
+        
+        events.append({
+            "event_id": event_id,
+            "symbol": symbol,
+            "timestamp": timestamp_arr[start_idx],
+            "enter_idx": start_idx,
+            "exit_idx": end_idx,
+            "duration_bars": end_idx - start_idx + 1,
+            "severity": total_liq,
+            "total_liquidation_notional": total_liq,
+            "oi_reduction_pct": oi_reduction_pct,
+            "price_drawdown": price_drawdown,
+            "vol_regime": str(vol_regime_arr[start_idx]) if vol_regime_arr is not None else "unknown",
+            "severity_bucket": "base"
+        })
+        
+        cooldown_until = end_idx + cooldown_bars
         
     return pd.DataFrame(events)
 
@@ -197,8 +187,8 @@ def main() -> int:
                 logging.info(f"Detected {len(events)} cascades for {sym}")
 
         events_df = pd.concat(all_events, ignore_index=True) if all_events else pd.DataFrame()
-        csv_path = out_dir / "liquidation_cascade_events.csv"
-        events_df.to_csv(csv_path, index=False)
+        csv_path = out_dir / "liquidation_cascade_events.parquet"
+        events_df.to_parquet(csv_path, index=False)
         
         finalize_manifest(manifest, "success", stats={"event_count": len(events_df)})
         return 0

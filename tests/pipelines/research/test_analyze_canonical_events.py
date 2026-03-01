@@ -55,7 +55,7 @@ def test_main_writes_rows_for_requested_event_type(monkeypatch, tmp_path):
         {
             "CUSTOM_TEST_EVENT": SimpleNamespace(
                 reports_dir="volatility_transition",
-                events_file="volatility_transition_events.csv",
+                events_file="volatility_transition_events.parquet",
             )
         },
     )
@@ -77,9 +77,9 @@ def test_main_writes_rows_for_requested_event_type(monkeypatch, tmp_path):
     )
     rc = aec.main()
     assert rc == 0
-    out_csv = tmp_path / "out" / "volatility_transition_events.csv"
-    assert out_csv.exists()
-    out = pd.read_csv(out_csv)
+    out_parquet = tmp_path / "out" / "volatility_transition_events.parquet"
+    assert out_parquet.exists()
+    out = pd.read_parquet(out_parquet)
     if not out.empty:
         assert set(out["event_type"].astype(str).unique()) == {"CUSTOM_TEST_EVENT"}
 

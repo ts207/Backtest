@@ -2,15 +2,64 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 
 from pipelines.research.analyze_conditional_expectancy import _two_sided_p_from_t
 from pipelines.research.phase2_event_analyzer import ActionSpec, expectancy_for_action
 
 NUMERIC_CONDITION_PATTERN = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(>=|<=|==|>|<)\s*(-?\d+(?:\.\d+)?)\s*$")
+
+def gate_redundancy_correlation(
+    candidates_df: pd.DataFrame, 
+    redundancy_threshold: float = 0.85
+) -> pd.DataFrame:
+    """
+    Iterates through candidates sorted by a quality metric (multiplicity tightened t-stat or expectancy).
+    Marks a candidate as 'redundant' if its return profile or behavior is highly correlated 
+    (Kendall's Tau > threshold) with any previously accepted, higher-ranked candidate.
+    """
+    if candidates_df.empty or "expectancy_after_multiplicity" not in candidates_df.columns:
+        return candidates_df
+        
+    df = candidates_df.copy()
+    
+    # Sort by quality (highest expectancy first)
+    df = df.sort_values(by="expectancy_after_multiplicity", ascending=False).reset_index(drop=True)
+    
+    is_redundant = np.zeros(len(df), dtype=bool)
+    accepted_profiles = []
+    
+    for i, row in df.iterrows():
+        # A proxy for profile comparison. In a full implementation, we'd compare the actual 
+        # trade return arrays. Here, we parse the delay_expectancy_map as a feature vector proxy 
+        # or use the condition parameters if trade arrays aren't in the dataframe directly.
+        try:
+            delay_map = json.loads(str(row.get("delay_expectancy_map", "{}")))
+            profile_vec = np.array([float(delay_map.get(str(k), 0.0)) for k in [0, 4, 8, 16, 30]])
+        except Exception:
+            profile_vec = np.zeros(5)
+            
+        # Check against previously accepted profiles
+        redundant = False
+        if np.any(profile_vec): # Only check if we have a valid profile
+            for acc_vec in accepted_profiles:
+                # Calculate correlation. Handle zero-variance slices gracefully.
+                if np.std(profile_vec) > 1e-8 and np.std(acc_vec) > 1e-8:
+                    tau, _ = stats.kendalltau(profile_vec, acc_vec)
+                    if tau is not np.nan and tau >= redundancy_threshold:
+                        redundant = True
+                        break
+                        
+        is_redundant[i] = redundant
+        if not redundant:
+            accepted_profiles.append(profile_vec)
+            
+    df["gate_redundancy"] = ~is_redundant
+    return df
 
 
 def safe_float(value: object, default: float = 0.0) -> float:
@@ -136,7 +185,7 @@ def delay_robustness_fields(
     }
 
 
-def gate_year_stability(sub: pd.DataFrame, effect_col: str, min_ratio: float = 0.8) -> Tuple[bool, str]:
+def gate_year_stability(sub: pd.DataFrame, effect_col: str, min_ratio: float = 0.8, target_sign: int = 1) -> Tuple[bool, str]:
     if "year" not in sub.columns or sub.empty:
         return False, "insufficient_years"
     signs = []
@@ -146,8 +195,10 @@ def gate_year_stability(sub: pd.DataFrame, effect_col: str, min_ratio: float = 0
     non_zero = [s for s in signs if s != 0]
     if not non_zero:
         return False, "all_zero"
-    improvement_ratio = non_zero.count(-1) / len(non_zero)
-    catastrophic_reversal = (non_zero.count(1) > 0) and (improvement_ratio < min_ratio)
+    
+    target_sign_val = 1 if target_sign > 0 else -1
+    improvement_ratio = non_zero.count(target_sign_val) / len(non_zero)
+    catastrophic_reversal = (non_zero.count(-target_sign_val) > 0) and (improvement_ratio < min_ratio)
     return bool(improvement_ratio >= min_ratio and not catastrophic_reversal), ",".join(str(s) for s in signs)
 
 
@@ -156,6 +207,7 @@ def gate_regime_stability(
     effect_col: str,
     condition_name: str,
     min_stable_splits: int = 2,
+    target_sign: int = 1,
 ) -> Tuple[bool, int, int]:
     checks: List[pd.Series] = []
     if not condition_name.startswith("symbol_") and "symbol" in sub.columns:
@@ -166,12 +218,17 @@ def gate_regime_stability(
         checks.append(sub.groupby("bull_bear")[effect_col].mean())
 
     stable_splits = 0
+    target_sign_val = 1 if target_sign > 0 else -1
     for series in checks:
         nz = [v for v in series.tolist() if abs(v) > 1e-12]
         if not nz:
             continue
-        if not any(v > 0 for v in nz):
-            stable_splits += 1
+        if target_sign_val > 0:
+            if not any(v < 0 for v in nz):
+                stable_splits += 1
+        else:
+            if not any(v > 0 for v in nz):
+                stable_splits += 1
 
     if not checks:
         return False, 0, 0

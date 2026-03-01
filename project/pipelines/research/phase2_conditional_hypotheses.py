@@ -1472,19 +1472,21 @@ def _delay_robustness_fields(
     }
 
 
-def _gate_year_stability(sub: pd.DataFrame, effect_col: str, min_ratio: float = 0.8) -> Tuple[bool, str]:
-    if "year" not in sub.columns or sub.empty:
+def _gate_year_stability(sub: pd.DataFrame, effect_col: str, min_ratio: float = 0.8, target_sign: int = 1) -> Tuple[bool, str]:
+    if sub.empty or "year" not in sub.columns:
         return False, "insufficient_years"
     signs = []
-    for _, g in sub.groupby("year", sort=True):
-        x = g[effect_col].mean()
-        signs.append(1 if x > 0 else -1 if x < 0 else 0)
-    non_zero = [s for s in signs if s != 0]
-    if not non_zero:
-        return False, "all_zero"
-    improvement_ratio = non_zero.count(-1) / len(non_zero)
-    catastrophic_reversal = (non_zero.count(1) > 0) and (improvement_ratio < min_ratio)
-    return bool(improvement_ratio >= min_ratio and not catastrophic_reversal), ",".join(str(s) for s in signs)
+    for _, group in sub.groupby("year", sort=False):
+        val = group[effect_col].mean()
+        signs.append(1 if val > 0 else -1 if val < 0 else 0)
+    nz = [s for s in signs if s != 0]
+    if not nz:
+        return False, "zero_mean"
+    target_sign_val = 1 if target_sign > 0 else -1
+    good = nz.count(target_sign_val)
+    ratio = good / len(nz)
+    catastrophic = (nz.count(-target_sign_val) > 0) and (ratio < min_ratio)
+    return bool(ratio >= min_ratio and not catastrophic), ",".join(str(s) for s in signs)
 
 
 def _gate_regime_stability(
@@ -1492,8 +1494,8 @@ def _gate_regime_stability(
     effect_col: str,
     condition_name: str,
     min_stable_splits: int = 2,
+    target_sign: int = 1,
 ) -> Tuple[bool, int, int]:
-    # If condition itself is on split variable, skip that split.
     checks: List[pd.Series] = []
     if not condition_name.startswith("symbol_") and "symbol" in sub.columns:
         checks.append(sub.groupby("symbol")[effect_col].mean())
@@ -1502,19 +1504,22 @@ def _gate_regime_stability(
     if not condition_name.startswith("bull_bear_") and "bull_bear" in sub.columns:
         checks.append(sub.groupby("bull_bear")[effect_col].mean())
 
-    # Majority-style regime gate by default (2/3 when all splits exist).
-    stable_splits = 0
-    for s in checks:
-        nz = [v for v in s.tolist() if abs(v) > 1e-12]
-        if not nz:
-            continue
-        # Improvement should stay non-positive (adverse reduction) across splits.
-        if not any(v > 0 for v in nz):
-            stable_splits += 1
-
     if not checks:
         return False, 0, 0
 
+    stable_splits = 0
+    target_sign_val = 1 if target_sign > 0 else -1
+    for series in checks:
+        nz = [v for v in series.tolist() if abs(v) > 1e-12]
+        if not nz:
+            continue
+        if target_sign_val > 0:
+            if not any(v < 0 for v in nz):
+                stable_splits += 1
+        else: # target_sign_val is -1
+            if not any(v > 0 for v in nz):
+                stable_splits += 1
+    
     required_splits = min(max(1, int(min_stable_splits)), len(checks))
     return stable_splits >= required_splits, stable_splits, required_splits
 
@@ -1691,12 +1696,13 @@ def _evaluate_candidate(
 
     tmp = sub.copy()
     tmp["adverse_effect"] = adverse_delta_vec
-    gate_b, year_signs = _gate_year_stability(tmp, "adverse_effect")
+    gate_b, year_signs = _gate_year_stability(tmp, "adverse_effect", target_sign=-1)
     gate_c, gate_c_stable_splits, gate_c_required_splits = _gate_regime_stability(
         tmp,
         "adverse_effect",
         condition_name=condition.name,
         min_stable_splits=min_regime_stable_splits,
+        target_sign=-1,
     )
 
     risk_reduction = float(-mean_adv) if np.isfinite(mean_adv) else np.nan

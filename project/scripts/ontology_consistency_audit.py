@@ -362,6 +362,12 @@ def main() -> int:
     else:
         _print_text(report)
 
+    # Strictly enforce that active specs must be mapped, preventing silent drops
+    implemented = report.get("implemented_contract", {})
+    if implemented.get("active_specs_without_registry") or implemented.get("missing_phase2_chain_entries"):
+        print("\nFATAL: Unmapped active event detected. Failing audit closed.", file=sys.stderr)
+        return 1
+
     if args.fail_on_missing and report.get("failures"):
         return 1
     return 0

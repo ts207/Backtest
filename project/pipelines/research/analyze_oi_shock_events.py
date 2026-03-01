@@ -129,8 +129,8 @@ def main() -> int:
             print(f"Error processing {symbol}: {e}")
 
     events_df = pd.DataFrame(all_events)
-    events_csv = out_dir / "oi_shock_events.csv"
-    events_df.to_csv(events_csv, index=False)
+    events_csv = out_dir / "oi_shock_events.parquet"
+    events_df.to_parquet(events_csv, index=False)
     
     print(f"Wrote {len(events_df)} OI shock events to {events_csv}")
     return 0

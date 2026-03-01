@@ -1528,20 +1528,20 @@ def main() -> int:
     md_path = out_dir / "funding_episode_events.md"
     md_path.write_text("\n".join(lines), encoding="utf-8")
 
-    hazard_csv = out_dir / "funding_episode_hazards.csv"
-    pd.DataFrame(all_hazard_rows).to_csv(hazard_csv, index=False)
-    auc_csv = out_dir / "funding_episode_hazard_auc.csv"
-    auc_df.to_csv(auc_csv, index=False)
-    phase_csv = out_dir / "funding_episode_phase_stability.csv"
-    phase_df.to_csv(phase_csv, index=False)
-    transition_csv = out_dir / "funding_persistence_transition_model.csv"
-    persistence_transition_df.to_csv(transition_csv, index=False)
-    interaction_csv = out_dir / "funding_persistence_interaction_stability.csv"
-    interaction_stability_df.to_csv(interaction_csv, index=False)
-    accel_csv = out_dir / "funding_acceleration_diagnostic.csv"
-    accel_diag_df.to_csv(accel_csv, index=False)
-    events_csv = out_dir / "funding_episode_events.csv"
-    events_df.to_csv(events_csv, index=False)
+    hazard_csv = out_dir / "funding_episode_hazards.parquet"
+    pd.DataFrame(all_hazard_rows).to_parquet(hazard_csv, index=False)
+    auc_csv = out_dir / "funding_episode_hazard_auc.parquet"
+    auc_df.to_parquet(auc_csv, index=False)
+    phase_csv = out_dir / "funding_episode_phase_stability.parquet"
+    phase_df.to_parquet(phase_csv, index=False)
+    transition_csv = out_dir / "funding_persistence_transition_model.parquet"
+    persistence_transition_df.to_parquet(transition_csv, index=False)
+    interaction_csv = out_dir / "funding_persistence_interaction_stability.parquet"
+    interaction_stability_df.to_parquet(interaction_csv, index=False)
+    accel_csv = out_dir / "funding_acceleration_diagnostic.parquet"
+    accel_diag_df.to_parquet(accel_csv, index=False)
+    events_csv = out_dir / "funding_episode_events.parquet"
+    events_df.to_parquet(events_csv, index=False)
 
     logging.info("Wrote %s", json_path)
     logging.info("Wrote %s", md_path)

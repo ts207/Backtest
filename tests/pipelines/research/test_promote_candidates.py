@@ -25,6 +25,7 @@ def _eval_row(**overrides):
         "gate_after_cost_stressed_positive": True,
         "gate_bridge_after_cost_positive_validation": True,
         "gate_bridge_after_cost_stressed_positive_validation": False,
+        "gate_delay_robustness": True,
     }
     row.update(overrides)
     return _evaluate_row(
@@ -82,6 +83,7 @@ def test_promote_candidate_rejects_missing_hypothesis_audit():
             "gate_after_cost_stressed_positive": True,
             "gate_bridge_after_cost_positive_validation": True,
             "gate_bridge_after_cost_stressed_positive_validation": True,
+            "gate_delay_robustness": True,
         },
         hypothesis_index={},
         negative_control_summary={"pass_rate_after_bh": 0.0},

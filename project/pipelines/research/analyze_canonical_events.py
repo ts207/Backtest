@@ -275,7 +275,7 @@ def main() -> int:
             prior = prior[prior["event_type"].astype(str) != event_type].copy()
             new_df = pd.concat([prior, new_df], ignore_index=True)
 
-    new_df.to_csv(out_path, index=False)
+    new_df.to_parquet(out_path, index=False)
     summary = {
         "run_id": str(args.run_id),
         "event_type": event_type,

@@ -170,8 +170,8 @@ def main() -> int:
                 logging.info("Detected %d copula events for %s", len(events), pair)
                 
         events_df = pd.concat(all_events, ignore_index=True) if all_events else pd.DataFrame()
-        csv_path = out_dir / "copula_pairs_events.csv"
-        events_df.to_csv(csv_path, index=False)
+        csv_path = out_dir / "copula_pairs_events.parquet"
+        events_df.to_parquet(csv_path, index=False)
         
         finalize_manifest(manifest, "success", stats={"event_count": len(events_df)})
         return 0

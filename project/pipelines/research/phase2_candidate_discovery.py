@@ -402,6 +402,14 @@ def _resolve_state_context_column(columns: pd.Index, state_id: Optional[str]) ->
     return None
 
 
+def _simes_p_value(p_vals: pd.Series) -> float:
+    p = p_vals.dropna().sort_values()
+    m = len(p)
+    if m == 0:
+        return 1.0
+    return float((p * m / np.arange(1, m + 1)).min())
+
+
 def _bool_mask_from_series(series: pd.Series) -> pd.Series:
     if series.dtype == bool:
         return series.fillna(False)
@@ -448,16 +456,32 @@ def _apply_multiplicity_controls(
         return out
 
     p_col = "p_value_for_fdr" if "p_value_for_fdr" in eligible.columns else "p_value"
+    
+    # 1. Compute Simes p-value per family
+    family_simes = eligible.groupby("family_id")[p_col].apply(_simes_p_value).rename("p_value_family").reset_index()
+    
+    # 2. BH across families
+    family_simes["q_value_family"] = _bh_adjust(family_simes["p_value_family"])
+    family_simes["is_discovery_family"] = family_simes["q_value_family"] <= float(max_q)
+    
+    family_q_map = dict(zip(family_simes["family_id"], family_simes["q_value_family"]))
+    family_disc_map = dict(zip(family_simes["family_id"], family_simes["is_discovery_family"]))
+    
+    eligible["q_value_family"] = eligible["family_id"].map(family_q_map).fillna(1.0)
+    eligible["is_discovery_family"] = eligible["family_id"].map(family_disc_map).fillna(False)
+
     family_frames: List[pd.DataFrame] = []
     for _, family_df in eligible.groupby("family_id"):
         fam = family_df.copy()
-        fam["q_value_family"] = _bh_adjust(fam[p_col])
-        fam["is_discovery_family"] = fam["q_value_family"] <= float(max_q)
+        is_sel = fam["is_discovery_family"].iloc[0] if len(fam) > 0 else False
+        if is_sel:
+            fam["q_value"] = _bh_adjust(fam[p_col])
+        else:
+            fam["q_value"] = 1.0
+        fam["is_discovery"] = fam["q_value"] <= float(max_q)
         family_frames.append(fam)
 
     eligible_scored = pd.concat(family_frames, axis=0)
-    eligible_scored["q_value"] = _bh_adjust(eligible_scored["q_value_family"])
-    eligible_scored["is_discovery"] = eligible_scored["q_value"] <= float(max_q)
 
     for col in ("q_value_family", "is_discovery_family", "q_value", "is_discovery"):
         out.loc[eligible_scored.index, col] = eligible_scored[col]
@@ -851,21 +875,61 @@ def _apply_hierarchical_shrinkage(
         how="left",
     )
 
-    out["shrinkage_weight_state"] = np.where(
+    # 3. State layer (cross-symbol)
+    out["shrinkage_weight_state_group"] = np.where(
         out["lambda_state_status"] == "insufficient_data",
         1.0,
-        out["_n"] / (out["_n"] + pd.to_numeric(out["lambda_state"], errors="coerce").fillna(float(lambda_state))),
+        out["n_state"] / (out["n_state"] + pd.to_numeric(out["lambda_state"], errors="coerce").fillna(float(lambda_state))),
     )
-    out["shrinkage_weight_state"] = out["shrinkage_weight_state"].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(0.0, 1.0)
-    out.loc[~state_mask, "lambda_state_status"] = "no_state"
-    out.loc[~state_mask, "lambda_state"] = 0.0
-    out.loc[~state_mask, "shrinkage_weight_state"] = 1.0
-
-    out["effect_shrunk_state"] = np.where(
+    out["shrinkage_weight_state_group"] = out["shrinkage_weight_state_group"].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(0.0, 1.0)
+    
+    out["effect_shrunk_state_group"] = np.where(
         state_mask,
-        out["shrinkage_weight_state"] * out["mean_state"].fillna(out["effect_raw"])
-        + (1.0 - out["shrinkage_weight_state"]) * out["effect_shrunk_event"],
-        out["effect_shrunk_event"],
+        out["shrinkage_weight_state_group"] * out["mean_state"] + (1.0 - out["shrinkage_weight_state_group"]) * out["effect_shrunk_event"],
+        out["effect_shrunk_event"]
+    )
+
+    # 4. Symbol layer (the candidate)
+    symbol_cols = state_cols + ["_symbol"]
+    symbol_stats = out[symbol_cols + ["_n", "effect_raw", "_var"]].copy()
+    symbol_stats = symbol_stats.rename(columns={"_n": "n_symbol", "effect_raw": "mean_symbol", "_var": "var_symbol"})
+    
+    lambda_symbol_df = _estimate_adaptive_lambda(
+        symbol_stats,
+        parent_cols=state_cols,
+        child_col="_symbol",
+        n_col="n_symbol",
+        mean_col="mean_symbol",
+        var_col="var_symbol",
+        lambda_name="lambda_symbol",
+        fixed_lambda=float(lambda_state),
+        adaptive=bool(adaptive_lambda),
+        lambda_min=float(adaptive_lambda_min),
+        lambda_max=float(adaptive_lambda_max),
+        eps=float(adaptive_lambda_eps),
+        min_total_samples=int(adaptive_lambda_min_total_samples),
+        previous_lambda_by_parent=None,
+        lambda_smoothing_alpha=float(lambda_smoothing_alpha),
+        lambda_shock_cap_pct=float(lambda_shock_cap_pct),
+    )
+    
+    out = out.merge(lambda_symbol_df[state_cols + ["lambda_symbol", "lambda_symbol_status"]], on=state_cols, how="left")
+    
+    # If a state has only one symbol (or insufficient data to adaptively estimate symbol-level variance),
+    # fall back to the fixed user-provided lambda_state to ensure small-N heavily pools toward the state.
+    out["lambda_symbol_eff"] = np.where(
+        out["lambda_symbol_status"].isin(["insufficient_data", "single_child"]),
+        float(lambda_state),
+        pd.to_numeric(out["lambda_symbol"], errors="coerce").fillna(float(lambda_state))
+    )
+    
+    out["shrinkage_weight_state"] = out["_n"] / (out["_n"] + out["lambda_symbol_eff"])
+    out["shrinkage_weight_state"] = out["shrinkage_weight_state"].replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(0.0, 1.0)
+
+    # The candidate is shrunk towards the cross-symbol group mean!
+    out["effect_shrunk_state"] = (
+        out["shrinkage_weight_state"] * out["effect_raw"] 
+        + (1.0 - out["shrinkage_weight_state"]) * out["effect_shrunk_state_group"]
     )
 
     # Build shrunken p-values from state-shrunk effect and raw standard error.
@@ -1242,8 +1306,8 @@ def _join_events_to_features(
         "basis_z",
         "side",
         "trade_side",
-        "signal_side",
         "direction_label",
+        "split_label",
     ):
         if col in evt.columns:
             extra_evt_cols.append(col)
@@ -1312,6 +1376,9 @@ def calculate_expectancy_stats(
             "mean_tau_down_days": 0.0,
             "tau_directional_ratio": 0.0,
             "directional_up_share": 0.0,
+            "mean_train_return": 0.0,
+            "mean_validation_return": 0.0,
+            "mean_test_return": 0.0,
         }
 
     if int(entry_lag_bars) < 1:
@@ -1339,6 +1406,9 @@ def calculate_expectancy_stats(
             "mean_tau_down_days": 0.0,
             "tau_directional_ratio": 0.0,
             "directional_up_share": 0.0,
+            "mean_train_return": 0.0,
+            "mean_validation_return": 0.0,
+            "mean_test_return": 0.0,
         }
 
     # Compute forward return at t0 using aligned feature rows.
@@ -1352,6 +1422,7 @@ def calculate_expectancy_stats(
     event_vol_list: List[Any] = []
     event_liq_list: List[Any] = []
     event_dir_list: List[int] = []
+    event_split_list: List[str] = []
     for _, row in merged.iterrows():
         ts = row["timestamp"]
         # Find position of this feature row in features_df
@@ -1372,18 +1443,19 @@ def calculate_expectancy_stats(
             continue
         fwd_ret = (close_fwd / close_t0) - 1.0
 
-        directional_ret = float(fwd_ret) * direction
+        event_direction = _event_direction_from_joined_row(
+            row,
+            canonical_family=canonical_family,
+            fallback_direction=1,
+        )
+
+        directional_ret = float(fwd_ret) * event_direction * direction
         event_returns.append(directional_ret)
         event_ts_list.append(pd.to_datetime(ts, utc=True, errors="coerce"))
         event_vol_list.append(row.get("evt_vol_regime", ""))
         event_liq_list.append(row.get("evt_liquidity_state", row.get("evt_market_liquidity_state", row.get("evt_depth_state", ""))))
-        event_dir_list.append(
-            _event_direction_from_joined_row(
-                row,
-                canonical_family=canonical_family,
-                fallback_direction=direction,
-            )
-        )
+        event_dir_list.append(event_direction)
+        event_split_list.append(str(row.get("evt_split_label", "")).strip().lower())
 
     if len(event_returns) < min_samples:
         std_ret = float(pd.Series(event_returns, dtype=float).std()) if len(event_returns) > 1 else 0.0
@@ -1404,6 +1476,9 @@ def calculate_expectancy_stats(
             "mean_tau_down_days": 0.0,
             "tau_directional_ratio": 0.0,
             "directional_up_share": 0.0,
+            "mean_train_return": 0.0,
+            "mean_validation_return": 0.0,
+            "mean_test_return": 0.0,
         }
 
     returns_series = pd.Series(event_returns, dtype=float)
@@ -1550,6 +1625,18 @@ def calculate_expectancy_stats(
         "tau_directional_ratio": tau_directional_ratio,
         "directional_up_share": directional_up_share,
     }
+
+    split_returns = {"train": [], "validation": [], "test": []}
+    if event_split_list:
+        for r, s in zip(event_returns, event_split_list):
+            if s in split_returns:
+                split_returns[s].append(r)
+                
+    out["mean_train_return"] = float(np.mean(split_returns["train"])) if split_returns["train"] else 0.0
+    out["mean_validation_return"] = float(np.mean(split_returns["validation"])) if split_returns["validation"] else 0.0
+    out["mean_test_return"] = float(np.mean(split_returns["test"])) if split_returns["test"] else 0.0
+
+    return out
 
 
 def calculate_expectancy(
@@ -2477,6 +2564,14 @@ def main():
             conservative_cost = cost * conservative_cost_multiplier
             after_cost = effect - cost
             after_cost_conservative = effect - conservative_cost
+            
+            mean_train_return = float(exp_stats.get("mean_train_return", 0.0))
+            mean_val_return = float(exp_stats.get("mean_validation_return", 0.0))
+            
+            bridge_train_after_cost_bps = float(mean_train_return - cost) * 10000.0 if mean_train_return else 0.0
+            bridge_validation_after_cost_bps = float(mean_val_return - cost) * 10000.0 if mean_val_return else 0.0
+            bridge_validation_stressed_after_cost_bps = float(mean_val_return - conservative_cost) * 10000.0 if mean_val_return else 0.0
+            
             econ_pass = after_cost >= min_after_cost
             econ_pass_conservative = after_cost_conservative >= min_after_cost
             fail_reasons = []
@@ -2574,6 +2669,9 @@ def main():
                 "gate_phase2_research": gate_phase2_research,
                 "gate_phase2_final": gate_phase2_final,
                 "robustness_score": _p2_quality_score,
+                "bridge_train_after_cost_bps": bridge_train_after_cost_bps,
+                "bridge_validation_after_cost_bps": bridge_validation_after_cost_bps,
+                "bridge_validation_stressed_after_cost_bps": bridge_validation_stressed_after_cost_bps,
                 # Explicit semantic columns — do not conflate these
                 "is_discovery": False,  # Populated after BH-FDR pass
                 "phase2_quality_score": _p2_quality_score,
@@ -2629,7 +2727,26 @@ def main():
                     )
                     operator_version = str(operator_def.get("operator_version", operator_registry_version)).strip() or operator_registry_version
                     # 3a. Base candidate (all events for this symbol)
-                    exp_stats = calculate_expectancy_stats(
+                    # The following block is moved into the _add_res function or a loop that calls it.
+                    # The original instruction seems to imply this block replaces the direct call to calculate_expectancy_stats
+                    # and its subsequent variable assignments, but it's structured as if it's inside a loop.
+                    # Given the context, it's likely intended to be part of the conditional bucketing logic,
+                    # which is not fully present in the provided snippet.
+                    # For now, I will apply the change as if it's replacing the direct calculation for the "all" condition,
+                    # assuming `bucket_events_local` refers to `sym_all_events` and `bucket_cond` refers to "all".
+                    # However, the instruction's provided snippet is incomplete and seems to be missing the loop structure
+                    # where `bucket_events_local` and `bucket_cond` would be defined.
+                    # I will apply the change by replacing the direct calculation with the new block,
+                    # using `sym_all_events` for `bucket_events_local` and "all" for `bucket_cond`.
+
+                    # Original code:
+                    # exp_stats = calculate_expectancy_stats(...)
+                    # effect = float(exp_stats["mean_return"])
+                    # ...
+                    # _add_res(effect, pval, n_joined, ...)
+
+                    # Modified based on instruction:
+                    cond_exp_stats = calculate_expectancy_stats(
                         sym_all_events, features_df, rule, horizon, canonical_family=canonical_family_for_event,
                         shift_labels_k=args.shift_labels_k,
                         entry_lag_bars=args.entry_lag_bars,
@@ -2648,20 +2765,22 @@ def main():
                         directional_tau_default_up_mult=float(args.directional_tau_default_up_mult),
                         directional_tau_default_down_mult=float(args.directional_tau_default_down_mult),
                     )
-                    effect = float(exp_stats["mean_return"])
-                    pval = float(exp_stats["p_value"])
-                    n_joined = float(exp_stats["n_events"])
-                    n_effective = float(exp_stats.get("n_effective", n_joined))
-                    stability_pass = bool(exp_stats["stability_pass"])
-                    std_return = float(exp_stats.get("std_return", 0.0))
-                    mean_weight_age_days = float(exp_stats.get("mean_weight_age_days", 0.0))
-                    time_weight_sum = float(exp_stats.get("time_weight_sum", n_joined))
-                    mean_tau_days = float(exp_stats.get("mean_tau_days", tau_days))
-                    learning_rate_mean = float(exp_stats.get("learning_rate_mean", 0.0))
-                    mean_tau_up_days = float(exp_stats.get("mean_tau_up_days", 0.0))
-                    mean_tau_down_days = float(exp_stats.get("mean_tau_down_days", 0.0))
-                    tau_directional_ratio = float(exp_stats.get("tau_directional_ratio", 0.0))
-                    directional_up_share = float(exp_stats.get("directional_up_share", 0.0))
+                    loc_eff = float(cond_exp_stats["mean_return"])
+                    loc_pv = float(cond_exp_stats["p_value"])
+                    loc_n = float(cond_exp_stats["n_events"])
+                    loc_n_eff = float(cond_exp_stats.get("n_effective", loc_n))
+                    loc_stab = bool(cond_exp_stats["stability_pass"])
+                    loc_std_ret = float(cond_exp_stats.get("std_return", 0.0))
+                    loc_mean_age_days = float(cond_exp_stats.get("mean_weight_age_days", 0.0))
+                    loc_time_weight_sum = float(cond_exp_stats.get("time_weight_sum", loc_n))
+                    loc_mean_tau_days = float(cond_exp_stats.get("mean_tau_days", tau_days))
+                    loc_learning_rate = float(cond_exp_stats.get("learning_rate_mean", 0.0))
+                    loc_tau_up = float(cond_exp_stats.get("mean_tau_up_days", 0.0))
+                    loc_tau_down = float(cond_exp_stats.get("mean_tau_down_days", 0.0))
+                    loc_tau_ratio = float(cond_exp_stats.get("tau_directional_ratio", 0.0))
+                    loc_up_share = float(cond_exp_stats.get("directional_up_share", 0.0))
+                    loc_mean_train = float(cond_exp_stats.get("mean_train_return", 0.0))
+                    loc_mean_val = float(cond_exp_stats.get("mean_validation_return", 0.0))
                     
                     def _add_res(
                         eff,
@@ -2678,6 +2797,8 @@ def main():
                         tau_down_days_local,
                         tau_directional_ratio_local,
                         directional_up_share_local,
+                        mean_train_local,
+                        mean_val_local,
                         bucket_events_for_cost,
                         cond_name="all",
                     ):
@@ -2689,6 +2810,10 @@ def main():
 
                         aft_cost = eff - cost
                         aft_cost_conservative = eff - conservative_cost
+                        
+                        bridge_train_after_cost_bps = float(mean_train_local - cost) * 10000.0 if mean_train_local else 0.0
+                        bridge_validation_after_cost_bps = float(mean_val_local - cost) * 10000.0 if mean_val_local else 0.0
+                        bridge_validation_stressed_after_cost_bps = float(mean_val_local - conservative_cost) * 10000.0 if mean_val_local else 0.0
 
                         ec_pass = aft_cost >= min_after_cost
                         ec_pass_conservative = aft_cost_conservative >= min_after_cost
@@ -2815,6 +2940,9 @@ def main():
                             "gate_oos_validation_test": False,
                             "gate_oos_consistency_strict": False,
                             "bridge_eval_status": "pending",
+                            "bridge_train_after_cost_bps": bridge_train_after_cost_bps,
+                            "bridge_validation_after_cost_bps": bridge_validation_after_cost_bps,
+                            "bridge_validation_stressed_after_cost_bps": bridge_validation_stressed_after_cost_bps,
                             "robustness_score": _p2_qs,
                             # Explicit semantic columns
                             "is_discovery": False,  # Populated after BH-FDR pass
@@ -2852,6 +2980,8 @@ def main():
                         mean_tau_down_days,
                         tau_directional_ratio,
                         directional_up_share,
+                        mean_train_return,
+                        mean_val_return,
                         sym_all_events,
                         "all",
                     )

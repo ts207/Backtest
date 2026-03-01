@@ -433,25 +433,25 @@ def main() -> int:
 
     # Outputs
     files = {
-        "events": out_dir / "vol_shock_relaxation_events.csv",
-        "controls": out_dir / "vol_shock_relaxation_controls.csv",
-        "hazards": out_dir / "vol_shock_relaxation_hazards.csv",
-        "hazard_auc": out_dir / "vol_shock_relaxation_hazard_auc.csv",
-        "deltas": out_dir / "vol_shock_relaxation_matched_deltas.csv",
-        "phase": out_dir / "vol_shock_relaxation_phase_stability.csv",
-        "sanity": out_dir / "vol_shock_relaxation_sanity.csv",
-        "sign": out_dir / "vol_shock_relaxation_sign_stability.csv",
-        "thresholds": out_dir / "vol_shock_relaxation_thresholds.csv",
+        "events": out_dir / "vol_shock_relaxation_events.parquet",
+        "controls": out_dir / "vol_shock_relaxation_controls.parquet",
+        "hazards": out_dir / "vol_shock_relaxation_hazards.parquet",
+        "hazard_auc": out_dir / "vol_shock_relaxation_hazard_auc.parquet",
+        "deltas": out_dir / "vol_shock_relaxation_matched_deltas.parquet",
+        "phase": out_dir / "vol_shock_relaxation_phase_stability.parquet",
+        "sanity": out_dir / "vol_shock_relaxation_sanity.parquet",
+        "sign": out_dir / "vol_shock_relaxation_sign_stability.parquet",
+        "thresholds": out_dir / "vol_shock_relaxation_thresholds.parquet",
     }
-    events_df.to_csv(files["events"], index=False)
-    controls_df.to_csv(files["controls"], index=False)
-    hazards_df.to_csv(files["hazards"], index=False)
-    auc_df.to_csv(files["hazard_auc"], index=False)
-    delta_df.to_csv(files["deltas"], index=False)
-    phase_df.to_csv(files["phase"], index=False)
-    sanity_df.to_csv(files["sanity"], index=False)
-    sign_df.to_csv(files["sign"], index=False)
-    thresholds_df.to_csv(files["thresholds"], index=False)
+    events_df.to_parquet(files["events"], index=False)
+    controls_df.to_parquet(files["controls"], index=False)
+    hazards_df.to_parquet(files["hazards"], index=False)
+    auc_df.to_parquet(files["hazard_auc"], index=False)
+    delta_df.to_parquet(files["deltas"], index=False)
+    phase_df.to_parquet(files["phase"], index=False)
+    sanity_df.to_parquet(files["sanity"], index=False)
+    sign_df.to_parquet(files["sign"], index=False)
+    thresholds_df.to_parquet(files["thresholds"], index=False)
 
     summary = {
         "run_id": args.run_id,

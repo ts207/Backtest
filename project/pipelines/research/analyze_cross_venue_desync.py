@@ -330,21 +330,21 @@ def main() -> int:
             .sort_values(["symbol", "year"])
         )
 
-    events_path = out_dir / "cross_venue_desync_events.csv"
-    controls_path = out_dir / "cross_venue_desync_controls.csv"
-    deltas_path = out_dir / "cross_venue_desync_matched_deltas.csv"
-    hazards_path = out_dir / "cross_venue_desync_hazards.csv"
-    phase_path = out_dir / "cross_venue_desync_phase_stability.csv"
-    sign_path = out_dir / "cross_venue_desync_sign_stability.csv"
+    events_path = out_dir / "cross_venue_desync_events.parquet"
+    controls_path = out_dir / "cross_venue_desync_controls.parquet"
+    deltas_path = out_dir / "cross_venue_desync_matched_deltas.parquet"
+    hazards_path = out_dir / "cross_venue_desync_hazards.parquet"
+    phase_path = out_dir / "cross_venue_desync_phase_stability.parquet"
+    sign_path = out_dir / "cross_venue_desync_sign_stability.parquet"
     summary_md_path = out_dir / "cross_venue_desync_summary.md"
     summary_json_path = out_dir / "cross_venue_desync_summary.json"
 
-    events.to_csv(events_path, index=False)
-    controls.to_csv(controls_path, index=False)
-    deltas.to_csv(deltas_path, index=False)
-    hazards.to_csv(hazards_path, index=False)
-    phase.to_csv(phase_path, index=False)
-    sign.to_csv(sign_path, index=False)
+    events.to_parquet(events_path, index=False)
+    controls.to_parquet(controls_path, index=False)
+    deltas.to_parquet(deltas_path, index=False)
+    hazards.to_parquet(hazards_path, index=False)
+    phase.to_parquet(phase_path, index=False)
+    sign.to_parquet(sign_path, index=False)
 
     summary = {
         "event_type": "CROSS_VENUE_DESYNC",

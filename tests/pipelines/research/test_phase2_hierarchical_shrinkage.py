@@ -235,7 +235,7 @@ def test_adaptive_lambda_insufficient_data_skips_state_pooling():
         adaptive_lambda_min_total_samples=1000,
     )
     assert (out["lambda_state_status"] == "insufficient_data").all()
-    assert (out["shrinkage_weight_state"] == 1.0).all()
+    assert (out["shrinkage_weight_state_group"] == 1.0).all()
     assert (out["effect_shrunk_state"] == out["effect_raw"]).all()
 
 

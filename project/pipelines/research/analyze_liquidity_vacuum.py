@@ -341,7 +341,7 @@ def main() -> int:
         
         controls_df = pd.DataFrame(control_rows)
         controls_path = out_dir / f"liquidity_vacuum_controls_{sym}.csv" # Per symbol controls file
-        controls_df.to_csv(controls_path, index=False)
+        controls_df.to_parquet(controls_path, index=False)
         if not controls_df.empty:
             logging.info("Wrote %s control events for %s to %s", len(controls_df), sym, controls_path)
         else:
@@ -352,20 +352,20 @@ def main() -> int:
     # Phase-2 expects the events CSV to exist for strict phase1->phase2 contracts,
     # even when no events were detected.
     events_df = pd.concat(all_events, ignore_index=True) if all_events else pd.DataFrame()
-    csv_path = out_dir / "liquidity_vacuum_events.csv"
-    events_df.to_csv(csv_path, index=False)
+    csv_path = out_dir / "liquidity_vacuum_events.parquet"
+    events_df.to_parquet(csv_path, index=False)
     if not events_df.empty:
         logging.info("Wrote events to %s", csv_path)
     else:
         logging.info("Wrote empty events scaffold to %s", csv_path)
-    # controls_path = out_dir / "liquidity_vacuum_controls.csv" # OLD: consolidated, now per symbol
-    # pd.DataFrame(columns=["event_id", "symbol", "start_idx", "end_idx"]).to_csv(controls_path, index=False)
+    # controls_path = out_dir / "liquidity_vacuum_controls.parquet" # OLD: consolidated, now per symbol
+    # pd.DataFrame(columns=["event_id", "symbol", "start_idx", "end_idx"]).to_parquet(controls_path, index=False)
     # logging.info("Wrote controls scaffold to %s", controls_path)
 
     if calibration_rows:
         calibration_df = pd.concat(calibration_rows, ignore_index=True)
-        calibration_csv_path = out_dir / "liquidity_vacuum_calibration.csv"
-        calibration_df.to_csv(calibration_csv_path, index=False)
+        calibration_csv_path = out_dir / "liquidity_vacuum_calibration.parquet"
+        calibration_df.to_parquet(calibration_csv_path, index=False)
         logging.info("Wrote calibration sweep to %s", calibration_csv_path)
 
     # Write a JSON summary capturing calibration and event counts per symbol

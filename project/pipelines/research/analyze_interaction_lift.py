@@ -25,7 +25,7 @@ def _load_phase2_data(run_id: str) -> pd.DataFrame:
         logging.warning("Phase 2 root not found: %s", phase2_root)
         return pd.DataFrame()
     
-    csv_files = list(phase2_root.glob("**/phase2_candidates.csv"))
+    csv_files = list(phase2_root.glob("**/phase2_candidates.parquet"))
     if not csv_files:
         return pd.DataFrame()
     
@@ -140,8 +140,8 @@ def main() -> int:
         parquet_path = out_dir / "lift_analysis.parquet"
         lift_df.to_parquet(parquet_path, index=False)
         
-        csv_path = out_dir / "lift_analysis.csv"
-        lift_df.to_csv(csv_path, index=False)
+        csv_path = out_dir / "lift_analysis.parquet"
+        lift_df.to_parquet(csv_path, index=False)
         
         # Generate Markdown summary
         md_path = out_dir / "top_lifts.md"
