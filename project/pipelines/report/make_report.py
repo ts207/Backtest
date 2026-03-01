@@ -239,6 +239,8 @@ def _load_btc_close(data_root: Path) -> pd.Series:
             return pd.Series(dtype=float)
         if "timestamp" in df.columns:
             df = df.sort_values("timestamp")
+            ts = pd.to_datetime(df["timestamp"], utc=True)
+            return pd.Series(df["close"].values, index=ts, dtype=float)
         return df["close"].reset_index(drop=True).astype(float)
     except Exception:
         return pd.Series(dtype=float)
@@ -254,8 +256,8 @@ def _load_strategy_pnl_and_positions(engine_dir: Path) -> tuple[pd.Series, pd.Se
     if not strategy_files:
         return pd.Series(dtype=float), pd.Series(dtype=float)
 
-    pnl_frames: List[pd.Series] = []
-    pos_frames: List[pd.Series] = []
+    pnl_series: List[pd.Series] = []
+    pos_series: List[pd.Series] = []
     for path in strategy_files:
         try:
             df = pd.read_csv(path)
@@ -263,13 +265,28 @@ def _load_strategy_pnl_and_positions(engine_dir: Path) -> tuple[pd.Series, pd.Se
             continue
         if df.empty:
             continue
+        idx = None
+        if "timestamp" in df.columns:
+            idx = pd.to_datetime(df["timestamp"], utc=True)
         if "pnl" in df.columns:
-            pnl_frames.append(df["pnl"].fillna(0.0).astype(float))
+            s = df["pnl"].fillna(0.0).astype(float)
+            if idx is not None:
+                s = s.set_axis(idx)
+            pnl_series.append(s)
         if "pos" in df.columns:
-            pos_frames.append(df["pos"].fillna(0.0).astype(float))
+            s = df["pos"].fillna(0.0).astype(float)
+            if idx is not None:
+                s = s.set_axis(idx)
+            pos_series.append(s)
 
-    combined_pnl = pd.concat(pnl_frames, ignore_index=True) if pnl_frames else pd.Series(dtype=float)
-    combined_pos = pd.concat(pos_frames, ignore_index=True) if pos_frames else pd.Series(dtype=float)
+    if pnl_series:
+        combined_pnl = pd.concat(pnl_series).groupby(level=0).sum()
+    else:
+        combined_pnl = pd.Series(dtype=float)
+    if pos_series:
+        combined_pos = pd.concat(pos_series).groupby(level=0).sum()
+    else:
+        combined_pos = pd.Series(dtype=float)
     return combined_pnl, combined_pos
 
 
@@ -662,10 +679,9 @@ def main() -> int:
                 btc_returns = btc_close.pct_change(fill_method=None).dropna()
                 strategy_pnl, strategy_pos = _load_strategy_pnl_and_positions(engine_dir)
                 if not strategy_pnl.empty and not btc_returns.empty:
-                    min_len = min(len(strategy_pnl), len(btc_returns))
                     btc_beta_decomposition = compute_btc_beta(
-                        strategy_returns=strategy_pnl.iloc[:min_len].reset_index(drop=True),
-                        btc_returns=btc_returns.iloc[:min_len].reset_index(drop=True),
+                        strategy_returns=strategy_pnl.pct_change(fill_method=None).fillna(0.0),
+                        btc_returns=btc_returns,
                     )
                 else:
                     logging.warning("Strategy pnl or BTC returns unavailable; skipping btc_beta_decomposition")

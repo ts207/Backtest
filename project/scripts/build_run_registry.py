@@ -1,9 +1,9 @@
 from __future__ import annotations
-import argparse, json, sqlite3, sys
+import argparse, json, logging, os, sqlite3, sys
 from pathlib import Path
 from typing import Dict, List
 
-DATA_ROOT = Path(__file__).resolve().parents[3] / "data"
+DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", str(Path(__file__).resolve().parents[3] / "data")))
 
 
 def create_schema(conn: sqlite3.Connection) -> None:
@@ -46,6 +46,7 @@ def query_top_promoted(conn: sqlite3.Connection, limit: int = 10) -> List[Dict]:
 
 
 def main() -> int:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="Index run manifests into SQLite registry")
     parser.add_argument("--data_root", default=str(DATA_ROOT))
     parser.add_argument("--db", default=None)
@@ -60,7 +61,8 @@ def main() -> int:
     for manifest_path in sorted((data_root / "runs").glob("*/run_manifest.json")):
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as exc:
+            logging.warning("Skipping malformed manifest %s: %s", manifest_path, exc)
             continue
         run_id = manifest.get("run_id", manifest_path.parent.name)
         upsert_run(conn, {
