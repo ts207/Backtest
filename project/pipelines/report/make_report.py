@@ -680,7 +680,9 @@ def main() -> int:
                 strategy_pnl, strategy_pos = _load_strategy_pnl_and_positions(engine_dir)
                 if not strategy_pnl.empty and not btc_returns.empty:
                     btc_beta_decomposition = compute_btc_beta(
-                        strategy_returns=strategy_pnl.pct_change(fill_method=None).fillna(0.0),
+                        strategy_returns=strategy_pnl.pct_change(fill_method=None).replace(
+                            [float("inf"), float("-inf")], float("nan")
+                        ),
                         btc_returns=btc_returns,
                     )
                 else:
