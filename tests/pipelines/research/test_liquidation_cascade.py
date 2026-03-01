@@ -23,8 +23,8 @@ def test_detect_cascades_basic():
     df.loc[50, "low"] = 95.0
     
     # median will be 10.0. 100.0 > 3.0 * 10.0
-    events = detect_cascades(df, "BTCUSDT", liq_median_window=20, liq_multiplier=3.0)
-    
+    events = detect_cascades(df, "BTCUSDT", liq_median_window=20, liq_multiplier=3.0, liq_vol_th=0.0, oi_drop_th=-10.0)
+
     assert len(events) == 1
     assert events.iloc[0]["total_liquidation_notional"] == 100.0
     assert events.iloc[0]["oi_reduction_pct"] == pytest.approx(0.05) # (1000 - 950) / 1000
@@ -50,8 +50,8 @@ def test_detect_cascades_multi_bar():
     df.loc[52, "oi_notional"] = 850.0
     df.loc[52, "low"] = 90.0
     
-    events = detect_cascades(df, "BTCUSDT", liq_median_window=20, liq_multiplier=3.0)
-    
+    events = detect_cascades(df, "BTCUSDT", liq_median_window=20, liq_multiplier=3.0, liq_vol_th=0.0, oi_drop_th=-10.0)
+
     assert len(events) == 1
     assert events.iloc[0]["duration_bars"] == 3
     assert events.iloc[0]["total_liquidation_notional"] == 300.0
@@ -74,5 +74,5 @@ def test_detect_cascades_no_trigger_on_positive_oi():
     df.loc[50, "liquidation_notional"] = 100.0
     df.loc[50, "oi_delta_1h"] = 50.0
     
-    events = detect_cascades(df, "BTCUSDT", liq_median_window=20, liq_multiplier=3.0)
+    events = detect_cascades(df, "BTCUSDT", liq_median_window=20, liq_multiplier=3.0, liq_vol_th=0.0, oi_drop_th=-10.0)
     assert len(events) == 0

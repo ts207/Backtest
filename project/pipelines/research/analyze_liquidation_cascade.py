@@ -44,11 +44,13 @@ def _load_features(run_id: str, symbol: str) -> pd.DataFrame:
     return df
 
 def detect_cascades(
-    df: pd.DataFrame, 
-    symbol: str, 
+    df: pd.DataFrame,
+    symbol: str,
     liq_median_window: int = 288,  # 1 day of 5m bars
     liq_multiplier: float = 3.0,
-    cooldown_bars: int = 12
+    cooldown_bars: int = 12,
+    liq_vol_th: float = 100000.0,
+    oi_drop_th: float = -500000.0,
 ) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
@@ -84,8 +86,8 @@ def detect_cascades(
         oi_delta = float(df["oi_delta_1h"].iat[i])
         threshold = float(df["liq_th"].iat[i])
         
-        # Rule: Liquidation spike AND OI drop
-        if liq > threshold and oi_delta < 0:
+        # Rule: Liquidation spike AND OI drop (both relative and absolute thresholds)
+        if liq > threshold and liq > liq_vol_th and oi_delta < oi_drop_th:
             # Found a cascade start
             start_idx = i
             end_idx = i
@@ -98,8 +100,8 @@ def detect_cascades(
                 next_liq = float(df["liquidation_notional"].iat[end_idx + 1])
                 next_oi_delta = float(df["oi_delta_1h"].iat[end_idx + 1])
                 next_threshold = float(df["liq_th"].iat[end_idx + 1])
-                
-                if next_liq > next_threshold and next_oi_delta < 0:
+
+                if next_liq > next_threshold and next_liq > liq_vol_th and next_oi_delta < oi_drop_th:
                     end_idx += 1
                 else:
                     break
@@ -151,6 +153,8 @@ def main() -> int:
     parser.add_argument("--symbols", required=True)
     parser.add_argument("--liq_multiplier", type=float, default=3.0)
     parser.add_argument("--median_window", type=int, default=288)
+    parser.add_argument("--liq_vol_th", type=float, default=100000.0)
+    parser.add_argument("--oi_drop_th", type=float, default=-500000.0)
     parser.add_argument("--out_dir", default=None)
     parser.add_argument("--log_path", default=None)
     args = parser.parse_args()
@@ -170,10 +174,12 @@ def main() -> int:
                 continue
             
             events = detect_cascades(
-                feats, 
-                sym, 
-                liq_median_window=args.median_window, 
-                liq_multiplier=args.liq_multiplier
+                feats,
+                sym,
+                liq_median_window=args.median_window,
+                liq_multiplier=args.liq_multiplier,
+                liq_vol_th=args.liq_vol_th,
+                oi_drop_th=args.oi_drop_th,
             )
             
             if not events.empty:

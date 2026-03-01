@@ -2079,7 +2079,7 @@ def _build_lambda_snapshot(fdr_df: pd.DataFrame) -> pd.DataFrame:
             "lambda_status": _evt.get("lambda_event_status", "").fillna("").astype(str),
         })
         level_frames.append(_evt_out)
-
+    st_cols = ["template_verb", "horizon", "canonical_family", "canonical_event_type", "lambda_state", "lambda_state_status"]
     _st = fdr_df[[c for c in st_cols if c in fdr_df.columns]].drop_duplicates().copy()
     if not _st.empty:
         _st_out = pd.DataFrame({

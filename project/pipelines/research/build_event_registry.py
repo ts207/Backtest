@@ -99,8 +99,8 @@ def main() -> int:
         for symbol in symbols:
             registry_contract_check(events, flags, symbol)
 
-        events["enter_ts"] = events["enter_ts"].astype("int64") // 10**6
-        events["exit_ts"] = events["exit_ts"].astype("int64") // 10**6
+        for _ts_col in ("phenom_enter_ts", "enter_ts", "detected_ts", "signal_ts", "exit_ts"):
+            events[_ts_col] = events[_ts_col].astype("int64") // 10**6
         EventRegistrySchema.validate(events)
 
         paths = write_event_registry_artifacts(
