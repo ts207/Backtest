@@ -19,6 +19,7 @@ REPO_ROOT = PROJECT_ROOT.parent
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", REPO_ROOT / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from eval.splits import build_time_splits_with_purge
 from pipelines._lib.io_utils import (
     ensure_dir,
     read_parquet,
@@ -658,7 +659,7 @@ def calculate_expectancy_stats(
         tau_directional_ratio = 0.0
         directional_up_share = 0.0
 
-    return {
+    out = {
         "mean_return": mean_ret,
         "p_value": p_value,
         "n_events": float(n),
@@ -685,6 +686,24 @@ def calculate_expectancy_stats(
     out["mean_train_return"] = float(np.mean(split_returns["train"])) if split_returns["train"] else 0.0
     out["mean_validation_return"] = float(np.mean(split_returns["validation"])) if split_returns["validation"] else 0.0
     out["mean_test_return"] = float(np.mean(split_returns["test"])) if split_returns["test"] else 0.0
+
+
+    def _t_stat(vals: List[float]) -> float:
+        if len(vals) < 2:
+            return 0.0
+        arr = np.asarray(vals, dtype="float64")
+        s = float(arr.std(ddof=1))
+        if s <= 0.0:
+            return 0.0
+        m = float(arr.mean())
+        return float(m / (s / np.sqrt(len(arr))))
+
+    out["train_samples"] = int(len(split_returns["train"]))
+    out["validation_samples"] = int(len(split_returns["validation"]))
+    out["test_samples"] = int(len(split_returns["test"]))
+    out["t_train"] = _t_stat(split_returns["train"])
+    out["t_validation"] = _t_stat(split_returns["validation"])
+    out["t_test"] = _t_stat(split_returns["test"])
 
     return out
 
@@ -1019,6 +1038,73 @@ def _validate_candidate_plan_ontology(
     allow_hash_mismatch: bool,
 ) -> List[str]:
     errors: List[str] = []
+    if not allow_hash_mismatch:
+        if run_manifest_ontology_hash and run_manifest_ontology_hash != current_ontology_hash:
+            errors.append(f"run_manifest ontology hash mismatch: manifest={run_manifest_ontology_hash}, current={current_ontology_hash}")
+    return errors
+
+
+def _read_csv_or_parquet(path: Path) -> pd.DataFrame:
+    """Read a table from CSV or Parquet, tolerating misnamed suffixes."""
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        if path.suffix.lower() == ".parquet":
+            return pd.read_parquet(path)
+        try:
+            return pd.read_csv(path)
+        except Exception:
+            return pd.read_parquet(path)
+    except Exception:
+        return pd.DataFrame()
+
+
+def _assign_event_split_labels(
+    events: pd.DataFrame,
+    *,
+    time_col: str = "enter_ts",
+    train_frac: float = 0.6,
+    validation_frac: float = 0.2,
+    embargo_days: int = 0,
+    purge_bars: int = 0,
+    bar_duration_minutes: int = 5,
+) -> pd.DataFrame:
+    """
+    Assign deterministic walk-forward split labels to events (train/validation/test).
+
+    Labels are derived from event timestamps using build_time_splits_with_purge.
+    """
+    if events.empty or time_col not in events.columns:
+        return events
+    out = events.copy()
+    ts = pd.to_datetime(out[time_col], utc=True, errors="coerce")
+    out[time_col] = ts
+    valid = ts.notna()
+    if valid.sum() < 5:
+        out["split_label"] = "train"
+        return out
+    start = ts[valid].min()
+    end = ts[valid].max()
+    try:
+        windows = build_time_splits_with_purge(
+            start=start,
+            end=end,
+            train_frac=float(train_frac),
+            validation_frac=float(validation_frac),
+            embargo_days=int(embargo_days),
+            purge_bars=int(purge_bars),
+            bar_duration_minutes=int(bar_duration_minutes),
+        )
+    except Exception:
+        out["split_label"] = "train"
+        return out
+
+    labels = pd.Series(["train"] * len(out), index=out.index, dtype="object")
+    for w in windows:
+        mask = valid & (ts >= w.start) & (ts <= w.end)
+        labels.loc[mask] = w.label
+    out["split_label"] = labels
+    return out
 
     if not run_manifest_ontology_hash and not allow_hash_mismatch:
         errors.append("run_manifest missing ontology_spec_hash while candidate_plan is provided")
@@ -1227,10 +1313,8 @@ def main():
     phase1_reports_root = DATA_ROOT / "reports" / spec.reports_dir / args.run_id
     events_path = phase1_reports_root / spec.events_file
 
-    if not events_path.exists():
-        log.error("Events file not found: %s", events_path)
-        sys.exit(1)
-
+    # Prefer canonical registry events (if build_event_registry has already run).
+    # Fall back to reading the phase-1 analyzer output directly if the registry is empty.
     events_df = load_registry_events(
         data_root=DATA_ROOT,
         run_id=args.run_id,
@@ -1239,7 +1323,7 @@ def main():
     )
     if events_df.empty:
         try:
-            events_df = pd.read_csv(events_path)
+            events_df = _read_csv_or_parquet(events_path)
             symbol_set = {str(s).strip().upper() for s in symbols if str(s).strip()}
             if symbol_set and not events_df.empty and "symbol" in events_df.columns:
                 events_df = events_df[events_df["symbol"].astype(str).str.upper().isin(symbol_set)].copy()
@@ -1258,6 +1342,21 @@ def main():
         
         if "enter_ts" in events_df.columns:
             events_df["enter_ts"] = pd.to_datetime(events_df["enter_ts"], utc=True, errors="coerce")
+
+            # Assign walk-forward split labels if absent.
+            if "split_label" not in events_df.columns:
+                max_h = max([HORIZON_BARS_BY_TIMEFRAME.get(h, 0) for h in horizons] or [0])
+                purge_bars = int(max_h) + int(args.entry_lag_bars)
+                events_df = _assign_event_split_labels(
+                    events_df,
+                    time_col="enter_ts",
+                    train_frac=float(fam_config.get("train_frac", 0.6)),
+                    validation_frac=float(fam_config.get("validation_frac", 0.2)),
+                    embargo_days=int(fam_config.get("embargo_days", 0)),
+                    purge_bars=purge_bars,
+                    bar_duration_minutes=5,
+                )
+
             
             merged_dfs = []
             unique_symbols = events_df["symbol"].dropna().unique()
@@ -1502,7 +1601,14 @@ def main():
             sample_gate_pass = int(sample_size) >= int(min_sample_size_gate) if int(min_sample_size_gate) > 0 else True
             if not sample_gate_pass:
                 fail_reasons.append("MIN_SAMPLE_SIZE_GATE")
-            gate_phase2_research = econ_pass_conservative and sample_gate_pass and (
+            
+            # OOS split usage is authoritative: must have validation samples
+            validation_samples = int(exp_stats.get("validation_samples", 0))
+            has_validation = validation_samples > 0
+            if not has_validation:
+                fail_reasons.append("NO_VALIDATION_SAMPLES")
+
+            gate_phase2_research = econ_pass_conservative and sample_gate_pass and has_validation and (
                 stability_pass if require_sign_stability else True
             )
             gate_phase2_final = gate_phase2_research
@@ -1579,6 +1685,14 @@ def main():
                 "time_decay_directional_up_share": directional_up_share if bool(int(args.enable_time_decay)) else 0.0,
                 "std_return": std_return,
                 "sign": 1 if effect > 0 else -1,
+                "mean_train_return": mean_train_return,
+                "mean_validation_return": mean_val_return,
+                "mean_test_return": float(exp_stats.get("mean_test_return", 0.0)),
+                "train_samples": int(exp_stats.get("train_samples", 0)),
+                "validation_samples": int(exp_stats.get("validation_samples", 0)),
+                "test_samples": int(exp_stats.get("test_samples", 0)),
+                "t_validation": float(exp_stats.get("t_validation", 0.0)),
+                "t_test": float(exp_stats.get("t_test", 0.0)),
                 "gate_economic": econ_pass,
                 "gate_economic_conservative": econ_pass_conservative,
                 "gate_after_cost_positive": bool(econ_pass),
@@ -1720,6 +1834,7 @@ def main():
                         mean_train_local,
                         mean_val_local,
                         bucket_events_for_cost,
+                        stats_dict,
                         cond_name="all",
                     ):
                         # Economic Gate with candidate-level cost calibration.
@@ -1745,13 +1860,20 @@ def main():
                             f_reasons.append("ECONOMIC_CONSERVATIVE")
                         if require_sign_stability and not stab:
                             f_reasons.append("STABILITY_GATE")
+                        
                         resolved_sample_size = _resolved_sample_size(n, len(sym_all_events))
                         sample_gate_pass = int(resolved_sample_size) >= int(min_sample_size_gate) if int(min_sample_size_gate) > 0 else True
                         if not sample_gate_pass:
                             f_reasons.append("MIN_SAMPLE_SIZE_GATE")
 
-                        # Composite Phase 2 gate (economic + stability).
-                        g_phase2_research = ec_pass_conservative and sample_gate_pass and (
+                        # OOS split usage is authoritative: must have validation samples
+                        val_samples = int(stats_dict.get("validation_samples", 0))
+                        has_validation = val_samples > 0
+                        if not has_validation:
+                            f_reasons.append("NO_VALIDATION_SAMPLES")
+
+                        # Composite Phase 2 gate (economic + stability + OOS).
+                        g_phase2_research = ec_pass_conservative and sample_gate_pass and has_validation and (
                             stab if require_sign_stability else True
                         )
                         g_phase2_final = g_phase2_research
@@ -1828,6 +1950,14 @@ def main():
                             "time_decay_directional_up_share": float(directional_up_share_local) if bool(int(args.enable_time_decay)) else 0.0,
                             "std_return": float(std_ret),
                             "sign": 1 if eff > 0 else -1,
+                            "mean_train_return": float(mean_train_local),
+                            "mean_validation_return": float(mean_val_local),
+                            "mean_test_return": float(stats_dict.get("mean_test_return", 0.0)),
+                            "train_samples": int(stats_dict.get("train_samples", 0)),
+                            "validation_samples": int(stats_dict.get("validation_samples", 0)),
+                            "test_samples": int(stats_dict.get("test_samples", 0)),
+                            "t_validation": float(stats_dict.get("t_validation", 0.0)),
+                            "t_test": float(stats_dict.get("t_test", 0.0)),
                             "gate_economic": ec_pass,
                             "gate_economic_conservative": ec_pass_conservative,
                             "gate_after_cost_positive": bool(ec_pass),
@@ -1887,23 +2017,24 @@ def main():
                         })
 
                     _add_res(
-                        effect,
-                        pval,
-                        n_joined,
-                        n_effective,
-                        stability_pass,
-                        std_return,
-                        mean_weight_age_days,
-                        time_weight_sum,
-                        mean_tau_days,
-                        learning_rate_mean,
-                        mean_tau_up_days,
-                        mean_tau_down_days,
-                        tau_directional_ratio,
-                        directional_up_share,
-                        mean_train_return,
-                        mean_val_return,
+                        loc_eff,
+                        loc_pv,
+                        loc_n,
+                        loc_n_eff,
+                        loc_stab,
+                        loc_std_ret,
+                        loc_mean_age_days,
+                        loc_time_weight_sum,
+                        loc_mean_tau_days,
+                        loc_learning_rate,
+                        loc_tau_up,
+                        loc_tau_down,
+                        loc_tau_ratio,
+                        loc_up_share,
+                        loc_mean_train,
+                        loc_mean_val,
                         sym_all_events,
+                        cond_exp_stats,
                         "all",
                     )
 
@@ -1961,6 +2092,8 @@ def main():
                             mean_tau_down_b = float(exp_stats_bucket.get("mean_tau_down_days", 0.0))
                             tau_ratio_b = float(exp_stats_bucket.get("tau_directional_ratio", 0.0))
                             up_share_b = float(exp_stats_bucket.get("directional_up_share", 0.0))
+                            mean_train_b = float(exp_stats_bucket.get("mean_train_return", 0.0))
+                            mean_val_b = float(exp_stats_bucket.get("mean_validation_return", 0.0))
                             _add_res(
                                 eff_b,
                                 pv_b,
@@ -1976,7 +2109,10 @@ def main():
                                 mean_tau_down_b,
                                 tau_ratio_b,
                                 up_share_b,
+                                mean_train_b,
+                                mean_val_b,
                                 bucket_events,
+                                exp_stats_bucket,
                                 f"{col}_{val}",
                             )
 

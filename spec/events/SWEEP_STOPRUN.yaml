@@ -1,4 +1,4 @@
 event_type: SWEEP_STOPRUN
 reports_dir: liquidity_dislocation
-events_file: liquidity_dislocation_events.csv
+events_file: liquidity_dislocation_events.parquet
 signal_column: sweep_stoprun_event

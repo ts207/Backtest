@@ -1,4 +1,4 @@
 event_type: SUPPORT_RESISTANCE_BREAK
 reports_dir: trend_structure
-events_file: trend_structure_events.csv
+events_file: trend_structure_events.parquet
 signal_column: support_resistance_break_event

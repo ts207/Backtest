@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 import yaml
+import pandas as pd
 
 
 # ---------------------------------------------------------------------------
@@ -263,162 +264,40 @@ def _check_hypothesis_registered(spec_path: Path) -> InvariantResult:
             remediation=remediation,
         )
     try:
-        with open(spec_path) as f:
-            spec = yaml.safe_load(f)
-    except Exception as exc:
-        return InvariantResult(
-            id=inv_id,
-            passed=False,
-            failure_reason=f"Failed to parse hypothesis spec: {exc}",
-            remediation=remediation,
-        )
-    status = spec.get("status", "")
-    if status != "active":
-        return InvariantResult(
-            id=inv_id,
-            passed=False,
-            failure_reason=f"Hypothesis spec status is '{status}', expected 'active'.",
-            remediation="Set status: active in the spec file.",
-        )
-    return InvariantResult(id=inv_id, passed=True)
-
-
-def _check_no_fallback_in_measurement(blueprints_path: Optional[Path]) -> InvariantResult:
-    inv_id = "INV_NO_FALLBACK_IN_MEASUREMENT"
-    remediation = (
-        "Option A: Set gates.yaml:gate_v1_fallback.promotion_eligible_regardless_of_fdr: false. "
-        "Option B: Filter blueprints_path to exclude lineage.promotion_track == 'fallback_only' "
-        "before passing to backtest/walkforward."
-    )
-    if blueprints_path is None or not blueprints_path.exists():
-        return InvariantResult(
-            id=inv_id,
-            passed=False,
-            failure_reason=(
-                f"blueprints_path not provided or does not exist: {blueprints_path}. "
-                "Cannot verify promotion_track."
-            ),
-            remediation=remediation,
-        )
-    fallback_ids: list[str] = []
-    try:
-        with open(blueprints_path) as f:
-            for line_no, line in enumerate(f, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                bp = json.loads(line)
-                lineage = bp.get("lineage", {})
-                track = lineage.get("promotion_track", "")
-                if track == "fallback_only":
-                    fallback_ids.append(bp.get("id", f"line_{line_no}"))
-    except Exception as exc:
-        return InvariantResult(
-            id=inv_id,
-            passed=False,
-            failure_reason=f"Failed to read blueprints_path: {exc}",
-            remediation=remediation,
-        )
-    if fallback_ids:
-        return InvariantResult(
-            id=inv_id,
-            passed=False,
-            failure_reason=(
-                f"{len(fallback_ids)} blueprint(s) have promotion_track == 'fallback_only': "
-                f"{fallback_ids[:5]}{'...' if len(fallback_ids) > 5 else ''}"
-            ),
-            remediation=remediation,
-        )
-    return InvariantResult(id=inv_id, passed=True)
-
-
-def _check_bh_applied_to_lift(ablation_report_path: Optional[Path]) -> InvariantResult:
-    inv_id = "INV_BH_APPLIED_TO_LIFT"
-    remediation = (
-        "In eval/ablation.py, apply _bh_adjust(p_values) within each "
-        "(symbol, event_type, rule_template, horizon) group and write the "
-        "result as a 'lift_q_value' column in ablation_report.parquet."
-    )
-    if ablation_report_path is None or not ablation_report_path.exists():
-        return InvariantResult(
-            id=inv_id,
-            passed=False,
-            failure_reason=(
-                f"ablation_report_path not provided or does not exist: {ablation_report_path}. "
-                "Cannot verify BH correction was applied."
-            ),
-            remediation=remediation,
-        )
-    try:
-        import pyarrow.parquet as pq
-        schema = pq.read_schema(ablation_report_path)
-        column_names = [f.name for f in schema]
-    except Exception as exc:
-        return InvariantResult(
-            id=inv_id,
-            passed=False,
-            failure_reason=f"Failed to read ablation_report schema: {exc}",
-            remediation=remediation,
-        )
-    if "lift_q_value" not in column_names:
-        return InvariantResult(
-            id=inv_id,
-            passed=False,
-            failure_reason=(
-                f"ablation_report.parquet does not contain 'lift_q_value' column. "
-                f"Found columns: {column_names}"
-            ),
-            remediation=remediation,
-        )
-    return InvariantResult(id=inv_id, passed=True)
-
-
-def _check_symbol_stratified_family(
-    phase2_report_root: Optional[Path], run_id: str
-) -> InvariantResult:
-    inv_id = "INV_SYMBOL_STRATIFIED_FAMILY"
-    remediation = (
-        "In phase2_candidate_discovery.py lines 542 and 638, change: "
-        "  family_id = f\"{event_type}_{rule}_{horizon}_{cond_label}\" "
-        "to: "
-        "  family_id = f\"{symbol}_{event_type}_{rule}_{horizon}_{cond_label}\""
-    )
-
-    if phase2_report_root is None or not phase2_report_root.exists():
-        return InvariantResult(
-            id=inv_id,
-            passed=False,
-            failure_reason=(
-                f"phase2_report_root not provided or does not exist: {phase2_report_root}. "
-                "Cannot verify family_id stratification."
-            ),
-            remediation=remediation,
-        )
-
-    # Discover the actual symbol universe from the CSV `symbol` column,
-    # falling back to a broad ALLCAPS-prefix pattern if the column is absent.
-    # This avoids hardcoding the symbol list and works for any run configuration.
-    import csv
-
-    observed_symbols: set[str] = set()
-    bad_family_ids: list[str] = []
-    unchecked_rows: list[tuple[str, str]] = []  # (fid, row_symbol) when symbol not yet known
-    checked = 0
-
-    try:
-        for csv_path in sorted(phase2_report_root.rglob("phase2_candidates.csv")):
-            with open(csv_path, newline="") as fh:
-                reader = csv.DictReader(fh)
-                for row in reader:
-                    sym = str(row.get("symbol", "")).strip().upper()
-                    if sym:
-                        observed_symbols.add(sym)
-                    fid = row.get("family_id", "")
-                    if fid:
-                        unchecked_rows.append((fid, sym))
-                    checked += 1
-                    if checked >= 500:
-                        break
+        for candidate_path in sorted(
+            list(phase2_report_root.rglob("phase2_candidates.parquet"))
+            + list(phase2_report_root.rglob("phase2_candidates.csv"))
+        ):
+            if candidate_path.suffix.lower() == ".parquet":
+                try:
+                    df = pd.read_parquet(candidate_path, columns=["symbol", "family_id"])
+                except Exception:
+                    df = pd.read_parquet(candidate_path)
+                if not df.empty:
+                    for _, row in df.head(500 - checked).iterrows():
+                        sym = str(row.get("symbol", "")).strip().upper()
+                        if sym:
+                            observed_symbols.add(sym)
+                        fid = row.get("family_id", "")
+                        if fid:
+                            unchecked_rows.append((fid, sym))
+                        checked += 1
+                        if checked >= 500:
+                            break
+            else:
+                import csv
+                with open(candidate_path, newline="") as fh:
+                    reader = csv.DictReader(fh)
+                    for row in reader:
+                        sym = str(row.get("symbol", "")).strip().upper()
+                        if sym:
+                            observed_symbols.add(sym)
+                        fid = row.get("family_id", "")
+                        if fid:
+                            unchecked_rows.append((fid, sym))
+                        checked += 1
+                        if checked >= 500:
+                            break
             if checked >= 500:
                 break
     except Exception as exc:
@@ -433,7 +312,7 @@ def _check_symbol_stratified_family(
         return InvariantResult(
             id=inv_id,
             passed=False,
-            failure_reason="No phase2_candidates.csv files found — cannot verify family stratification.",
+            failure_reason="No phase2_candidates.(parquet|csv) files found — cannot verify family stratification.",
             remediation=remediation,
         )
 

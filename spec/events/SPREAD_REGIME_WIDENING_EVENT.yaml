@@ -1,4 +1,4 @@
 event_type: SPREAD_REGIME_WIDENING_EVENT
 reports_dir: execution_friction
-events_file: execution_friction_events.csv
+events_file: execution_friction_events.parquet
 signal_column: spread_regime_widening_event

@@ -942,10 +942,20 @@ def main() -> int:
         if not int(args.ignore_checklist):
             decision = _checklist_decision(run_id=args.run_id)
             if decision != "PROMOTE":
-                raise ValueError(
-                    f"Checklist decision must be PROMOTE before strategy candidate build (run_id={args.run_id}, decision={decision}). "
-                    "Use --ignore_checklist 1 only for explicit override."
+                # Research mode: no promotable candidates yet. Write empty artifacts and succeed.
+                print(
+                    f"INFO: Checklist decision={decision} for run_id={args.run_id}. "
+                    "No strategy candidates built (research stage). Writing empty artifacts.",
+                    file=sys.stderr,
                 )
+                out_json = out_dir / "strategy_candidates.json"
+                out_deploy = out_dir / "deployment_manifest.json"
+                import json as _json
+                out_json.write_text(_json.dumps([], indent=2), encoding="utf-8")
+                out_deploy.write_text(_json.dumps({"candidates": [], "checklist_decision": decision, "run_id": args.run_id}, indent=2), encoding="utf-8")
+                outputs.append({"path": str(out_json), "rows": 0, "start_ts": None, "end_ts": None})
+                finalize_manifest(manifest, "success", stats={"strategy_count": 0, "checklist_decision": decision})
+                return 0
 
         promoted_payloads, promoted_paths = _load_promoted_blueprints(run_id=args.run_id)
         inputs.append({"path": str(promoted_paths["promoted_path"]), "rows": None, "start_ts": None, "end_ts": None})

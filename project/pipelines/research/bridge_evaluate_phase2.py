@@ -167,35 +167,59 @@ def _effective_cost_bps(row: pd.Series) -> float:
     return float(max(0.0, gross_proxy_bps * min(1.0, cost_ratio)))
 
 
+
 def _bridge_metrics_for_row(row: pd.Series, stressed_cost_multiplier: float) -> Dict[str, float]:
-    expectancy_after = _safe_float(row.get("after_cost_expectancy_per_trade"), _safe_float(row.get("expectancy_per_trade"), 0.0))
+    """
+    Bridge metrics are computed on validation by default.
+
+    If candidate discovery already emitted split-specific bps fields, prefer them.
+    Otherwise fall back to deriving bps from per-trade expectancy fields.
+    """
+    expectancy_after = _safe_float(
+        row.get("after_cost_expectancy_per_trade"),
+        _safe_float(row.get("expectancy_per_trade"), 0.0),
+    )
     stressed_after = _safe_float(
         row.get("stressed_after_cost_expectancy_per_trade"),
         expectancy_after,
     )
     effective_cost = _effective_cost_bps(row)
-    validation_after_bps = float(expectancy_after * 10_000.0)
-    validation_stressed_bps = float(stressed_after * 10_000.0)
-    if not np.isfinite(validation_stressed_bps):
-        validation_stressed_bps = float(validation_after_bps - ((float(stressed_cost_multiplier) - 1.0) * effective_cost))
+
+    fallback_validation_after_bps = float(expectancy_after * 10_000.0)
+    fallback_validation_stressed_bps = float(stressed_after * 10_000.0)
+    if not np.isfinite(fallback_validation_stressed_bps):
+        fallback_validation_stressed_bps = float(
+            fallback_validation_after_bps - ((float(stressed_cost_multiplier) - 1.0) * effective_cost)
+        )
+
+    validation_after_bps = _safe_float(row.get("bridge_validation_after_cost_bps"), fallback_validation_after_bps)
+    validation_stressed_bps = _safe_float(
+        row.get("bridge_validation_stressed_after_cost_bps"), fallback_validation_stressed_bps
+    )
+    train_after_bps = _safe_float(row.get("bridge_train_after_cost_bps"), validation_after_bps)
+
     gross_edge_bps = float(max(0.0, validation_after_bps + effective_cost))
     edge_to_cost_ratio = float(gross_edge_bps / max(effective_cost, 1e-9))
     costed_x0_5 = float(validation_after_bps + (0.5 * effective_cost))
     costed_x1_0 = float(validation_after_bps)
     costed_x1_5 = float(validation_after_bps - (0.5 * effective_cost))
     costed_x2_0 = float(validation_after_bps - effective_cost)
-    train_after_bps = float(validation_after_bps)
-    validation_trades = max(0, _safe_int(row.get("validation_samples"), _safe_int(row.get("sample_size"), 0)))
+
+    validation_trades = max(
+        0,
+        _safe_int(row.get("validation_samples"), _safe_int(row.get("sample_size"), 0)),
+    )
+
     return {
-        "bridge_train_after_cost_bps": train_after_bps,
-        "bridge_validation_after_cost_bps": validation_after_bps,
-        "bridge_validation_stressed_after_cost_bps": validation_stressed_bps,
+        "bridge_train_after_cost_bps": float(train_after_bps),
+        "bridge_validation_after_cost_bps": float(validation_after_bps),
+        "bridge_validation_stressed_after_cost_bps": float(validation_stressed_bps),
         "exp_costed_x0_5": costed_x0_5,
         "exp_costed_x1_0": costed_x1_0,
         "exp_costed_x1_5": costed_x1_5,
         "exp_costed_x2_0": costed_x2_0,
         "bridge_validation_trades": int(validation_trades),
-        "bridge_effective_cost_bps_per_trade": effective_cost,
+        "bridge_effective_cost_bps_per_trade": float(effective_cost),
         "bridge_gross_edge_bps_per_trade": gross_edge_bps,
         "bridge_edge_to_cost_ratio": edge_to_cost_ratio,
     }

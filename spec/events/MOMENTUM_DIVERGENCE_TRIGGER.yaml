@@ -1,4 +1,4 @@
 event_type: MOMENTUM_DIVERGENCE_TRIGGER
 reports_dir: forced_flow_and_exhaustion
-events_file: forced_flow_and_exhaustion_events.csv
+events_file: forced_flow_and_exhaustion_events.parquet
 signal_column: momentum_divergence_trigger_event

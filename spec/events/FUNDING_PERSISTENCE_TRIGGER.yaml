@@ -1,4 +1,4 @@
-event_type: "FUNDING_PERSISTENCE_TRIGGER"
-reports_dir: "funding_events"
-events_file: "funding_episode_events.csv"
-signal_column: "funding_persistence_event"
+event_type: FUNDING_PERSISTENCE_TRIGGER
+reports_dir: funding_events
+events_file: funding_episode_events.parquet
+signal_column: funding_persistence_event

@@ -1,4 +1,4 @@
-event_type: "OI_SPIKE_NEGATIVE"
-reports_dir: "oi_shocks"
-events_file: "oi_shock_events.csv"
-signal_column: "oi_spike_neg_event"
+event_type: OI_SPIKE_NEGATIVE
+reports_dir: oi_shocks
+events_file: oi_shock_events.parquet
+signal_column: oi_spike_neg_event

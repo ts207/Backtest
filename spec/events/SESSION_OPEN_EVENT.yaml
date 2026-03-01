@@ -1,4 +1,4 @@
 event_type: SESSION_OPEN_EVENT
 reports_dir: temporal_structure
-events_file: temporal_structure_events.csv
+events_file: temporal_structure_events.parquet
 signal_column: session_open_event

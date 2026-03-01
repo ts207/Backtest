@@ -1,4 +1,4 @@
 event_type: SPOT_PERP_BASIS_SHOCK
 reports_dir: information_desync
-events_file: information_desync_events.csv
+events_file: information_desync_events.parquet
 signal_column: spot_perp_basis_shock_event

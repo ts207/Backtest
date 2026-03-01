@@ -1,4 +1,4 @@
 event_type: VOL_REGIME_SHIFT_EVENT
 reports_dir: regime_transition
-events_file: regime_transition_events.csv
+events_file: regime_transition_events.parquet
 signal_column: vol_regime_shift_event

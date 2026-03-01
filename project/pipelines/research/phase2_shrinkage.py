@@ -208,7 +208,8 @@ def _event_direction_from_joined_row(
     for col in _EVENT_DIRECTION_NUMERIC_COLS:
         if col not in row.index:
             continue
-        sign = _direction_sign(row.get(col))
+        val = row.get(col)
+        sign = _direction_sign(val)
         if sign is None:
             continue
         if family_key == "POSITIONING_EXTREMES" and col == "evt_funding_z":
@@ -217,7 +218,8 @@ def _event_direction_from_joined_row(
     for col in _EVENT_DIRECTION_TEXT_COLS:
         if col not in row.index:
             continue
-        sign = _direction_sign(row.get(col))
+        val = row.get(col)
+        sign = _direction_sign(val)
         if sign is not None:
             return sign
     return 1 if int(fallback_direction) >= 0 else -1
@@ -707,8 +709,10 @@ def _apply_hierarchical_shrinkage(
     t_shrunk.loc[valid_se] = out.loc[valid_se, "effect_shrunk_state"] / se.loc[valid_se]
     # Vectorized: use scipy.stats.t.sf directly instead of row-by-row .apply
     from scipy.stats import t as _scipy_t
-    _df_vals = (out.loc[valid_se, "_n"] - 1.0).clip(lower=1.0)
-    p_shrunk.loc[valid_se] = (2.0 * _scipy_t.sf(t_shrunk.loc[valid_se].abs(), df=_df_vals)).clip(0.0, 1.0)
+    _df_vals = (out.loc[valid_se, "_n"].astype(float) - 1.0).clip(lower=1.0)
+    _t_abs = t_shrunk.loc[valid_se].astype(float).abs()
+    if not _t_abs.empty:
+        p_shrunk.loc[valid_se] = (2.0 * _scipy_t.sf(_t_abs, df=_df_vals)).clip(0.0, 1.0)
     out["p_value_shrunk"] = pd.to_numeric(p_shrunk, errors="coerce").fillna(out["p_value_raw"]).clip(0.0, 1.0)
     out["p_value_for_fdr"] = out["p_value_shrunk"]
 

@@ -170,7 +170,10 @@ def _load_phase1_events(run_id: str, event_type: str) -> pd.DataFrame:
     path = DATA_ROOT / "reports" / report_dir / run_id / file_name
     if not path.exists():
         raise FileNotFoundError(f"Missing Phase-1 events file for event_type={event_type}: {path}")
-    events = pd.read_csv(path)
+    if path.suffix == ".parquet":
+        events = pd.read_parquet(path)
+    else:
+        events = pd.read_csv(path)
     if events.empty:
         raise ValueError(f"Phase-1 events file is empty for event_type={event_type}: {path}")
     if spec is not None:

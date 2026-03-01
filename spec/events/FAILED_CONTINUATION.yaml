@@ -1,4 +1,4 @@
 event_type: FAILED_CONTINUATION
 reports_dir: forced_flow_and_exhaustion
-events_file: forced_flow_and_exhaustion_events.csv
+events_file: forced_flow_and_exhaustion_events.parquet
 signal_column: failed_continuation_event

@@ -628,7 +628,7 @@ def main() -> int:
     parser.add_argument("--blueprints_filter_event_type", default="all")
     parser.add_argument("--atlas_mode", type=int, default=0)
     parser.add_argument("--mode", choices=["research", "production", "certification"], default="research")
-    parser.add_argument("--feature_schema_version", default="")
+    parser.add_argument("--feature_schema_version", default="v1")
     parser.add_argument("--strategies", default="")
     parser.add_argument("--run_backtest", type=int, default=0)
     parser.add_argument("--run_walkforward_eval", type=int, default=0)
@@ -921,6 +921,7 @@ def main() -> int:
         "late_artifact_examples": [],
     }
     existing_manifest_path = DATA_ROOT / "runs" / run_id / "run_manifest.json"
+    existing_ontology_hash = ""
     if existing_manifest_path.exists():
         try:
             existing_manifest = json.loads(existing_manifest_path.read_text(encoding="utf-8"))

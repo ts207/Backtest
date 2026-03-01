@@ -32,7 +32,7 @@ def _load_phase2_data(run_id: str) -> pd.DataFrame:
     dfs = []
     for f in csv_files:
         try:
-            df = pd.read_csv(f)
+            df = pd.read_parquet(f)
             if not df.empty:
                 dfs.append(df)
         except Exception as e:

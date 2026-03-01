@@ -1,4 +1,4 @@
 event_type: TREND_DECELERATION
 reports_dir: trend_structure
-events_file: trend_structure_events.csv
+events_file: trend_structure_events.parquet
 signal_column: trend_deceleration_event

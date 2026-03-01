@@ -1,4 +1,4 @@
 event_type: LEAD_LAG_BREAK
 reports_dir: information_desync
-events_file: information_desync_events.csv
+events_file: information_desync_events.parquet
 signal_column: lead_lag_break_event

@@ -25,6 +25,7 @@ def test_promotion_tob_coverage_gate():
         "gate_bridge_after_cost_positive_validation": True,
         "gate_bridge_after_cost_stressed_positive_validation": True,
         "gate_delay_robustness": True,
+        "validation_samples": 100,
         "tob_coverage": 0.9 # High coverage
     }
     

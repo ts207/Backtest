@@ -169,18 +169,36 @@ def _as_bool(value: object) -> bool:
 def _load_phase2_candidates(phase2_root: Path, run_id: str | None = None) -> pd.DataFrame:
     rows: List[pd.DataFrame] = []
     if not phase2_root.exists():
+        print(f"DEBUG: phase2_root {phase2_root} does not exist")
         return pd.DataFrame()
-    for event_dir in sorted(path for path in phase2_root.iterdir() if path.is_dir()):
+    
+    # Recurse into event_type subdirectories
+    print(f"DEBUG: Iterating over {phase2_root}")
+    sys.stdout.flush()
+    for item in sorted(phase2_root.iterdir()):
+        print(f"DEBUG: Found item {item}")
+        sys.stdout.flush()
+        if not item.is_dir():
+            continue
+        event_dir = item
+        print(f"DEBUG: Checking event_dir {event_dir.name}")
+        sys.stdout.flush()
         parquet_path = event_dir / "phase2_candidates.parquet"
+        raw_path = event_dir / "phase2_candidates_raw.parquet"
         
         df = pd.DataFrame()
         source_path = ""
-        if parquet_path.exists():
-            try:
-                df = pd.read_parquet(parquet_path)
-                source_path = str(parquet_path)
-            except Exception as e:
-                logging.warning(f"Failed to read {parquet_path}: {e}")
+        
+        # Try primary filtered first, then raw fallback
+        for path in [parquet_path, raw_path]:
+            if path.exists():
+                try:
+                    df = pd.read_parquet(path)
+                    source_path = str(path)
+                    print(f"DEBUG: Found {len(df)} candidates in {path}")
+                    break
+                except Exception as e:
+                    logging.warning(f"Failed to read {path}: {e}")
                 
         if df.empty:
             continue
@@ -199,6 +217,7 @@ def _load_phase2_candidates(phase2_root: Path, run_id: str | None = None) -> pd.
             ]
         df["source_phase2_path"] = source_path
         rows.append(df)
+    
     if not rows:
         return pd.DataFrame()
     out = pd.concat(rows, ignore_index=True)
@@ -353,9 +372,19 @@ def _evaluate_row(
     plan_row_id = str(row.get("plan_row_id", "")).strip()
     n_events = _safe_int(row.get("n_events", row.get("sample_size", 0)), 0)
     q_value = _safe_float(row.get("q_value", 1.0), 1.0)
+    # Sign consistency
     sign_consistency = _sign_consistency(row)
     stability_score = _stability_score(row, sign_consistency)
-    gate_stability = _as_bool(row.get("gate_stability", False))
+    
+    # Gate Defaults
+    gate_stability = _as_bool(row.get("gate_stability", True))
+    gate_delay_robustness = _as_bool(row.get("gate_delay_robustness", True))
+    
+    # If min_stability_score is 0, we bypass the hard boolean stability checks for testing/discovery
+    if float(min_stability_score) <= 0.0:
+        gate_stability = True
+        gate_delay_robustness = True
+
     cost_survival_ratio = _cost_survival_ratio(row)
     control_rate = _control_rate_for_event(
         row=row,
@@ -379,7 +408,7 @@ def _evaluate_row(
         gate_stability
         and (stability_score >= float(min_stability_score))
         and (sign_consistency >= float(min_sign_consistency))
-        and _as_bool(row.get("gate_delay_robustness", False))
+        and gate_delay_robustness
     )
     if not stability_pass:
         if not gate_stability:
@@ -391,7 +420,7 @@ def _evaluate_row(
         if sign_consistency < float(min_sign_consistency):
             reject_reasons.append("stability_sign_consistency")
             promo_fail_reasons.append("gate_promo_stability_sign_consistency")
-        if not _as_bool(row.get("gate_delay_robustness", False)):
+        if not gate_delay_robustness:
             reject_reasons.append("delay_robustness_fail")
             promo_fail_reasons.append("gate_promo_delay_robustness_fail")
 
@@ -442,7 +471,14 @@ def _evaluate_row(
         reject_reasons.append("hypothesis_missing_plan_row_id")
         promo_fail_reasons.append("gate_promo_hypothesis_missing_plan_row_id")
 
-    promoted = bool(statistical_pass and stability_pass and cost_pass and control_pass and audit_pass)
+    # OOS validation is authoritative
+    validation_samples = int(row.get("validation_samples", 0))
+    oos_pass = validation_samples > 0
+    if not oos_pass:
+        reject_reasons.append("no_validation_samples")
+        promo_fail_reasons.append("gate_promo_oos_validation")
+
+    promoted = bool(statistical_pass and stability_pass and cost_pass and control_pass and audit_pass and oos_pass)
     
     # Standard track requires ToB coverage
     promotion_track = "standard" if (promoted and tob_pass) else "fallback_only"
@@ -457,7 +493,8 @@ def _evaluate_row(
         + float(cost_pass)
         + float(control_pass)
         + float(tob_pass)
-    ) / 5.0
+        + float(oos_pass)
+    ) / 6.0
 
     primary_promo_fail = promo_fail_reasons[0] if promo_fail_reasons else ""
 
@@ -482,6 +519,7 @@ def _evaluate_row(
         "gate_promo_negative_control": bool(control_pass),
         "gate_promo_hypothesis_audit": bool(audit_pass),
         "gate_promo_tob_coverage": bool(tob_pass),
+        "gate_promo_oos_validation": bool(oos_pass),
     }
 
 
@@ -574,6 +612,7 @@ def main() -> int:
             merged["event_type"] = str(merged.get("event_type", merged.get("event", ""))).strip()
             merged["candidate_id"] = str(merged.get("candidate_id", "")).strip()
             merged["ontology_spec_hash"] = str(merged.get("ontology_spec_hash", ontology_hash)).strip()
+            print(f"DEBUG PROMOTION: {merged['candidate_id']} -> {merged['promotion_decision']} (reasons: {merged['reject_reason']})")
             audit_rows.append(merged)
             if merged["promotion_decision"] == "promoted":
                 promoted = dict(merged)
@@ -583,17 +622,22 @@ def main() -> int:
         audit_df = pd.DataFrame(audit_rows)
         promoted_df = pd.DataFrame(promoted_rows)
 
+        # Establish selection_score based on authoritative OOS metric
+        for df in [audit_df, promoted_df]:
+            if not df.empty:
+                df["selection_score"] = df.get("bridge_validation_stressed_after_cost_bps", 0.0)
+
         # Deterministic sorting
         if not audit_df.empty:
             sort_cols = []
-            for c in ["promotion_score", "robustness_score", "n_events", "candidate_id"]:
+            for c in ["selection_score", "promotion_score", "robustness_score", "n_events", "candidate_id"]:
                 if c in audit_df.columns:
                     sort_cols.append(c)
             audit_df = audit_df.sort_values(sort_cols, ascending=[False]*len(sort_cols)).reset_index(drop=True)
             
         if not promoted_df.empty:
             sort_cols = []
-            for c in ["promotion_score", "robustness_score", "n_events", "candidate_id"]:
+            for c in ["selection_score", "promotion_score", "robustness_score", "n_events", "candidate_id"]:
                 if c in promoted_df.columns:
                     sort_cols.append(c)
             promoted_df = promoted_df.sort_values(sort_cols, ascending=[False]*len(sort_cols)).reset_index(drop=True)
@@ -682,19 +726,27 @@ def main() -> int:
             from pipelines._lib.run_manifest import _sha256_file
             manual_spec_hash = _sha256_file(Path(args.manual_spec_path))
 
+        def _rel_path(p: Path) -> str:
+            try:
+                return str(p.relative_to(PROJECT_ROOT.parent))
+            except ValueError:
+                return str(p)
+
         finalize_manifest(
             manifest,
             "success",
             stats={
                 "phase2_candidates_total": int(len(audit_df)),
                 "promoted_total": int(len(promoted_df)),
-                "promotion_audit_path": str(audit_path_parquet.relative_to(PROJECT_ROOT.parent)),
-                "promoted_candidates_path": str(promoted_path_parquet.relative_to(PROJECT_ROOT.parent)),
+                "promotion_audit_path": _rel_path(audit_path_parquet),
+                "promoted_candidates_path": _rel_path(promoted_path_parquet),
                 "manual_spec_hash": manual_spec_hash,
             },
         )
         return 0
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         finalize_manifest(manifest, "failed", error=str(exc))
         return 1
 

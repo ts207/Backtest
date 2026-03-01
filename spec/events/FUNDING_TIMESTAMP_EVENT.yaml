@@ -1,4 +1,4 @@
 event_type: FUNDING_TIMESTAMP_EVENT
 reports_dir: temporal_structure
-events_file: temporal_structure_events.csv
+events_file: temporal_structure_events.parquet
 signal_column: funding_timestamp_event

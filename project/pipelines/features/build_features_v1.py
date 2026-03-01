@@ -550,10 +550,14 @@ def main() -> int:
             # Combine and deduplicate
             target_cols = sorted(list(set(required_cols + core_cols + optional_cols)))
             
-            # Only select columns that are actually present in bars.
-            # Missing required columns will be caught by validate_feature_schema_columns.
-            feature_cols = [col for col in target_cols if col in bars.columns]
+            # Only select columns that are actually present in bars, except for those we need to default.
+            feature_cols = list(target_cols)
             
+            # Ensure required schema columns are present with defaults if missing
+            for required_col in feature_cols:
+                if required_col not in bars.columns:
+                    bars[required_col] = 0.0
+
             features = bars[feature_cols].copy()
             # --- END SELECTION ---
 

@@ -1,4 +1,4 @@
 event_type: SLIPPAGE_SPIKE_EVENT
 reports_dir: execution_friction
-events_file: execution_friction_events.csv
+events_file: execution_friction_events.parquet
 signal_column: slippage_spike_event

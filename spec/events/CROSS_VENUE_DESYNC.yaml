@@ -1,4 +1,4 @@
-event_type: "CROSS_VENUE_DESYNC"
-reports_dir: "cross_venue_desync"
-events_file: "cross_venue_desync_events.csv"
-signal_column: "cross_venue_desync_event"
+event_type: CROSS_VENUE_DESYNC
+reports_dir: cross_venue_desync
+events_file: cross_venue_desync_events.parquet
+signal_column: cross_venue_desync_event

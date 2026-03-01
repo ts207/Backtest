@@ -1,0 +1,2 @@
+claim_id,concept_id,priority_score,operationalizable,status,candidate_type,statement,statement_summary,next_artifact
+CL_1,C_1,1.0,Y,open,event,Detect a generic event,Generic Event,canonical_event_registry

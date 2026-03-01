@@ -1,4 +1,4 @@
-event_type: "LIQUIDATION_CASCADE"
-reports_dir: "liquidation_cascade"
-events_file: "liquidation_cascade_events.csv"
-signal_column: "liquidation_cascade_event"
+event_type: LIQUIDATION_CASCADE
+reports_dir: liquidation_cascade
+events_file: liquidation_cascade_events.parquet
+signal_column: liquidation_cascade_event

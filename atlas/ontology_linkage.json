@@ -2,23 +2,23 @@
   "component_hashes": {
     "canonical_event_registry": "sha256:26315d6255eab9ca60b08730a3d1ba4e4b7d370bb4b73562c84ea1d46f3228ea",
     "state_registry": "sha256:edd3bb9db255fb35e5c325e74fc24651492ed59be5ae3b69ccf28dd21778464e",
-    "taxonomy": "sha256:2729a4c3bbed8e4546414458ad47409f59eed66757d135f6efe0c6f5bde6b482",
-    "template_verb_lexicon": "sha256:d8d3f3393168c722da9e7b2631753cca5c1959fd7a59d86f47e384ac75c2701a"
+    "taxonomy": "sha256:30b4bfcf77473034ad99f19dd1bfe5d03e1aeb339c58061919821fec19a41db7",
+    "template_verb_lexicon": "sha256:045a0ed7ad3426ebae7ce499d49c23f9ecc4a54d713c773d608c52cd78630aad"
   },
   "counts": {
-    "event_claims_skipped_unimplemented": 7,
-    "event_templates_total": 14,
-    "event_templates_unknown_ontology": 2,
-    "events_in_canonical_registry": 11,
-    "events_in_implemented_contract": 12,
-    "events_in_taxonomy": 11,
-    "events_total": 12,
-    "feature_templates_total": 231,
-    "implemented_event_types_total": 56,
+    "event_claims_skipped_unimplemented": 0,
+    "event_templates_total": 0,
+    "event_templates_unknown_ontology": 0,
+    "events_in_canonical_registry": 0,
+    "events_in_implemented_contract": 0,
+    "events_in_taxonomy": 0,
+    "events_total": 0,
+    "feature_templates_total": 0,
+    "implemented_event_types_total": 57,
     "planned_candidates_total": 0,
     "states_linked_total": 53,
     "states_total": 53,
-    "templates_total": 245,
+    "templates_total": 0,
     "unknown_templates_total": 0
   },
   "implementation_contract": {
@@ -48,6 +48,7 @@
       "LEAD_LAG_BREAK",
       "LIQUIDATION_CASCADE",
       "LIQUIDITY_GAP_PRINT",
+      "LIQUIDITY_SHOCK",
       "LIQUIDITY_VACUUM",
       "MOMENTUM_DIVERGENCE_TRIGGER",
       "OI_FLUSH",
@@ -106,6 +107,7 @@
       "LEAD_LAG_BREAK",
       "LIQUIDATION_CASCADE",
       "LIQUIDITY_GAP_PRINT",
+      "LIQUIDITY_SHOCK",
       "LIQUIDITY_VACUUM",
       "MOMENTUM_DIVERGENCE_TRIGGER",
       "OI_FLUSH",
@@ -182,7 +184,7 @@
       "ZSCORE_STRETCH"
     ]
   },
-  "ontology_spec_hash": "sha256:73e68f995b7b630b56b43b4bf53f71d21a99b1c7df042a5b21b97a163b4aedbd",
+  "ontology_spec_hash": "sha256:d9dbe800b0a0e2ed5c4c581e4aa4e845cdad363c500d29dc68c60ceaf743b8d0",
   "spec_paths": {
     "canonical_event_registry": "spec/events/canonical_event_registry.yaml",
     "state_registry": "spec/states/state_registry.yaml",
@@ -198,47 +200,9 @@
   "unresolved": {
     "canonical_unimplemented_nonplanned": [],
     "declared_implemented_missing_in_registry": [],
-    "events_missing_in_canonical_registry": [
-      "COPULA_PAIRS_TRADING"
-    ],
+    "events_missing_in_canonical_registry": [],
     "planned_unimplemented_events": [],
-    "skipped_event_claims": [
-      {
-        "claim_id": "CL_0482",
-        "event_type": "CONDITION",
-        "reason": "unimplemented_event"
-      },
-      {
-        "claim_id": "CL_0094",
-        "event_type": "LIQUIDITY_SHOCK",
-        "reason": "unimplemented_event"
-      },
-      {
-        "claim_id": "CL_0408",
-        "event_type": "LIQUIDITY_SHOCK",
-        "reason": "unimplemented_event"
-      },
-      {
-        "claim_id": "CL_0483",
-        "event_type": "CONDITION",
-        "reason": "unimplemented_event"
-      },
-      {
-        "claim_id": "CL_0489",
-        "event_type": "DESIGN",
-        "reason": "unimplemented_event"
-      },
-      {
-        "claim_id": "CL_0441",
-        "event_type": "DESIGN",
-        "reason": "unimplemented_event"
-      },
-      {
-        "claim_id": "CL_0490",
-        "event_type": "FAILURE",
-        "reason": "unimplemented_event"
-      }
-    ],
+    "skipped_event_claims": [],
     "state_registry_validation_issues": [],
     "states_with_missing_source_event": [],
     "taxonomy_unimplemented_nonplanned": [],

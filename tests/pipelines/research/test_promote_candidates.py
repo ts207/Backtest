@@ -26,6 +26,7 @@ def _eval_row(**overrides):
         "gate_bridge_after_cost_positive_validation": True,
         "gate_bridge_after_cost_stressed_positive_validation": False,
         "gate_delay_robustness": True,
+        "validation_samples": 100,
     }
     row.update(overrides)
     return _evaluate_row(

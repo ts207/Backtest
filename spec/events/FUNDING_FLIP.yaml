@@ -1,4 +1,4 @@
 event_type: FUNDING_FLIP
 reports_dir: positioning_extremes
-events_file: positioning_extremes_events.csv
+events_file: positioning_extremes_events.parquet
 signal_column: funding_flip_event

@@ -1,4 +1,4 @@
-event_type: "COPULA_PAIRS_TRADING"
-reports_dir: "copula_pairs"
-events_file: "copula_pairs_events.csv"
-signal_column: "copula_pairs_trading_event"
+event_type: COPULA_PAIRS_TRADING
+reports_dir: copula_pairs
+events_file: copula_pairs_events.parquet
+signal_column: copula_pairs_trading_event

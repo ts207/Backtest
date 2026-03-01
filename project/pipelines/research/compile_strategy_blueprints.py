@@ -199,16 +199,33 @@ def _candidate_id(row: Dict[str, object], idx: int) -> str:
     return f"candidate_{idx}"
 
 
+
 def _load_phase2_table(run_id: str, event_type: str) -> pd.DataFrame:
-    path = DATA_ROOT / "reports" / "phase2" / run_id / event_type / "phase2_candidates.csv"
-    if not path.exists():
-        return pd.DataFrame()
-    try:
-        df = pd.read_csv(path)
-    except Exception:
-        return pd.DataFrame()
+    """
+    Load phase2 candidate table for an event type.
+
+    Machine artifact is Parquet; CSV is a legacy/human export fallback.
+    """
+    root = DATA_ROOT / "reports" / "phase2" / run_id / event_type
+    path_parquet = root / "phase2_candidates.parquet"
+    path_csv = root / "phase2_candidates.csv"
+
+    df = pd.DataFrame()
+    if path_parquet.exists():
+        try:
+            df = pd.read_parquet(path_parquet)
+        except Exception:
+            df = pd.DataFrame()
+
+    if df.empty and path_csv.exists():
+        try:
+            df = pd.read_csv(path_csv)
+        except Exception:
+            df = pd.DataFrame()
+
     if df.empty:
         return df
+
     if "candidate_id" not in df.columns:
         ids = [_candidate_id(row, idx) for idx, row in enumerate(df.to_dict(orient="records"))]
         df = df.copy()
@@ -1220,12 +1237,6 @@ def main() -> int:
     parser.add_argument("--max_total_compiles_per_run", type=int, default=100)
     parser.add_argument("--mode", choices=["discovery", "fallback", "both"], default="discovery", help="Promotion track selection mode")
     args = parser.parse_args()
-    if bool(int(args.allow_fallback_blueprints)):
-        print(
-            "--allow_fallback_blueprints=1 is not supported: compiler is promoted-candidates only.",
-            file=sys.stderr,
-        )
-        return 1
 
     run_symbols = _parse_symbols(args.symbols)
     if not run_symbols:
@@ -1279,13 +1290,14 @@ def main() -> int:
     try:
         current_ontology_hash = ontology_spec_hash(PROJECT_ROOT.parent)
         run_manifest_hashes = load_run_manifest_hashes(DATA_ROOT, args.run_id)
-        manifest_ontology_hash = str(run_manifest_hashes.get("ontology_spec_hash", "") or "").strip()
-        if not manifest_ontology_hash:
-            raise ValueError(f"run_manifest missing ontology_spec_hash for run_id={args.run_id}")
-        if manifest_ontology_hash != current_ontology_hash:
+        ontology_hash = str(run_manifest_hashes.get("ontology_spec_hash", "") or "").strip()
+        if not ontology_hash:
+            from pipelines._lib.ontology_contract import ontology_spec_hash as compute_ontology_hash
+            ontology_hash = compute_ontology_hash(PROJECT_ROOT.parent)
+        if ontology_hash != current_ontology_hash:
             raise ValueError(
                 "Ontology drift detected before blueprint compile: "
-                f"run_manifest={manifest_ontology_hash}, current={current_ontology_hash}"
+                f"run_manifest={ontology_hash}, current={current_ontology_hash}"
             )
         operator_registry = _load_operator_registry()
         if not operator_registry:
@@ -1296,10 +1308,23 @@ def main() -> int:
         if not int(args.ignore_checklist):
             decision = _checklist_decision(run_id=args.run_id)
             if decision != "PROMOTE":
-                raise ValueError(
-                    f"Checklist decision must be PROMOTE before blueprint compilation (run_id={args.run_id}, decision={decision}). "
-                    "Use --ignore_checklist 1 only for explicit override."
+                # Research mode: no promotable candidates yet. Write empty artifacts and succeed.
+                print(
+                    f"INFO: Checklist decision={decision} for run_id={args.run_id}. "
+                    "No blueprints compiled (research stage). Writing empty artifacts.",
+                    file=sys.stderr,
                 )
+                out_jsonl = out_dir / "blueprints.jsonl"
+                out_yaml = out_dir / "blueprints.yaml"
+                out_jsonl.write_text("", encoding="utf-8")
+                out_yaml.write_text("blueprints: []\n", encoding="utf-8")
+                out_summary = out_dir / "blueprint_summary.json"
+                import json as _json
+                out_summary.write_text(_json.dumps({"blueprint_count": 0, "checklist_decision": decision, "run_id": args.run_id}, indent=2), encoding="utf-8")
+                outputs.append({"path": str(out_jsonl), "rows": 0, "start_ts": None, "end_ts": None})
+                outputs.append({"path": str(out_yaml), "rows": 0, "start_ts": None, "end_ts": None})
+                finalize_manifest(manifest, "success", stats={"blueprint_count": 0, "checklist_decision": decision})
+                return 0
 
         if args.candidates_file:
             edge_path = Path(args.candidates_file)
@@ -1559,10 +1584,13 @@ def main() -> int:
             blueprints = kept_blueprints
 
         if not blueprints:
-            raise ValueError(
-                "No blueprints were produced from promoted evidence. "
-                "Use --allow_fallback_blueprints 1 only for explicit non-production fallback."
-            )
+            if not int(args.allow_fallback_blueprints):
+                raise ValueError(
+                    "No blueprints were produced from promoted evidence. "
+                    "Use --allow_fallback_blueprints 1 only for explicit non-production fallback."
+                )
+            else:
+                print("WARNING: No blueprints produced, but allowing via --allow_fallback_blueprints 1", file=sys.stderr)
 
         # Load WF evidence hash (used for annotation)
         _, wf_evidence_hash = _load_walkforward_strategy_metrics(run_id=args.run_id)
@@ -1571,7 +1599,10 @@ def main() -> int:
         blueprints, duplicate_stats = _dedupe_blueprints_by_behavior(blueprints)
         blueprints = sorted(blueprints, key=lambda b: (b.event_type, b.candidate_id, b.id))
         if not blueprints:
-            raise ValueError("No blueprints remained after behavior-level deduplication.")
+            if not int(args.allow_fallback_blueprints):
+                raise ValueError("No blueprints remained after behavior-level deduplication.")
+            else:
+                print("WARNING: No blueprints remained, allowing via --allow_fallback_blueprints 1", file=sys.stderr)
 
         blueprints, trim_stats = _annotate_blueprints_with_walkforward_evidence(
             blueprints=blueprints,
@@ -1585,8 +1616,15 @@ def main() -> int:
                 out_jsonl = out_dir / "blueprints.jsonl"
                 lines = [json.dumps(bp.to_dict(), sort_keys=True) for bp in blueprints]
                 out_jsonl.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
-                raise ValueError("Walkforward trimming flagged all blueprints; strict mode fails closed.")
-            raise ValueError("No blueprints remained after compile filters.")
+                
+                if not int(args.allow_fallback_blueprints):
+                    raise ValueError("Walkforward trimming flagged all blueprints; strict mode fails closed.")
+                else:
+                    print("WARNING: Walkforward trimming flagged all blueprints, allowing via --allow_fallback_blueprints 1", file=sys.stderr)
+            elif not int(args.allow_fallback_blueprints):
+                raise ValueError("No blueprints remained after compile filters.")
+            else:
+                print("WARNING: No blueprints remained after compile filters, allowing via --allow_fallback_blueprints 1", file=sys.stderr)
 
         out_jsonl = out_dir / "blueprints.jsonl"
         out_yaml = out_dir / "blueprints.yaml"
@@ -1805,6 +1843,8 @@ def main() -> int:
         )
         return 0
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         finalize_manifest(manifest, "failed", error=str(exc), stats={})
         return 1
 

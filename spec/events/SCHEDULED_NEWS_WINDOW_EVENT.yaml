@@ -1,4 +1,4 @@
 event_type: SCHEDULED_NEWS_WINDOW_EVENT
 reports_dir: temporal_structure
-events_file: temporal_structure_events.csv
+events_file: temporal_structure_events.parquet
 signal_column: scheduled_news_window_event

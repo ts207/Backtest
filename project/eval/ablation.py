@@ -84,9 +84,20 @@ def main():
         
     for event_dir in phase2_root.iterdir():
         if event_dir.is_dir():
-            res_file = event_dir / "phase2_candidates.csv"
-            if res_file.exists():
-                df = pd.read_csv(res_file)
+            res_file_parquet = event_dir / "phase2_candidates.parquet"
+            res_file_csv = event_dir / "phase2_candidates.csv"
+            df = pd.DataFrame()
+            if res_file_parquet.exists():
+                try:
+                    df = pd.read_parquet(res_file_parquet)
+                except Exception:
+                    df = pd.DataFrame()
+            if df.empty and res_file_csv.exists():
+                try:
+                    df = pd.read_csv(res_file_csv)
+                except Exception:
+                    df = pd.DataFrame()
+            if not df.empty:
                 all_results.append(df)
                 
     if not all_results:

@@ -1,4 +1,4 @@
 event_type: ZSCORE_STRETCH
 reports_dir: statistical_dislocation
-events_file: statistical_dislocation_events.csv
+events_file: statistical_dislocation_events.parquet
 signal_column: zscore_stretch_event

@@ -1,4 +1,4 @@
 event_type: CLIMAX_VOLUME_BAR
 reports_dir: forced_flow_and_exhaustion
-events_file: forced_flow_and_exhaustion_events.csv
+events_file: forced_flow_and_exhaustion_events.parquet
 signal_column: climax_volume_bar_event

@@ -1,4 +1,4 @@
-event_type: "BASIS_DISLOC"
-reports_dir: "basis_dislocation"
-events_file: "basis_dislocation_events.csv"
-signal_column: "basis_dislocation_event"
+event_type: BASIS_DISLOC
+reports_dir: basis_dislocation
+events_file: basis_dislocation_events.parquet
+signal_column: basis_dislocation_event

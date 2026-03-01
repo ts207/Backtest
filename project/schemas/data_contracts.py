@@ -1,6 +1,7 @@
 import pandera as pa
 import pandas as pd
 from pandera.typing import DataFrame, Series
+from typing import Optional
 
 class Cleaned5mBarsSchema(pa.DataFrameModel):
     symbol: Series[str] = pa.Field(coerce=True)
@@ -30,6 +31,9 @@ class EventRegistrySchema(pa.DataFrameModel):
     exit_ts: Series[int] = pa.Field(ge=1577836800000)
     event_id: Series[str] = pa.Field(nullable=False)
     signal_column: Series[str] = pa.Field(nullable=False)
+    direction: Optional[Series[float]] = pa.Field(nullable=True)
+    sign: Optional[Series[float]] = pa.Field(nullable=True)
+    split_label: Optional[Series[str]] = pa.Field(nullable=True)
 
     @pa.dataframe_check
     def check_exit_after_enter(cls, df: DataFrame) -> Series[bool]:

@@ -84,6 +84,9 @@ REGISTRY_EVENT_COLUMNS = [
     "exit_ts",
     "symbol",
     "event_id",
+    "direction",
+    "sign",
+    "split_label",
     "features_at_event",
 ]
 
@@ -250,6 +253,14 @@ def normalize_phase1_events(events: pd.DataFrame, spec: EventRegistrySpec, run_i
     if missing_ids.any():
         out.loc[missing_ids, "event_id"] = [f"{spec.event_type}_{idx:08d}" for idx in range(int(missing_ids.sum()))]
 
+    # Preserve direction/sign/split_label if present; enforce stable dtypes
+    for col in ["direction", "sign"]:
+        if col not in out.columns:
+            out[col] = np.nan
+        out[col] = pd.to_numeric(out[col], errors="coerce").astype("float64")
+    if "split_label" not in out.columns:
+        out["split_label"] = np.nan
+
     out = out.sort_values(["timestamp", "symbol", "event_id"]).reset_index(drop=True)
     out["features_at_event"] = out.apply(_feature_payload, axis=1)
 
@@ -266,6 +277,9 @@ def normalize_phase1_events(events: pd.DataFrame, spec: EventRegistrySpec, run_i
             "exit_ts": out["exit_ts"],
             "symbol": out["symbol"],
             "event_id": out["event_id"],
+            "direction": out["direction"],
+            "sign": out["sign"],
+            "split_label": out["split_label"],
             "features_at_event": out["features_at_event"],
         }
     )
@@ -274,13 +288,39 @@ def normalize_phase1_events(events: pd.DataFrame, spec: EventRegistrySpec, run_i
 
 
 def _read_phase1_events(data_root: Path, run_id: str, spec: EventRegistrySpec) -> pd.DataFrame:
-    path = Path(data_root) / "reports" / spec.reports_dir / str(run_id) / spec.events_file
-    if not path.exists():
-        return pd.DataFrame()
-    try:
-        return pd.read_csv(path)
-    except Exception:
-        return pd.DataFrame()
+    """
+    Read phase-1 event artifacts for a given spec.
+
+    Contract:
+      - Machine artifacts are preferred as Parquet.
+      - CSV is allowed as a human-facing export / legacy format.
+      - If spec.events_file is missing, try the alternate suffix (.csv <-> .parquet)
+        to tolerate partial migrations.
+    """
+    primary = Path(data_root) / "reports" / spec.reports_dir / str(run_id) / spec.events_file
+    candidates: List[Path] = [primary]
+
+    # Tolerate spec/analyzer suffix mismatches during migrations.
+    if primary.suffix.lower() == ".csv":
+        candidates.append(primary.with_suffix(".parquet"))
+    elif primary.suffix.lower() == ".parquet":
+        candidates.append(primary.with_suffix(".csv"))
+
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            if path.suffix.lower() == ".parquet":
+                return pd.read_parquet(path)
+            # CSV path: try CSV first, but fall back to Parquet if the content is misnamed.
+            try:
+                return pd.read_csv(path)
+            except Exception:
+                return pd.read_parquet(path)
+        except Exception:
+            continue
+
+    return pd.DataFrame()
 
 
 def collect_registry_events(data_root: Path, run_id: str, event_types: Iterable[str] | None = None) -> pd.DataFrame:
@@ -329,6 +369,8 @@ def _normalize_registry_events_frame(events: pd.DataFrame) -> pd.DataFrame:
     out["symbol"] = out["symbol"].fillna("ALL").astype(str).str.upper().replace("", "ALL")
     out["event_id"] = out["event_id"].fillna("").astype(str)
     out["features_at_event"] = out["features_at_event"].fillna("{}").astype(str)
+    for col in ("direction", "sign"):
+        out[col] = pd.to_numeric(out[col], errors="coerce").astype("float64")
     out = out.drop_duplicates(subset=["event_type", "timestamp", "symbol", "event_id"]).copy()
     out = out.sort_values(["timestamp", "symbol", "event_type", "event_id"]).reset_index(drop=True)
     return out[REGISTRY_EVENT_COLUMNS]

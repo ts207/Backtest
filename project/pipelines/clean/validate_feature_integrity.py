@@ -74,12 +74,11 @@ def main():
     parser.add_argument("--nan_threshold", type=float, default=0.05)
     parser.add_argument("--z_threshold", type=float, default=10.0)
     args = parser.parse_args()
-
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
     data_root = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
-    
-    start_ts = start_manifest(PROJECT_ROOT / "pipelines" / "clean" / "validate_feature_integrity.py", vars(args))
-    
+
+    manifest = start_manifest("validate_feature_integrity", args.run_id, vars(args), [], [])
+
     all_issues = {}
     for symbol in symbols:
         LOGGER.info(f"Auditing data integrity for {symbol}...")
@@ -90,16 +89,12 @@ def main():
     status = "success"
     if all_issues:
         LOGGER.warning(f"Integrity check found issues in {len(all_issues)} symbols.")
-        # We don't necessarily fail the run yet, but we log it for the "Research Ledger"
         status = "warning"
 
     finalize_manifest(
-        run_id=args.run_id,
-        stage="validate_feature_integrity",
-        status=status,
-        start_ts=start_ts,
-        artifacts=[],
-        metrics={"symbols_with_issues": len(all_issues), "details": all_issues}
+        manifest,
+        status,
+        stats={"symbols_with_issues": len(all_issues), "details": all_issues}
     )
 
 if __name__ == "__main__":

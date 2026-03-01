@@ -46,10 +46,18 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _load_candidates(path: Path) -> pd.DataFrame:
-    try:
-        return pd.read_csv(path)
-    except Exception:
-        return pd.DataFrame()
+    path_parquet = path.with_suffix(".parquet")
+    if path_parquet.exists():
+        try:
+            return pd.read_parquet(path_parquet)
+        except Exception:
+            pass
+    if path.exists():
+        try:
+            return pd.read_csv(path)
+        except Exception:
+            return pd.DataFrame()
+    return pd.DataFrame()
 
 
 def _load_json_object(path: Path) -> Dict[str, object]:
