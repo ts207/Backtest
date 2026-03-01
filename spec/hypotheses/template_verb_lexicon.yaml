@@ -69,7 +69,7 @@ operators:
     side_policy: directional
     label_target: fwd_return_h
     test_spec: mean_gt_0
-    compatible_families: [TREND_STRUCTURE, VOLATILITY_TRANSITION]
+    compatible_families: [TREND_STRUCTURE, VOLATILITY_TRANSITION, LIQUIDITY_DISLOCATION]
     default_conditioning: {}
     risk_metrics_required: [drawdown_filter]
   breakout_followthrough:
@@ -79,7 +79,7 @@ operators:
     side_policy: directional
     label_target: fwd_return_h
     test_spec: mean_gt_0
-    compatible_families: [TREND_STRUCTURE, VOLATILITY_TRANSITION]
+    compatible_families: [TREND_STRUCTURE, VOLATILITY_TRANSITION, LIQUIDITY_DISLOCATION]
     default_conditioning: {}
     risk_metrics_required: []
   false_breakout_reversal:
@@ -109,7 +109,7 @@ operators:
     side_policy: directional
     label_target: fwd_return_h
     test_spec: mean_gt_0
-    compatible_families: [TREND_STRUCTURE, VOLATILITY_TRANSITION]
+    compatible_families: [TREND_STRUCTURE, VOLATILITY_TRANSITION, LIQUIDITY_DISLOCATION]
     default_conditioning: {}
     risk_metrics_required: [drawdown_filter]
   range_reversion:

@@ -13,26 +13,19 @@ END ?= 2025-07-10
 STRATEGIES ?=
 ENABLE_CROSS_VENUE_SPOT_PIPELINE ?= 0
 
-.PHONY: help run baseline discover-edges discover-edges-from-raw discover-hybrid discover-hybrid-backtest test test-fast compile clean-runtime clean-all-data clean-repo debloat check-hygiene clean-hygiene
+TRACK_NAME ?= research_general
+
+.PHONY: help run baseline discover-edges discover-edges-from-raw discover-hybrid discover-hybrid-backtest test test-fast compile clean-runtime clean-all-data clean-repo debloat check-hygiene clean-hygiene governance update-conductor pre-commit
 
 help:
 	@echo "Targets:"
 	@echo "  run               - ingest+clean+features+context"
 	@echo "  baseline          - run + backtest + report"
-	@echo "  discover-edges    - run multi-symbol discovery chain (phase1+phase2+export)"
-	@echo "  discover-edges-from-raw - discovery chain using existing raw lake partitions (skips ingest)"
-	@echo "  discover-hybrid   - discover-edges + expectancy checks (research-speed mode)"
-	@echo "  discover-hybrid-backtest - discover-hybrid + backtest + report"
-	@echo "                          requires STRATEGIES=... (comma-separated)"
+	@echo "  governance        - audit specs and sync schemas"
+	@echo "  update-conductor  - update conductor tracks after a run"
+	@echo "  pre-commit        - run pre-commit quality checks"
 	@echo "  test              - run test suite"
 	@echo "  test-fast         - run fast test profile (exclude slow tests)"
-	@echo "  compile           - byte-compile all Python modules under project/"
-	@echo "  clean-runtime     - clean run/report artifacts"
-	@echo "  clean-all-data    - clean all local data artifacts"
-	@echo "  clean-repo        - clean local runtime/cache artifacts in repo tree"
-	@echo "  debloat           - alias for clean-repo"
-	@echo "  check-hygiene     - enforce repo hygiene constraints"
-	@echo "  clean-hygiene     - remove local sidecar metadata files"
 
 run:
 	$(PYTHON) $(RUN_ALL) \
@@ -40,6 +33,7 @@ run:
 		--symbols $(SYMBOLS) \
 		--start $(START) \
 		--end $(END)
+	$(MAKE) update-conductor TRACK_NAME="Execution: $(RUN_ID)"
 
 baseline:
 	@test -n "$(STRATEGIES)" || (echo "Set STRATEGIES=... for baseline" && exit 1)
@@ -51,6 +45,16 @@ baseline:
 		--run_backtest 1 \
 		--run_make_report 1 \
 		--strategies "$(STRATEGIES)"
+	$(MAKE) update-conductor TRACK_NAME="Baseline: $(RUN_ID)"
+
+governance:
+	$(PYTHON) project/scripts/pipeline_governance.py --audit --sync
+
+update-conductor:
+	$(PYTHON) project/scripts/update_conductor.py --track "$(TRACK_NAME)"
+
+pre-commit:
+	bash project/scripts/pre_commit.sh
 
 discover-edges:
 	$(PYTHON) $(RUN_ALL) \

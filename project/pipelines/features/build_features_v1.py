@@ -28,7 +28,12 @@ from pipelines._lib.run_manifest import (
 from pipelines._lib.validation import ensure_utc_timestamp, validate_columns, ts_ns_utc
 from pipelines._lib.sanity import assert_monotonic_utc_timestamp
 from schemas.data_contracts import Cleaned5mBarsSchema
-from features.microstructure import calculate_vpin, calculate_roll, calculate_amihud, calculate_kyle_lambda
+from features.microstructure import (
+    calculate_vpin_score,
+    calculate_roll_spread_bps,
+    calculate_amihud_illiquidity,
+    calculate_kyle_lambda,
+)
 
 FUNDING_EVENT_HOURS = 8
 FUNDING_MAX_STALENESS = pd.Timedelta(hours=FUNDING_EVENT_HOURS)
@@ -569,11 +574,11 @@ def main() -> int:
                     buy_vol_proxy = vol_raw * (c - l) / (h - l).replace(0.0, np.nan).fillna(0.5)
                 
                 if "ms_vpin_24" in target_cols:
-                    features["ms_vpin_24"] = calculate_vpin(vol_raw, buy_vol_proxy, window=24)
+                    features["ms_vpin_24"] = calculate_vpin_score(vol_raw, buy_vol_proxy, window=24)
                 if "ms_roll_24" in target_cols:
-                    features["ms_roll_24"] = calculate_roll(bars["close"], window=24)
+                    features["ms_roll_24"] = calculate_roll_spread_bps(bars["close"], window=24)
                 if "ms_amihud_24" in target_cols:
-                    features["ms_amihud_24"] = calculate_amihud(bars["close"], vol_raw, window=24)
+                    features["ms_amihud_24"] = calculate_amihud_illiquidity(bars["close"], vol_raw, window=24)
                 if "ms_kyle_24" in target_cols:
                     features["ms_kyle_24"] = calculate_kyle_lambda(
                         bars["close"], 

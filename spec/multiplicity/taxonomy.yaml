@@ -9,6 +9,7 @@ families:
     description: "Microstructure imbalance and liquidity withdrawal/recovery dynamics."
     events:
       - "LIQUIDITY_VACUUM"
+      - "LIQUIDITY_SHOCK"
       - "DEPTH_COLLAPSE"
       - "SPREAD_BLOWOUT"
       - "ORDERFLOW_IMBALANCE_SHOCK"
@@ -284,6 +285,7 @@ families:
 # Runtime event ids are canonical-only.
 runtime_event_aliases:
   LIQUIDITY_VACUUM: "LIQUIDITY_VACUUM"
+  LIQUIDITY_SHOCK: "LIQUIDITY_SHOCK"
   VOL_SHOCK: "VOL_SHOCK"
   FUNDING_EXTREME_ONSET: "FUNDING_EXTREME_ONSET"
   FUNDING_PERSISTENCE_TRIGGER: "FUNDING_PERSISTENCE_TRIGGER"
@@ -303,6 +305,7 @@ implemented_events:
   - "FUNDING_PERSISTENCE_TRIGGER"
   - "LIQUIDATION_CASCADE"
   - "LIQUIDITY_VACUUM"
+  - "LIQUIDITY_SHOCK"
   - "OI_FLUSH"
   - "OI_SPIKE_NEGATIVE"
   - "OI_SPIKE_POSITIVE"
@@ -362,6 +365,7 @@ implementation_status_by_event:
   FUNDING_PERSISTENCE_TRIGGER: implemented
   LIQUIDATION_CASCADE: implemented
   LIQUIDITY_VACUUM: implemented
+  LIQUIDITY_SHOCK: implemented
   OI_FLUSH: implemented
   OI_SPIKE_NEGATIVE: implemented
   OI_SPIKE_POSITIVE: implemented

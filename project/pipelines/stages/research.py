@@ -73,6 +73,13 @@ def build_research_stages(
                         "--oi_drop_th", str(args.oi_drop_th),
                     ]
                 )
+            if script_name == "analyze_liquidity_shock.py":
+                phase1_args.extend(
+                    [
+                        "--volume_collapse_th", str(args.volume_collapse_th),
+                        "--range_spike_th", str(args.range_spike_th),
+                    ]
+                )
             stages.append((script_name.removesuffix(".py"), phase1_script, phase1_args))
 
             registry_stage_name = "build_event_registry" if len(selected_chain) == 1 else f"build_event_registry_{event_type}"

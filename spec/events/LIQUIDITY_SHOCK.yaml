@@ -1,8 +1,9 @@
 event_type: "LIQUIDITY_SHOCK"
-active: false
-status: planned
+active: true
+status: implemented
 description: "Abrupt collapse in market depth combined with a spike in bid-ask spread."
 reports_dir: "liquidity_shock"
+events_file: "liquidity_shock_events.csv"
 signal_column: "liquidity_shock_event"
 parameters:
   depth_collapse_th: 0.5

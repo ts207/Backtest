@@ -133,6 +133,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Phase-1 analyzer for Copula Pairs Trading events")
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--pairs", required=True, help="Comma-separated pairs (e.g. BTCUSDT:ETHUSDT)")
+    parser.add_argument("--symbols", default=None, help="Ignored; use --pairs instead")
     parser.add_argument("--alpha1", type=float, default=0.05)
     parser.add_argument("--alpha2", type=float, default=0.95)
     parser.add_argument("--timeframe", default="5m")

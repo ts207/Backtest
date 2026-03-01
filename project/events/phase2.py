@@ -19,6 +19,7 @@ PHASE2_EVENT_CHAIN: List[Tuple[str, str, List[str]]] = [
     ('OI_SPIKE_NEGATIVE', 'analyze_oi_shock_events.py', []),
     ('OI_FLUSH', 'analyze_oi_shock_events.py', []),
     ('LIQUIDATION_CASCADE', 'analyze_liquidation_cascade.py', []),
+    ('LIQUIDITY_SHOCK', 'analyze_liquidity_shock.py', []),
     ('DEPTH_COLLAPSE', 'analyze_liquidity_dislocation_events.py', ['--event_type', 'DEPTH_COLLAPSE', '--timeframe', '5m']),
     ('SPREAD_BLOWOUT', 'analyze_liquidity_dislocation_events.py', ['--event_type', 'SPREAD_BLOWOUT', '--timeframe', '5m']),
     ('ORDERFLOW_IMBALANCE_SHOCK', 'analyze_liquidity_dislocation_events.py', ['--event_type', 'ORDERFLOW_IMBALANCE_SHOCK', '--timeframe', '5m']),

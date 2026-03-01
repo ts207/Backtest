@@ -1,0 +1,121 @@
+{
+  "version": "1.0.0",
+  "features": {
+    "funding": {
+      "family": "derivatives",
+      "params": null
+    },
+    "amihud": {
+      "family": "microstructure",
+      "params": null
+    },
+    "slippage": {
+      "family": "execution",
+      "params": null
+    },
+    "h1_2": {
+      "family": "copula_mispricing",
+      "params": null
+    },
+    "atr": {
+      "family": "volatility",
+      "params": null
+    },
+    "open_interest": {
+      "family": "derivatives",
+      "params": null
+    },
+    "impact": {
+      "family": "market_quality",
+      "params": null
+    },
+    "quoted_spread": {
+      "family": "market_quality",
+      "params": null
+    },
+    "roll": {
+      "family": "microstructure",
+      "params": null
+    },
+    "oi": {
+      "family": "derivatives",
+      "params": null
+    },
+    "realized_vol": {
+      "family": "volatility",
+      "params": null
+    },
+    "vpin": {
+      "family": "microstructure",
+      "params": null
+    },
+    "auc": {
+      "family": "evaluation",
+      "params": null
+    },
+    "basis": {
+      "family": "derivatives",
+      "params": null
+    },
+    "rsi": {
+      "family": "momentum",
+      "params": null
+    },
+    "macd": {
+      "family": "momentum",
+      "params": null
+    },
+    "correlation": {
+      "family": "microstructure",
+      "params": null
+    },
+    "spread": {
+      "family": "market_quality",
+      "params": null
+    },
+    "mae": {
+      "family": "evaluation",
+      "params": null
+    },
+    "order_book": {
+      "family": "microstructure",
+      "params": null
+    },
+    "microstructure": {
+      "family": "microstructure",
+      "params": null
+    },
+    "sharpe": {
+      "family": "performance",
+      "params": null
+    },
+    "market_depth": {
+      "family": "market_quality",
+      "params": null
+    },
+    "expected_shortfall": {
+      "family": "risk",
+      "params": null
+    },
+    "random_forest": {
+      "family": "evaluation",
+      "params": null
+    },
+    "kyle": {
+      "family": "microstructure",
+      "params": null
+    },
+    "rmse": {
+      "family": "evaluation",
+      "params": null
+    },
+    "carry_state": {
+      "family": "carry_state",
+      "params": null
+    },
+    "vol_regime": {
+      "family": "vol_regime",
+      "params": null
+    }
+  }
+}

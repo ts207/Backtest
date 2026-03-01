@@ -12,6 +12,18 @@ families:
     - 15m
     max_candidates_per_run: 1000
     conditioning_cols: []
+  LIQUIDITY_SHOCK:
+    canonical_family: LIQUIDITY_DISLOCATION
+    templates:
+    - mean_reversion
+    - continuation
+    - stop_run_repair
+    - overshoot_repair
+    - only_if_liquidity
+    - slippage_aware_filter
+    horizons:
+    - 15m
+    max_candidates_per_run: 600
   DEPTH_COLLAPSE:
     canonical_family: LIQUIDITY_DISLOCATION
     templates:

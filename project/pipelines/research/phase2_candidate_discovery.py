@@ -2016,9 +2016,9 @@ def _load_previous_lambda_maps(
         _sub = df[df["level"].astype(str).str.strip().str.lower() == _level].copy()
         if _sub.empty:
             continue
-        _sub["_lam"] = pd.to_numeric(_sub["lambda_value"], errors="coerce")
-        _sub = _sub.dropna(subset=["_lam"])
-        _sub = _sub[_sub["_lam"] > 0.0]
+        _sub["lam_"] = pd.to_numeric(_sub["lambda_value"], errors="coerce")
+        _sub = _sub.dropna(subset=["lam_"])
+        _sub = _sub[_sub["lam_"] > 0.0]
         if _sub.empty:
             continue
         _present = [c for c in _key_cols if c in _sub.columns]
@@ -2029,9 +2029,9 @@ def _load_previous_lambda_maps(
             _sub[_c] = _sub[_c].fillna("").astype(str).str.strip()
             if _c in ("canonical_family", "canonical_event_type"):
                 _sub[_c] = _sub[_c].str.upper()
-        for _rec in _sub[[*_present, "_lam"]].itertuples(index=False):
+        for _rec in _sub[[*_present, "lam_"]].itertuples(index=False):
             _key = tuple(getattr(_rec, c) for c in _present)
-            out[_level][_key] = float(_rec._lam)
+            out[_level][_key] = float(_rec.lam_)
     return out, source
 
 

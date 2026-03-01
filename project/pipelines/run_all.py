@@ -618,6 +618,8 @@ def main() -> int:
     parser.add_argument("--auto_continue_on_keep_research", type=int, default=0)
     parser.add_argument("--liq_vol_th", type=float, default=100000.0)
     parser.add_argument("--oi_drop_th", type=float, default=-500000.0)
+    parser.add_argument("--volume_collapse_th", type=float, default=0.5)
+    parser.add_argument("--range_spike_th", type=float, default=2.0)
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--run_backtest", type=int, default=0)
     parser.add_argument("--backtest_timeframe", default="5m", help="Bar timeframe for backtest/walkforward data loading (e.g. '5m', '15m')")
