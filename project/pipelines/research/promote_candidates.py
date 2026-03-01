@@ -166,7 +166,7 @@ def _as_bool(value: object) -> bool:
     return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "on"}
 
 
-def _load_phase2_candidates(phase2_root: Path) -> pd.DataFrame:
+def _load_phase2_candidates(phase2_root: Path, run_id: str | None = None) -> pd.DataFrame:
     rows: List[pd.DataFrame] = []
     if not phase2_root.exists():
         return pd.DataFrame()
@@ -193,8 +193,9 @@ def _load_phase2_candidates(phase2_root: Path) -> pd.DataFrame:
         if "event_type" not in df.columns:
             df["event_type"] = event_name
         if "candidate_id" not in df.columns:
+            prefix = f"{run_id}_" if run_id else ""
             df["candidate_id"] = [
-                f"{event_name}_{idx}" for idx in range(len(df))
+                f"{prefix}{event_name}_{idx}" for idx in range(len(df))
             ]
         df["source_phase2_path"] = source_path
         rows.append(df)
@@ -496,6 +497,7 @@ def main() -> int:
     parser.add_argument("--max_negative_control_pass_rate", type=float, default=0.01)
     parser.add_argument("--require_hypothesis_audit", type=int, default=0)
     parser.add_argument("--allow_missing_negative_controls", type=int, default=1)
+    parser.add_argument("--allow_discovery_promotion", type=int, default=0, help="If 1, allow promoting candidates from a 'discovery' mode run")
     parser.add_argument("--manual_spec_path", default=None, help="Path to a manual strategy specification YAML")
     parser.add_argument("--backtest_run_id", default=None, help="Backtest run ID to evaluate for manual strategy")
     args = parser.parse_args()
@@ -524,12 +526,16 @@ def main() -> int:
         if not ontology_hash:
             ontology_hash = compute_ontology_hash(PROJECT_ROOT.parent)
 
+        if manifest.get("run_mode") == "discovery" and not bool(int(args.allow_discovery_promotion)):
+            logging.error("Cannot promote candidates from a 'discovery' mode run without --allow_discovery_promotion 1")
+            return 1
+
         if args.manual_spec_path:
             if not args.backtest_run_id:
                 raise ValueError("--backtest_run_id is required when using --manual_spec_path")
             phase2_df = _load_manual_candidate(Path(args.manual_spec_path), args.backtest_run_id)
         else:
-            phase2_df = _load_phase2_candidates(phase2_root)
+            phase2_df = _load_phase2_candidates(phase2_root, run_id=args.run_id)
             
         if phase2_df.empty:
             raise ValueError(f"No candidates found (manual={bool(args.manual_spec_path)})")

@@ -916,16 +916,18 @@ def main() -> int:
         except Exception:
             existing_manifest = {}
         existing_ontology_hash = str(existing_manifest.get("ontology_spec_hash", "")).strip()
-        if (
-            existing_ontology_hash
-            and existing_ontology_hash != ontology_hash
-            and not bool(int(args.allow_ontology_hash_mismatch))
-        ):
-            raise ValueError(
-                "Ontology hash mismatch for existing run_id. "
-                f"existing={existing_ontology_hash}, current={ontology_hash}. "
-                "Use --allow_ontology_hash_mismatch 1 only for explicit override."
-            )
+        if existing_ontology_hash and existing_ontology_hash != ontology_hash:
+            if not bool(int(args.allow_ontology_hash_mismatch)):
+                raise ValueError(
+                    "Ontology hash mismatch for existing run_id. "
+                    f"existing={existing_ontology_hash}, current={ontology_hash}. "
+                    "Use --allow_ontology_hash_mismatch 1 only for explicit override."
+                )
+            else:
+                print(
+                    f"WARNING: [ISC-1] Ontology hash mismatch for existing run_id {run_id}. Override enabled.",
+                    file=sys.stderr,
+                )
     _write_run_manifest(run_id, run_manifest)
 
     print(f"Planned stages: {len(stages)}")
@@ -948,6 +950,15 @@ def main() -> int:
     for _attr, _stage_name, _cli_flag in _STARTUP_NON_PROD_FLAGS:
         if bool(int(getattr(args, _attr, 0))):
             non_production_overrides.append(f"{_stage_name}:{_cli_flag}=1")
+
+    # Capture ontology bypass in overrides (ISC-6)
+    if existing_manifest_path.exists() and bool(int(args.allow_ontology_hash_mismatch)):
+        # Check mismatch again to ensure we only record if it actually happened
+        if existing_ontology_hash and existing_ontology_hash != ontology_hash:
+            non_production_overrides.append("run_all:allow_ontology_hash_mismatch=1")
+
+    if non_production_overrides:
+        _write_run_manifest(run_id, {"non_production_overrides": non_production_overrides})
     def _has_hypothesis_entries(run_id: str, event_type: str) -> bool:
         # If hypothesis generator was explicitly disabled, assume we want fallback/broad discovery
         # and allow all event types to proceed to Phase 2.
