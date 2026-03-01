@@ -1,6 +1,6 @@
 # Getting Started
 
-Step-by-step guide to set up the Backtest platform and run your first discovery.
+Step-by-step guide to set up the Backtest Alpha Discovery platform and run your first research discovery.
 
 ---
 
@@ -35,19 +35,9 @@ make test-fast
 
 ---
 
-## First run: clean and features only
+## First run: Ingest and Features
 
-If you already have raw OHLCV data in `data/lake/raw/`:
-
-```bash
-make discover-edges-from-raw \
-  RUN_ID=first_run \
-  SYMBOLS=BTCUSDT,ETHUSDT \
-  START=2022-01-01 \
-  END=2024-12-31
-```
-
-If you need to ingest from Binance API:
+If you need to ingest from Binance API and prepare features:
 
 ```bash
 make run \
@@ -61,30 +51,36 @@ This runs: ingest → clean → features. Takes 5–20 minutes depending on data
 
 ---
 
-## Running discovery
+## Running Discovery
+
+To run the full research pipeline and produce **Strategy Blueprints**:
 
 ```bash
-# Phase 1 + Phase 2 discovery (no ingest, uses existing raw data)
-make discover-edges-from-raw \
+# Phase 1 + Phase 2 discovery + Blueprint Compilation
+make discover-blueprints \
   RUN_ID=discovery_$(date +%Y%m%d) \
   SYMBOLS=BTCUSDT,ETHUSDT \
   START=2020-06-01 \
   END=2025-07-10
 ```
 
-This runs all 57 event analyzers in parallel (default: up to 8 workers), then Phase 2 discovery, bridge evaluation, and produces `blueprints.jsonl`.
+This runs all 57 event analyzers in parallel, then Phase 2 discovery, bridge evaluation, and produces `blueprints.jsonl` in `data/reports/strategy_blueprints/`.
 
 On a 4-core machine with 2 symbols over 5 years: **~30–40 minutes**.
 
 ---
 
-## Viewing results
+## Viewing Results
 
+### 1. Run Manifest
+Check the timing, status, and metadata of your discovery run:
 ```bash
-# Run manifest (timing, status, git hash)
 cat data/runs/discovery_$(date +%Y%m%d)/run_manifest.json | python3 -m json.tool
+```
 
-# Top promoted candidates
+### 2. Top Promoted Candidates
+Inspect the statistically validated candidates before they are compiled into blueprints:
+```bash
 python3 -c "
 import pandas as pd, glob, os
 run_id = 'discovery_$(date +%Y%m%d)'
@@ -100,8 +96,11 @@ else:
          'after_cost_expectancy','p_value','n_events']
     ].head(20).to_string())
 "
+```
 
-# Strategy blueprints
+### 3. Strategy Blueprints
+View the final executable "Alpha DNA" artifacts:
+```bash
 python3 -c "
 import json
 with open('data/reports/strategy_blueprints/discovery_$(date +%Y%m%d)/blueprints.jsonl') as f:
@@ -113,99 +112,12 @@ with open('data/reports/strategy_blueprints/discovery_$(date +%Y%m%d)/blueprints
 
 ---
 
-## Running a backtest
+## Next Steps
 
-Once you have blueprints, run a strategy backtest:
+Now that you have your Blueprints, the next stage is to import them into **NautilusTrader** for high-fidelity backtesting and live execution.
 
-```bash
-make discover-hybrid-backtest \
-  RUN_ID=discovery_$(date +%Y%m%d) \
-  SYMBOLS=BTCUSDT,ETHUSDT \
-  STRATEGIES=vol_shock_mean_reversion_v1
-```
-
-Or run the full hybrid discovery + backtest in one command:
-
-```bash
-make discover-hybrid-backtest \
-  RUN_ID=full_$(date +%Y%m%d) \
-  SYMBOLS=BTCUSDT,ETHUSDT \
-  START=2020-06-01 \
-  END=2025-07-10 \
-  STRATEGIES=vol_shock_mean_reversion_v1
-```
-
----
-
-## Configuring the run
-
-All parameters can be passed as CLI flags to `run_all.py`:
-
-```bash
-python project/pipelines/run_all.py \
-  --run_id my_run \
-  --symbols BTCUSDT,ETHUSDT \
-  --start 2020-06-01 --end 2025-07-10 \
-  --phase2_event_type VOL_SHOCK \      # run only one event type
-  --max_analyzer_workers 4 \           # parallel workers
-  --mode research \                    # discovery gate profile
-  --entry_lag_bars 1 \                 # PIT-safe entry lag
-  --enable_time_decay 1 \              # exponential weighting
-  --run_phase2_conditional 1
-```
-
-See `python project/pipelines/run_all.py --help` for the full parameter list.
-
----
-
-## Performance tips
-
-- Use `make discover-edges-from-raw` instead of `make discover-edges` to skip re-ingesting data you already have
-- Set `--max_analyzer_workers` to your CPU core count for maximum parallelism
-- Enable `BACKTEST_STAGE_CACHE=1` to skip unchanged stages on re-runs
-- Reduce `START`/`END` range or `SYMBOLS` for faster iteration during development
-
-See [PERFORMANCE.md](PERFORMANCE.md) for the full performance guide.
-
----
-
-## Troubleshooting
-
-### "No data found for symbol"
-
-Check that the raw data exists:
-```bash
-ls data/lake/raw/perp/BTCUSDT/5m/ohlcv/
-```
-
-If empty, run `make run` first to ingest.
-
-### Stage failed
-
-```bash
-# Find which stage failed
-cat data/runs/<run_id>/run_manifest.json | python3 -m json.tool | grep failed_stage
-
-# Read the log
-cat data/runs/<run_id>/<failed_stage>.log
-```
-
-### Out of memory
-
-Reduce `--max_analyzer_workers`. See [PERFORMANCE.md](PERFORMANCE.md#memory-pressure).
-
-### `ontology_spec_hash` mismatch
-
-Your `spec/` files changed since the candidate plan was created. Either regenerate the plan or pass `--allow_ontology_hash_mismatch 1` (use with caution — results may not be reproducible against the current spec).
-
----
-
-## Next steps
-
-- [ARCHITECTURE.md](ARCHITECTURE.md) — full pipeline diagram and module map
+- [ARCHITECTURE.md](ARCHITECTURE.md) — research pipeline diagram and module map
 - [CONCEPTS.md](CONCEPTS.md) — PIT safety, shrinkage, gates, event taxonomy
 - [DEVELOPER.md](DEVELOPER.md) — adding events, features, and gates
-- [OPERATIONS.md](OPERATIONS.md) — monitoring, kill switch, OOS validation, cleanup
 - [PERFORMANCE.md](PERFORMANCE.md) — bottlenecks, tuning, caching
-- [AUDIT.md](AUDIT.md) — current audit findings and maturity assessment
 - [SPEC_FIRST.md](SPEC_FIRST.md) — spec-driven development workflow

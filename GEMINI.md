@@ -1,24 +1,26 @@
 # Backtest Project Context
 
 ## What This Repo Is
-Backtest is a spec-driven, event-first trading research system for Binance perp/spot data.
+Backtest is a specialized **Research & Alpha Discovery** engine for Binance perp/spot data. Its primary objective is to convert raw market data into statistically validated **Strategy Blueprints** using rigorous FDR control and hierarchical shrinkage.
+
+Downstream execution, high-fidelity backtesting, and live trading are handled by the `nautilus_trader` engine.
 
 Core entrypoint: `project/pipelines/run_all.py`
 
 ## Runtime Structure
-- Data ingest and cleaning for 5m bar research datasets.
-- Feature and context generation with PIT-safe joins.
-- Phase 1 event analyzers by event family.
-- Canonical event registry (`events.parquet`, `event_flags.parquet`).
-- Phase 2 conditional discovery with multiplicity controls.
-- Bridge tradability checks.
-- Blueprint compile and optional downstream evaluation.
+- **Ingest & Clean:** 5m bar research datasets for Binance.
+- **Feature Generation:** PIT-safe features (Vol, Carry, Microstructure).
+- **Phase 1 Event Detection:** 57 canonical event types across 10 families.
+- **Phase 2 Discovery:** Statistical validation using James-Stein shrinkage and Benjamini-Hochberg FDR.
+- **Bridge Evaluation:** Fast, cost-stressed tradability check.
+- **Blueprint Compilation:** Final artifact generation (`blueprints.jsonl`).
 
 ## Contracts That Matter
-- Use registry outputs for event alignment (`*_event`, `*_active`).
-- Enforce lagged entry for close-derived signals (`entry_lag_bars >= 1`).
-- Keep missing-data states explicit (no false neutral fills).
-- Treat specs in `spec/` as source of truth for concepts/events/gates.
+- **Blueprint-as-Artifact:** The pipeline ends at `blueprints.jsonl`. This is the "Alpha DNA" for external execution.
+- **Spec is Truth:** All event and gate definitions live in `spec/`.
+- **Statistical Rigor:** No signal is promoted to a blueprint without passing the FDR and shrinkage gates.
+- **PIT Safety:** All joins must use `merge_asof(direction="backward")`.
+- **Lagged Entry:** Always assume `entry_lag_bars >= 1` for research consistency.
 
 ## Working Commands
 ```bash

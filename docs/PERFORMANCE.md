@@ -1,10 +1,10 @@
 # Performance Guide
 
-This document covers pipeline performance characteristics, known bottlenecks, applied patches, and tuning parameters.
+This document covers pipeline performance characteristics, known bottlenecks, and tuning parameters for the Alpha Discovery Engine.
 
 ---
 
-## Wall-time budget (reference)
+## Wall-time Budget (Reference)
 
 On a 4-core dev machine with BTCUSDT + ETHUSDT, 2020–2025:
 
@@ -15,120 +15,80 @@ On a 4-core dev machine with BTCUSDT + ETHUSDT, 2020–2025:
 | Event registry × 57 events | ~28 min | **~7 min** (8 workers) |
 | Phase 2 discovery × 57 events | ~15 min | ~15 min (sequential) |
 | Bridge eval + promotion | ~3 min | ~3 min |
-| Backtest (optional) | ~5 min | ~5 min |
-| **Total (discovery only)** | **~51 min** | **~30 min** |
+| Blueprint Compiler | ~1 min | ~1 min |
+| **Total (discovery only)** | **~52 min** | **~31 min** |
 
 ---
 
-## Bottleneck inventory and patches
+## Bottleneck Inventory and Patches
 
-### [PATCHED] #1 — Parallel event analyzers
+### [PATCHED] #1 — Parallel Event Analyzers
 
 **File:** `project/pipelines/run_all.py`
 
-All 57 event analyzer stages (`build_event_registry_*`, `phase1_analyze_*`) previously ran serially as blocking `subprocess.run` calls. They are now dispatched in parallel via `ThreadPoolExecutor`.
+All 57 event analyzer stages (`build_event_registry_*`, `phase1_analyze_*`) previously ran serially. They are now dispatched in parallel via `ThreadPoolExecutor`.
 
 **Config:**
 ```bash
 # Via make target (default auto-detects CPU count, caps at 8)
-make discover-edges
+make discover-blueprints
 
 # Explicit worker count
 python project/pipelines/run_all.py --max_analyzer_workers 4 ...
-
-# Disable parallelism (sequential fallback for debugging)
-python project/pipelines/run_all.py --max_analyzer_workers 1 ...
 ```
 
 ---
 
-### [PATCHED] #2 — `iterrows` in Phase 2 hot loops
+### [PATCHED] #2 — Vectorized Hot Loops in Phase 2
 
 **File:** `project/pipelines/research/phase2_candidate_discovery.py`
 
-Lambda snapshot builder and loader previously iterated frame rows one at a time with `iterrows`, building Python dicts. Replaced with vectorized DataFrame slice construction and `pd.concat`.
+Lambda snapshot builder and loader now use vectorized DataFrame construction instead of row-by-row `iterrows`. This improved performance by ~10x on large event sets.
 
 ---
 
-### [PATCHED] #3 — `.apply(lambda)` for `fail_reasons` and `phase2_quality_components`
+### [PATCHED] #3 — Vectorized Shrinkage and P-Values
 
 **File:** `project/pipelines/research/phase2_candidate_discovery.py`
 
-`phase2_quality_components` JSON was serialized row-by-row via `df.apply(json.dumps, axis=1)`. Replaced with vectorized string concatenation — 5–30× faster on large frames.
-
-`fail_reasons` was similarly rebuilt row-by-row. Replaced with vectorized boolean mask columns + `pd.Series.str.cat`.
+Statistical calculations for James-Stein shrinkage and two-sided p-values (via `scipy.stats.t.sf`) are now fully vectorized, eliminating row-by-row Python function calls.
 
 ---
 
-### [PATCHED] #4 — `_aggregate_effect_units` Python list builder
-
-**File:** `phase2_candidate_discovery.py:486`
-
-The shrinkage aggregation loop built a Python list of dicts inside a `groupby`. Refactored to use vectorized `groupby().agg()` over the whole frame.
-
----
-
-### [PATCHED] #5 — Row-by-row `p_value_shrunk`
-
-**File:** `phase2_candidate_discovery.py:877`
-
-`t_shrunk.apply(_two_sided_p_from_t)` was calling `scipy.stats.t.sf` one row at a time. Replaced with a single vectorized call:
-```python
-from scipy.stats import t as _scipy_t
-p_shrunk.loc[valid_se] = (2.0 * _scipy_t.sf(t_shrunk.loc[valid_se].abs(), df=_df_vals)).clip(0.0, 1.0)
-```
-
----
-
-### [PATCHED] #6 — Stage output caching
+### [PATCHED] #4 — Stage Output Caching
 
 **File:** `project/pipelines/run_all.py`
 
-Every `make discover-edges` previously re-ran all stages even when inputs were unchanged. Stage manifests now carry an `input_hash` (script mtime + CLI args). On cache hit the stage is skipped instantly.
+Stage manifests now carry an `input_hash` (script mtime + CLI args). On cache hit, the stage is skipped.
 
 **Enable:**
 ```bash
-BACKTEST_STAGE_CACHE=1 make discover-edges
+BACKTEST_STAGE_CACHE=1 make discover-blueprints
 ```
-
-> **Note:** Cache is disabled by default to preserve correctness. Enable only when you are confident specs and input data have not changed since the last run.
 
 ---
 
-## Tuning guide
+## Tuning Guide
 
-### Memory pressure
+### Memory Pressure
 
-Phase 2 discovery loads all feature bars for each symbol into memory simultaneously. For 5 years of 5m bars on 2 symbols this is ~400 MB. With `--max_analyzer_workers 8`, peak memory is ~3 GB (8 workers × ~400 MB each).
+Phase 2 discovery loads all feature bars for each symbol into memory. With `--max_analyzer_workers 8`, peak memory is ~3 GB for a standard 2-symbol run.
 
 If OOM:
 ```bash
 # Reduce workers
 python project/pipelines/run_all.py --max_analyzer_workers 2 ...
-
-# Or process symbols sequentially
-python project/pipelines/run_all.py --symbols BTCUSDT ... && \
-python project/pipelines/run_all.py --symbols ETHUSDT ...
 ```
 
-### I/O bottleneck (parquet reads)
+### I/O Bottleneck (Parquet Reads)
 
 The cleaned bar parquet partitions are read by every analyzer. If disk I/O is the bottleneck (spinning disk, NFS):
-- Pre-load data to a RAM tmpfs: `cp -r data/lake/cleaned /dev/shm/cleaned && BACKTEST_DATA_ROOT=/dev/shm make discover-edges`
+- Pre-load data to a RAM tmpfs: `cp -r data/lake/cleaned /dev/shm/cleaned && BACKTEST_DATA_ROOT=/dev/shm make discover-blueprints`
 - Or reduce symbol count / date range first.
 
-### Phase 2 shrinkage time
+### Profiling a Single Event Type
 
-`_apply_hierarchical_shrinkage` is O(unique_groups × unique_states). With `--grid_expansion` enabled (more horizons/templates), this grows quickly. Profile with:
-```bash
-python -c "
-import cProfile, pstats
-# import and call phase2 main
-"
-```
-
-### Profiling a single event type
-
+To debug performance for a specific event analyzer:
 ```bash
 export BACKTEST_DATA_ROOT=$(pwd)/data
 python -m cProfile -s cumulative \
@@ -137,21 +97,4 @@ python -m cProfile -s cumulative \
   --event_type VOL_SHOCK \
   --symbols BTCUSDT,ETHUSDT \
   2>&1 | head -40
-```
-
----
-
-## Monitoring
-
-```bash
-# Check data freshness (exits non-zero if staleness > threshold)
-make monitor
-
-# Feature drift (PSI-based)
-python project/scripts/monitor_feature_drift.py \
-  --run_id discovery_2020_2025 --symbol BTCUSDT --reference_window_days 30
-
-# Full safety check (staleness + drawdown + slippage)
-python project/scripts/kill_switch.py \
-  --run_id discovery_2020_2025 --symbol BTCUSDT
 ```

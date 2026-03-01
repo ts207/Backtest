@@ -15,17 +15,32 @@ ENABLE_CROSS_VENUE_SPOT_PIPELINE ?= 0
 
 TRACK_NAME ?= research_general
 
-.PHONY: help run baseline discover-edges discover-edges-from-raw discover-hybrid discover-hybrid-backtest test test-fast compile clean-runtime clean-all-data clean-repo debloat check-hygiene clean-hygiene governance update-conductor pre-commit
+.PHONY: help run baseline discover-blueprints discover-edges discover-edges-from-raw discover-hybrid discover-hybrid-backtest test test-fast compile clean-runtime clean-all-data clean-repo debloat check-hygiene clean-hygiene governance update-conductor pre-commit
 
 help:
-	@echo "Targets:"
-	@echo "  run               - ingest+clean+features+context"
-	@echo "  baseline          - run + backtest + report"
-	@echo "  governance        - audit specs and sync schemas"
-	@echo "  update-conductor  - update conductor tracks after a run"
-	@echo "  pre-commit        - run pre-commit quality checks"
-	@echo "  test              - run test suite"
-	@echo "  test-fast         - run fast test profile (exclude slow tests)"
+	@echo "Primary Research Targets:"
+	@echo "  discover-blueprints - Full research pipeline: Ingest -> Discovery -> Blueprints"
+	@echo "  run                - Ingest + Clean + Features (Preparation only)"
+	@echo "  test-fast          - Run fast research test profile"
+	@echo "  governance         - Audit specs and sync schemas"
+	@echo "Legacy / Execution Targets (Note: Use NautilusTrader for production BT):"
+	@echo "  baseline           - Run + Legacy Backtest + Report"
+	@echo "  discover-hybrid    - Discovery + Legacy expectancy/robustness analysis"
+
+discover-blueprints:
+	$(PYTHON) $(RUN_ALL) \
+		--run_id $(RUN_ID) \
+		--symbols $(SYMBOLS) \
+		--start $(START) \
+		--end $(END) \
+		--run_hypothesis_generator 1 \
+		--run_phase2_conditional 1 \
+		--phase2_event_type all \
+		--run_edge_candidate_universe 1 \
+		--run_strategy_blueprint_compiler 1 \
+		--run_strategy_builder 1 \
+		--run_recommendations_checklist 1
+	$(MAKE) update-conductor TRACK_NAME="Discovery: $(RUN_ID)"
 
 run:
 	$(PYTHON) $(RUN_ALL) \

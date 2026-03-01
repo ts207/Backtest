@@ -1,4 +1,4 @@
-# A Non-Technical Beginner's Guide to the Backtest Platform
+# A Non-Technical Beginner's Guide to the Backtest Alpha Discovery Platform
 
 Welcome! If you're looking at this project for the first time and wondering, *"What exactly is this, and what does it do?"* — you're in the right place. 
 
@@ -66,7 +66,7 @@ It calculates complex metrics (like "volatility" or "market depth") and assigns 
 #### Stage 3: Event Detection (The Scan)
 The platform looks at the whole timeline and flags every single instance where one of the 57 Events occurred. It might find that `VOL_SHOCK` happened exactly 312 times in the last 5 years.
 
-#### Stage 4: Phase 2 Discovery (The Interrogation Room)
+#### Stage 4: Discovery (The Interrogation Room)
 This is the heart of the system. The platform takes the detected events and tests thousands of "If/Then" Rules against them. 
 
 Because testing thousands of rules means you'll eventually find one that looks profitable purely by blind luck, the platform uses a powerful statistical filter called **FDR Control (False Discovery Rate)** to filter out the noise.
@@ -75,10 +75,8 @@ It also stress-tests the ideas through strict **Gates** (Rules it must pass):
 - **The Economic Gate & Execution Model:** Does this strategy still make money *after* paying exchange fees and accounting for "slippage" (the hidden cost of placing a large trade)?
 - **The Stability Gate:** Did this strategy only work in 2021, and then completely fail in 2023? If it's not stable across the whole timeline, it's thrown out.
 
-#### Stage 5: Blueprints & Backtesting (The Result)
-The surviving ideas—the cream of the crop—are published as **Strategy Blueprints**. These are final, certified recipes that the system believes are genuinely profitable. 
-
-You can then run a full simulated **Backtest**, which pretends you had a starting bankroll 5 years ago and traded exactly according to these blueprints, step-by-step, producing a report of your final simulated profit.
+#### Stage 5: Strategy Blueprints (The Result)
+The surviving ideas—the cream of the crop—are published as **Strategy Blueprints**. These are final, certified "Alpha DNA" recipes that the system believes are genuinely profitable. 
 
 ---
 
@@ -107,20 +105,16 @@ The platform is controlled using a command terminal. By typing simple commands (
 **1. "Just run the discovery engine on Bitcoin and Ethereum from 2020 to 2025."**
 You type:
 ```bash
-make discover-edges-from-raw RUN_ID=my_first_experiment SYMBOLS=BTCUSDT,ETHUSDT START=2020-06-01 END=2025-07-10
+make discover-blueprints RUN_ID=my_first_experiment SYMBOLS=BTCUSDT,ETHUSDT START=2020-06-01 END=2025-07-10
 ```
-*The orchestrator wakes up, deploys parallel workers to analyze the 57 events, subjects them to the statistical interrogation room, and generates the Blueprints. (This takes about 30-40 minutes on a standard machine).*
+*The orchestrator wakes up, analyzes the 57 events, subjects them to the statistical interrogation room, and generates the Blueprints. (This takes about 30-40 minutes on a standard machine).*
 
 **2. "Show me the top strategies you found."**
 You look at the generated `blueprints.jsonl` file, which gives you clear, plain-English outputs like:
 > "Event: VOL_SHOCK | Horizon: 15m | Rule: Mean Reversion | Expected Profit Per Trade: 0.05%"
 
-**3. "Run a simulated backtest to see how much money that strategy would have made."**
-You type:
-```bash
-make discover-hybrid-backtest RUN_ID=my_first_experiment STRATEGIES=vol_shock_mean_reversion_v1
-```
-*The engine simulates the trades and gives you a report showing the hypothetical profit over the last 5 years.*
+**3. "Now what?"**
+Once you have your Blueprints, you import them into the **NautilusTrader** engine to perform high-resolution backtesting and, ultimately, live trading on real markets.
 
 ---
 
@@ -128,4 +122,4 @@ make discover-hybrid-backtest RUN_ID=my_first_experiment STRATEGIES=vol_shock_me
 
 In short, this project is a "truth machine" for trading ideas. 
 
-It prevents you from betting on flawed human intuition by systematically defining events, testing thousands of combinations against historic data, subjecting them to Ivy-League-level statistics, subtracting the true costs of trading, and giving you only the strategies that survived the gauntlet.
+It prevents you from betting on flawed human intuition by systematically defining events, testing thousands of combinations against historic data, subjecting them to Ivy-League-level statistics, subtracting the true costs of trading, and giving you only the "Alpha DNA" that survived the gauntlet.

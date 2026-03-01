@@ -1,10 +1,10 @@
-# Architecture
+# Research Architecture
 
-Backtest is an event-first, spec-driven quantitative research platform for Binance perpetual and spot markets. The system runs as a sequential pipeline orchestrated by `project/pipelines/run_all.py`, converting raw OHLCV data into statistically validated strategy blueprints.
+Backtest is a specialized **Research & Alpha Discovery** engine for Binance perp/spot data. The system operates as a sequential pipeline, converting raw market data into statistically validated **Strategy Blueprints** for deployment in external execution engines (e.g., NautilusTrader).
 
 ---
 
-## Pipeline overview
+## Research Pipeline
 
 ```
 Raw data (Binance API)
@@ -18,64 +18,48 @@ Raw data (Binance API)
         ▼
 [FEATURES] build_features_v1 → vol regime, carry, microstructure, funding persistence
            build_context_features → cross-symbol correlation, beta, regime context
-           build_market_context   → session, news windows, macro flags
         │
         ▼
 [EVENT REGISTRY] build_event_registry_<EVENT> (57 event types, run in parallel)
         │
         ▼
 [PHASE 2 DISCOVERY] phase2_conditional_hypotheses_<EVENT>
-   → calculate_expectancy_stats per symbol × horizon × rule × state
    → hierarchical shrinkage (family → event → state)
-   → BH-FDR multiplicity control
-   → gate_v1_phase2 promotion/fallback gates
+   → BH-FDR multiplicity control (q ≤ 0.05)
         │
         ▼
-[BRIDGE EVAL] bridge_evaluate_phase2 — OOS window separation + cost stress
+[BRIDGE EVAL] bridge_evaluate_phase2 — Fast cost-stressed tradability stress test
         │
         ▼
-[CANDIDATE PROMOTION] build_strategy_candidates → blueprints.jsonl
+[BLUEPRINT COMPILER] compile_strategy_blueprints → blueprints.jsonl (The Final Artifact)
         │
         ▼
-[BACKTEST] (optional) backtest_strategies → per-strategy PnL via engine/runner.py
-        │
-        ▼
-[WALKFORWARD] (optional) run_walkforward → OOS performance splits
-        │
-        ▼
-[REPORT] make_report → JSON + Markdown summary artifacts
+  (NautilusTrader) → Production Backtesting & Live Execution
 ```
 
 ---
 
-## Module map
+## Module Map
 
 ### `project/pipelines/`
-The orchestration layer. All stages are plain Python subprocesses managed by `run_all.py`.
+The research orchestration layer.
 
 | Path | Responsibility |
 |------|----------------|
-| `run_all.py` | Master orchestrator. Builds stage list, runs them sequentially (analyzers in parallel), writes `run_manifest.json` |
-| `pipelines/stages.py` | Stage builder functions: `build_ingest_stages`, `build_core_stages`, `build_research_stages`, `build_evaluation_stages` |
-| `pipelines/clean/` | OHLCV cleaning, ToB aggregation, basis state construction |
-| `pipelines/features/` | Feature computation: vol regime, microstructure, funding, carry, market context |
-| `pipelines/research/` | Phase 1 & 2 analyzers (one script per event family) |
-| `pipelines/backtest/` | Strategy simulation against cleaned bars |
-| `pipelines/eval/` | Walkforward splits, robustness, microstructure acceptance |
-| `pipelines/alpha_bundle/` | Cross-section signals, momentum, regime filter, orthogonalised factor overlay |
-| `pipelines/_lib/` | Shared utilities: IO, spec loading, stats, BH-FDR, ontology contracts |
+| `run_all.py` | Master orchestrator. Builds stage list and manages parallel workers. |
+| `pipelines/stages/` | Stage builders for Ingest, Core, Research, and Evaluation (Promotion). |
+| `pipelines/research/` | Statistical analyzers and **Blueprint Compiler**. |
+| `pipelines/features/` | Feature computation: vol regime, microstructure, funding, carry. |
+| `pipelines/_lib/` | Shared utilities: BH-FDR, Shrinkage, IO, Ontology contracts. |
 
-### `project/engine/`
-The simulation core, used by `backtest_strategies`.
+### `project/engine/` (Internal Simulator)
+Used for fast "internal" validation only. **High-fidelity backtesting must be performed in NautilusTrader.**
 
 | File | Responsibility |
 |------|----------------|
-| `runner.py` | Strategy runner: merges event features, calls risk allocator, computes PnL |
-| `risk_allocator.py` | `RiskLimits` + `allocate_position_scales` — deterministic 4-layer cap: strategy → symbol → portfolio → max_new_exposure_per_bar |
-| `pnl.py` | `compute_pnl_components` — supports `close` and `next_open` exec modes |
-| `execution_model.py` | Dynamic cost model: spread + volatility + liquidity + participation impact |
-| `kill_switches.py` | Automated halt triggers: data staleness, drawdown, slippage ratio |
-| `monitoring.py` | PSI-based feature drift monitor |
+| `runner.py` | Coarse simulator: merges event features, computes bar-level PnL. |
+| `risk_allocator.py` | Portolio-level gross caps and deterministic scaling. |
+| `execution_model.py` | Dynamic cost model for coarse simulation. |
 
 ### `project/events/`
 - `registry.py` — loads `spec/events/canonical_event_registry.yaml`, exposes `EVENT_REGISTRY_SPECS`

@@ -72,6 +72,14 @@ def build_core_stages(
                 "--force", force_flag,
             ],
         ),
+        (
+            "validate_feature_integrity",
+            project_root / "pipelines" / "clean" / "validate_feature_integrity.py",
+            [
+                "--run_id", run_id,
+                "--symbols", symbols,
+            ],
+        ),
     ])
 
     if run_spot_pipeline:

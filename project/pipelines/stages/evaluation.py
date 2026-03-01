@@ -11,8 +11,13 @@ def build_evaluation_stages(
     project_root: Path,
     data_root: Path,
 ) -> List[Tuple[str, Path, List[str]]]:
+    """
+    Build research-focused evaluation and promotion stages.
+    Primary Goal: Produce validated blueprints.jsonl.
+    """
     stages: List[Tuple[str, Path, List[str]]] = []
 
+    # 1. Blueprint Compilation (The "Final Artifact")
     if int(args.run_strategy_blueprint_compiler):
         promoted_candidates_path = data_root / "reports" / "promotions" / run_id / "promoted_candidates.parquet"
         stages.append(
@@ -33,6 +38,7 @@ def build_evaluation_stages(
             )
         )
 
+    # 2. Strategy Candidate Building (Candidate bundling)
     if int(args.run_strategy_builder):
         stages.append(
             (
@@ -47,72 +53,6 @@ def build_evaluation_stages(
                     "--ignore_checklist", str(int(args.strategy_builder_ignore_checklist)),
                     "--allow_non_promoted", str(int(args.strategy_builder_allow_non_promoted)),
                     "--allow_missing_candidate_detail", str(int(args.strategy_builder_allow_missing_candidate_detail)),
-                ],
-            )
-        )
-
-    if int(args.run_backtest):
-        stages.append(
-            (
-                "backtest_strategies",
-                project_root / "pipelines" / "backtest" / "backtest_strategies.py",
-                [
-                    "--run_id", run_id,
-                    "--symbols", symbols,
-                    "--force", force_flag,
-                    "--clean_engine_artifacts", str(int(args.clean_engine_artifacts)),
-                ],
-            )
-        )
-
-    if int(args.run_walkforward_eval):
-        stages.append(
-            (
-                "run_walkforward",
-                project_root / "pipelines" / "eval" / "run_walkforward.py",
-                [
-                    "--run_id", run_id,
-                    "--symbols", symbols,
-                    "--start", start,
-                    "--end", end,
-                    "--embargo_days", str(int(args.walkforward_embargo_days)),
-                    "--train_frac", str(float(args.walkforward_train_frac)),
-                    "--validation_frac", str(float(args.walkforward_validation_frac)),
-                    "--regime_max_share", str(float(args.walkforward_regime_max_share)),
-                    "--drawdown_cluster_top_frac", str(float(args.walkforward_drawdown_cluster_top_frac)),
-                    "--drawdown_tail_q", str(float(args.walkforward_drawdown_tail_q)),
-                    "--allow_unexpected_strategy_files", str(int(args.walkforward_allow_unexpected_strategy_files)),
-                    "--clean_engine_artifacts", str(int(args.clean_engine_artifacts)),
-                    "--force", force_flag,
-                ],
-            )
-        )
-
-    if int(args.run_backtest) and int(args.run_blueprint_promotion):
-        stages.append(
-            (
-                "promote_blueprints",
-                project_root / "pipelines" / "research" / "promote_blueprints.py",
-                [
-                    "--run_id", run_id,
-                    "--allow_fallback_evidence", str(int(args.promotion_allow_fallback_evidence)),
-                    "--regime_max_share", str(float(args.promotion_regime_max_share)),
-                    "--max_loss_cluster_len", str(int(args.promotion_max_loss_cluster_len)),
-                    "--max_cluster_loss_concentration", str(float(args.promotion_max_cluster_loss_concentration)),
-                    "--min_tail_conditional_drawdown_95", str(float(args.promotion_min_tail_conditional_drawdown_95)),
-                    "--max_cost_ratio_train_validation", str(float(args.promotion_max_cost_ratio_train_validation)),
-                ],
-            )
-        )
-
-    if int(args.run_make_report) or int(args.run_backtest):
-        stages.append(
-            (
-                "make_report",
-                project_root / "pipelines" / "report" / "make_report.py",
-                [
-                    "--run_id", run_id,
-                    "--allow_backtest_artifact_fallback", str(int(args.report_allow_backtest_artifact_fallback)),
                 ],
             )
         )
