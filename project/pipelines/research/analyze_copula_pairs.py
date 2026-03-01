@@ -12,7 +12,8 @@ import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
+REPO_ROOT = PROJECT_ROOT.parent
+DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", REPO_ROOT / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.io_utils import (
@@ -132,16 +133,54 @@ def detect_copula_events(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Phase-1 analyzer for Copula Pairs Trading events")
     parser.add_argument("--run_id", required=True)
-    parser.add_argument("--pairs", required=True, help="Comma-separated pairs (e.g. BTCUSDT:ETHUSDT)")
-    parser.add_argument("--symbols", default=None, help="Ignored; use --pairs instead")
+    parser.add_argument(
+        "--pairs",
+        default="",
+        help="Comma-separated pairs (e.g. BTCUSDT:ETHUSDT). Overrides --pairs_spec when provided.",
+    )
+    parser.add_argument(
+        "--pairs_spec",
+        default="",
+        help="Path to CSV with columns symbol_a,symbol_b. Defaults to spec/copula_pairs.csv next to repo root.",
+    )
+    parser.add_argument("--symbols", default=None, help="Ignored; use --pairs or --pairs_spec instead")
     parser.add_argument("--alpha1", type=float, default=0.05)
     parser.add_argument("--alpha2", type=float, default=0.95)
     parser.add_argument("--timeframe", default="5m")
     parser.add_argument("--out_dir", default=None)
     args = parser.parse_args()
-    
+
     run_id = args.run_id
-    pair_list = [p.strip() for p in args.pairs.split(",") if ":" in p]
+
+    # Resolve pair list: explicit --pairs flag takes precedence over spec file.
+    raw_pairs_arg = str(args.pairs).strip()
+    if raw_pairs_arg:
+        pair_list = [p.strip() for p in raw_pairs_arg.split(",") if ":" in p]
+    else:
+        # Resolve spec path: --pairs_spec flag or repo-root default.
+        spec_path_arg = str(args.pairs_spec).strip()
+        if spec_path_arg:
+            spec_path = Path(spec_path_arg)
+        else:
+            spec_path = REPO_ROOT / "spec" / "copula_pairs.csv"
+        if not spec_path.exists():
+            logging.error("Copula pairs spec not found: %s", spec_path)
+            return 1
+        try:
+            import pandas as _pd
+            spec_df = _pd.read_csv(spec_path)
+            pair_list = [
+                f"{str(row['symbol_a']).strip().upper()}:{str(row['symbol_b']).strip().upper()}"
+                for _, row in spec_df.iterrows()
+                if str(row.get('symbol_a', '')).strip() and str(row.get('symbol_b', '')).strip()
+            ]
+        except Exception as exc:
+            logging.error("Failed to read copula pairs spec %s: %s", spec_path, exc)
+            return 1
+        if not pair_list:
+            logging.error("No valid pairs found in %s", spec_path)
+            return 1
+
     out_dir = Path(args.out_dir) if args.out_dir else DATA_ROOT / "reports" / "copula_pairs" / run_id
     ensure_dir(out_dir)
     

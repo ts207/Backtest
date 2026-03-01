@@ -62,7 +62,7 @@ PHASE2_EVENT_CHAIN: List[Tuple[str, str, List[str]]] = [
     ('SPREAD_REGIME_WIDENING_EVENT', 'analyze_execution_friction_events.py', ['--event_type', 'SPREAD_REGIME_WIDENING_EVENT', '--timeframe', '5m']),
     ('SLIPPAGE_SPIKE_EVENT', 'analyze_execution_friction_events.py', ['--event_type', 'SLIPPAGE_SPIKE_EVENT', '--timeframe', '5m']),
     ('FEE_REGIME_CHANGE_EVENT', 'analyze_execution_friction_events.py', ['--event_type', 'FEE_REGIME_CHANGE_EVENT', '--timeframe', '5m']),
-    ('COPULA_PAIRS_TRADING', 'analyze_copula_pairs.py', ['--pairs', 'BTCUSDT:ETHUSDT']),
+    ('COPULA_PAIRS_TRADING', 'analyze_copula_pairs.py', []),
     ('FND_DISLOC', 'analyze_funding_dislocation.py', ['--timeframe', '5m']),
     ('BASIS_DISLOC', 'analyze_basis_dislocation.py', ['--timeframe', '5m']),
 ]

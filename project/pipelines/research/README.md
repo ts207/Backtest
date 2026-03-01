@@ -36,4 +36,4 @@ Flags include both:
 
 ## Notes on Legacy Files
 
-`phase2_conditional_hypotheses.py` remains as legacy/refactor scaffolding and is not the orchestrated Phase2 entrypoint in current `run_all.py`.
+`archive/phase2_conditional_hypotheses.py` has been moved to `archive/` as legacy/refactor scaffolding and is not the orchestrated Phase2 entrypoint in current `run_all.py`.

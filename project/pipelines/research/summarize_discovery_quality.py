@@ -121,6 +121,7 @@ def _family_defaults() -> Dict[str, object]:
         "phase2_gate_all_pass": 0,
         "bridge_evaluable": 0,
         "bridge_pass_val": 0,
+        "overlay_kill_by_missing_base_count": 0,
         "compiled_bases": 0,
         "compiled_overlays": 0,
         "wf_tested": 0,
@@ -178,6 +179,17 @@ def build_summary(*, run_id: str, phase2_root: Path, top_fail_reasons: int) -> d
             family_row["bridge_evaluable"] = int(eval_mask.sum())
             if "gate_bridge_tradable" in bridge_df.columns:
                 family_row["bridge_pass_val"] = int(pd.to_numeric(bridge_df["gate_bridge_tradable"], errors="coerce").fillna(0.0).astype(float).gt(0).sum())
+            # Count overlays killed due to missing base candidate.
+            if "bridge_fail_reasons" in bridge_df.columns:
+                missing_base_mask = bridge_df["bridge_fail_reasons"].astype(str).str.contains(
+                    "gate_bridge_missing_overlay_base", regex=False, na=False
+                )
+                family_row["overlay_kill_by_missing_base_count"] = int(missing_base_mask.sum())
+            elif "bridge_eval_status" in bridge_df.columns:
+                missing_base_mask = bridge_df["bridge_eval_status"].astype(str).str.contains(
+                    "missing_overlay_base", regex=False, na=False
+                )
+                family_row["overlay_kill_by_missing_base_count"] = int(missing_base_mask.sum())
             bridge_reasons = _split_fail_reasons(bridge_df.get("bridge_fail_reasons", pd.Series(dtype=str)))
             family_fail_counter[family].update(bridge_reasons)
             global_fail_counter.update(bridge_reasons)
@@ -279,6 +291,7 @@ def _build_funnel_payload(summary: Dict[str, object], *, top_fail_reasons: int) 
         "phase2_gate_all_pass": 0,
         "bridge_evaluable": 0,
         "bridge_pass_val": 0,
+        "overlay_kill_by_missing_base_count": 0,
         "compiled_bases": 0,
         "compiled_overlays": 0,
         "wf_tested": 0,
@@ -295,6 +308,7 @@ def _build_funnel_payload(summary: Dict[str, object], *, top_fail_reasons: int) 
             "phase2_gate_all_pass": int(row.get("phase2_gate_all_pass", 0) or 0),
             "bridge_evaluable": int(row.get("bridge_evaluable", 0) or 0),
             "bridge_pass_val": int(row.get("bridge_pass_val", 0) or 0),
+            "overlay_kill_by_missing_base_count": int(row.get("overlay_kill_by_missing_base_count", 0) or 0),
             "compiled_bases": int(row.get("compiled_bases", 0) or 0),
             "compiled_overlays": int(row.get("compiled_overlays", 0) or 0),
             "wf_tested": int(row.get("wf_tested", 0) or 0),

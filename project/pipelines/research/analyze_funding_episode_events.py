@@ -1,3 +1,29 @@
+"""
+Funding Episode Event Analyzer.
+
+Structure-only analysis of funding-rate dynamics. Produces event catalogues,
+matched-baseline comparisons, hazard curves, and phase-boundary stability reports.
+No directional signal is extracted — this module characterises the *structure* of
+funding extremes so that downstream Phase 2 can condition on the structural environment.
+
+Event Types
+-----------
+FUNDING_EXTREME_ONSET
+    Triggered when the rolling percentile of ``|funding_rate_scaled|`` first crosses
+    above ``--extreme_pct`` (default 95).  Marks the *beginning* of a high-funding
+    regime.
+
+FUNDING_PERSISTENCE_TRIGGER
+    Fires when ``|funding_rate|`` remains above ``--persistence_pct`` for at least
+    ``--persistence_bars`` consecutive 5-minute bars.  Captures episodes where
+    high funding is sustained — the primary structural primitive for Phase 2.
+
+FUNDING_NORMALIZATION_TRIGGER
+    Triggers when the funding percentile falls back below ``--normalization_pct``
+    after a prior extreme.  Characterises the *tail-end* of a funding episode,
+    useful for mean-reversion conditioning.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -918,6 +944,100 @@ def _interaction_stability(
     return pd.DataFrame(coef_rows), pd.DataFrame(stability_rows)
 
 
+
+def _process_symbol_events(
+    symbol: str,
+    df: pd.DataFrame,
+    args: argparse.Namespace,
+    rng: np.random.Generator,
+    idx_map: Dict[str, List[int]],
+    vol_burst_threshold: float,
+) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
+    """Detect events for a single symbol and sample matched baselines.
+
+    Returns (event_rows, baseline_rows).
+    """
+    all_indices = sorted({i for indices in idx_map.values() for i in indices})
+    blocked = _build_blocked_mask(len(df), all_indices, args.event_lookahead)
+    candidate_mask = (~blocked) & df["vol_q"].notna() & (np.arange(len(df)) + args.event_lookahead < len(df))
+    candidate_df = (
+        df.loc[candidate_mask, ["tod_slot", "vol_q"]]
+        .copy()
+        .assign(idx=np.flatnonzero(candidate_mask))
+    )
+
+    event_rows: List[Dict[str, object]] = []
+    baseline_rows: List[Dict[str, object]] = []
+
+    for event_type, indices in idx_map.items():
+        for idx in indices:
+            metrics = _event_metrics(
+                df=df,
+                idx=idx,
+                vol_burst_threshold=vol_burst_threshold,
+                event_lookahead=args.event_lookahead,
+                liquidation_abs_return=args.liquidation_abs_return,
+                drawdown_abs_return=args.drawdown_abs_return,
+                normalization_pct=args.normalization_pct,
+                pre_window=args.pre_window,
+                post_window=args.post_window,
+            )
+            if not metrics:
+                continue
+
+            event_rows.append(
+                {
+                    "symbol": symbol,
+                    "event_type": event_type,
+                    "event_idx": int(idx),
+                    "timestamp": df.at[idx, "timestamp"].isoformat(),
+                    "bull_bear": str(df.at[idx, "bull_bear"]),
+                    "vol_regime": str(df.at[idx, "vol_regime"]),
+                    "funding_rate_scaled": _safe_float(df.at[idx, "funding_rate_scaled"]),
+                    "funding_abs_pct": _safe_float(df.at[idx, "funding_abs_pct"]),
+                    **metrics,
+                }
+            )
+            sampled = _sample_controls_for_event(
+                candidate_df=candidate_df,
+                vol_q=str(df.at[idx, "vol_q"]) if pd.notna(df.at[idx, "vol_q"]) else "na",
+                tod_slot=int(df.at[idx, "tod_slot"]),
+                n_samples=args.baseline_samples_per_event,
+                rng=rng,
+            )
+            for ctrl_idx in sampled:
+                ctrl_metrics = _event_metrics(
+                    df=df,
+                    idx=int(ctrl_idx),
+                    vol_burst_threshold=vol_burst_threshold,
+                    event_lookahead=args.event_lookahead,
+                    liquidation_abs_return=args.liquidation_abs_return,
+                    drawdown_abs_return=args.drawdown_abs_return,
+                    normalization_pct=args.normalization_pct,
+                    pre_window=args.pre_window,
+                    post_window=args.post_window,
+                )
+                if not ctrl_metrics:
+                    continue
+                baseline_rows.append(
+                    {
+                        "symbol": symbol,
+                        "event_type": event_type,
+                        "event_idx": int(ctrl_idx),
+                        "matched_event_idx": int(idx),
+                        "control_idx": int(ctrl_idx),
+                        "timestamp": df.at[int(ctrl_idx), "timestamp"].isoformat(),
+                        "bull_bear": str(df.at[int(ctrl_idx), "bull_bear"]),
+                        "vol_regime": str(df.at[int(ctrl_idx), "vol_regime"]),
+                        "funding_rate_scaled": _safe_float(df.at[int(ctrl_idx), "funding_rate_scaled"]),
+                        "funding_abs_pct": _safe_float(df.at[int(ctrl_idx), "funding_abs_pct"]),
+                        **ctrl_metrics,
+                    }
+                )
+
+    return event_rows, baseline_rows
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Analyze funding episode events (structure only, no direction)")
     parser.add_argument("--run_id", required=True)
@@ -1027,80 +1147,16 @@ def main() -> int:
             normalization_lookback=args.normalization_lookback,
             min_event_spacing=args.min_event_spacing,
         )
-        all_indices = sorted({i for indices in idx_map.values() for i in indices})
-        blocked = _build_blocked_mask(len(df), all_indices, args.event_lookahead)
-        candidate_mask = (~blocked) & df["vol_q"].notna() & (np.arange(len(df)) + args.event_lookahead < len(df))
-        candidate_df = (
-            df.loc[candidate_mask, ["tod_slot", "vol_q"]]
-            .copy()
-            .assign(idx=np.flatnonzero(candidate_mask))
+        sym_events, sym_baselines = _process_symbol_events(
+            symbol=symbol,
+            df=df,
+            args=args,
+            rng=rng,
+            idx_map=idx_map,
+            vol_burst_threshold=vol_burst_threshold,
         )
-
-        for event_type, indices in idx_map.items():
-            for idx in indices:
-                metrics = _event_metrics(
-                    df=df,
-                    idx=idx,
-                    vol_burst_threshold=vol_burst_threshold,
-                    event_lookahead=args.event_lookahead,
-                    liquidation_abs_return=args.liquidation_abs_return,
-                    drawdown_abs_return=args.drawdown_abs_return,
-                    normalization_pct=args.normalization_pct,
-                    pre_window=args.pre_window,
-                    post_window=args.post_window,
-                )
-                if not metrics:
-                    continue
-
-                all_event_rows.append(
-                    {
-                        "symbol": symbol,
-                        "event_type": event_type,
-                        "event_idx": int(idx),
-                        "timestamp": df.at[idx, "timestamp"].isoformat(),
-                        "bull_bear": str(df.at[idx, "bull_bear"]),
-                        "vol_regime": str(df.at[idx, "vol_regime"]),
-                        "funding_rate_scaled": _safe_float(df.at[idx, "funding_rate_scaled"]),
-                        "funding_abs_pct": _safe_float(df.at[idx, "funding_abs_pct"]),
-                        **metrics,
-                    }
-                )
-                sampled = _sample_controls_for_event(
-                    candidate_df=candidate_df,
-                    vol_q=str(df.at[idx, "vol_q"]) if pd.notna(df.at[idx, "vol_q"]) else "na",
-                    tod_slot=int(df.at[idx, "tod_slot"]),
-                    n_samples=args.baseline_samples_per_event,
-                    rng=rng,
-                )
-                for ctrl_idx in sampled:
-                    ctrl_metrics = _event_metrics(
-                        df=df,
-                        idx=int(ctrl_idx),
-                        vol_burst_threshold=vol_burst_threshold,
-                        event_lookahead=args.event_lookahead,
-                        liquidation_abs_return=args.liquidation_abs_return,
-                        drawdown_abs_return=args.drawdown_abs_return,
-                        normalization_pct=args.normalization_pct,
-                        pre_window=args.pre_window,
-                        post_window=args.post_window,
-                    )
-                    if not ctrl_metrics:
-                        continue
-                    all_baseline_rows.append(
-                        {
-                            "symbol": symbol,
-                            "event_type": event_type,
-                            "event_idx": int(ctrl_idx),
-                            "matched_event_idx": int(idx),
-                            "control_idx": int(ctrl_idx),
-                            "timestamp": df.at[int(ctrl_idx), "timestamp"].isoformat(),
-                            "bull_bear": str(df.at[int(ctrl_idx), "bull_bear"]),
-                            "vol_regime": str(df.at[int(ctrl_idx), "vol_regime"]),
-                            "funding_rate_scaled": _safe_float(df.at[int(ctrl_idx), "funding_rate_scaled"]),
-                            "funding_abs_pct": _safe_float(df.at[int(ctrl_idx), "funding_abs_pct"]),
-                            **ctrl_metrics,
-                        }
-                    )
+        all_event_rows.extend(sym_events)
+        all_baseline_rows.extend(sym_baselines)
 
     events_df = pd.DataFrame(all_event_rows)
     if events_df.empty:
