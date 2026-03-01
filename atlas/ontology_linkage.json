@@ -7,18 +7,18 @@
   },
   "counts": {
     "event_claims_skipped_unimplemented": 0,
-    "event_templates_total": 0,
-    "event_templates_unknown_ontology": 0,
-    "events_in_canonical_registry": 0,
-    "events_in_implemented_contract": 0,
-    "events_in_taxonomy": 0,
-    "events_total": 0,
+    "event_templates_total": 57,
+    "event_templates_unknown_ontology": 4,
+    "events_in_canonical_registry": 53,
+    "events_in_implemented_contract": 57,
+    "events_in_taxonomy": 54,
+    "events_total": 57,
     "feature_templates_total": 0,
     "implemented_event_types_total": 57,
     "planned_candidates_total": 0,
     "states_linked_total": 53,
     "states_total": 53,
-    "templates_total": 0,
+    "templates_total": 57,
     "unknown_templates_total": 0
   },
   "implementation_contract": {
@@ -200,7 +200,12 @@
   "unresolved": {
     "canonical_unimplemented_nonplanned": [],
     "declared_implemented_missing_in_registry": [],
-    "events_missing_in_canonical_registry": [],
+    "events_missing_in_canonical_registry": [
+      "BASIS_DISLOC",
+      "COPULA_PAIRS_TRADING",
+      "FND_DISLOC",
+      "LIQUIDITY_SHOCK"
+    ],
     "planned_unimplemented_events": [],
     "skipped_event_claims": [],
     "state_registry_validation_issues": [],

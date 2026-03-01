@@ -555,10 +555,8 @@ def main() -> int:
         # Atomic writes for canonical artifacts
         updated_canonical = ensure_candidate_schema(updated)
         
-        # Save Parquet first
-        tmp_parquet = phase2_candidates_path.with_suffix(".parquet.tmp")
-        updated_canonical.to_parquet(tmp_parquet, index=False)
-        tmp_parquet.replace(phase2_candidates_path.with_suffix(".parquet"))
+        # Save parquet (falls back to CSV when pyarrow is unavailable)
+        write_parquet(updated_canonical, phase2_candidates_path.with_suffix(".parquet"))
         
         # Save CSV second
         tmp_csv = phase2_candidates_path.with_suffix(".csv.tmp")

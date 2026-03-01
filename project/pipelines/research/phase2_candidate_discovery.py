@@ -24,6 +24,8 @@ from pipelines._lib.io_utils import (
     ensure_dir,
     read_parquet,
     list_parquet_files,
+    write_parquet,
+    HAS_PYARROW,
     run_scoped_lake_path,
     choose_partition_dir,
 )
@@ -1045,16 +1047,33 @@ def _validate_candidate_plan_ontology(
 
 
 def _read_csv_or_parquet(path: Path) -> pd.DataFrame:
-    """Read a table from CSV or Parquet, tolerating misnamed suffixes."""
+    """Read a table from CSV or Parquet.
+
+    - If parquet engines are unavailable, fall back to a same-stem .csv.
+    - If the given path does not exist, try the alternate suffix.
+    """
+
     if not path.exists():
-        return pd.DataFrame()
+        alt = path.with_suffix(".csv") if path.suffix.lower() == ".parquet" else path.with_suffix(".parquet")
+        return _read_csv_or_parquet(alt) if alt.exists() else pd.DataFrame()
+
     try:
-        if path.suffix.lower() == ".parquet":
-            return pd.read_parquet(path)
+        suffix = path.suffix.lower()
+        if suffix == ".csv":
+            return pd.read_csv(path)
+        if suffix == ".parquet":
+            if HAS_PYARROW:
+                return pd.read_parquet(path)
+            alt = path.with_suffix(".csv")
+            return pd.read_csv(alt) if alt.exists() else pd.DataFrame()
+
+        # Unknown suffix: try CSV first, then parquet if available.
         try:
             return pd.read_csv(path)
         except Exception:
-            return pd.read_parquet(path)
+            if HAS_PYARROW:
+                return pd.read_parquet(path)
+            return pd.DataFrame()
     except Exception:
         return pd.DataFrame()
 
@@ -1370,7 +1389,7 @@ def main():
                 
                 if ms_path.exists():
                     try:
-                        ms_df = pd.read_parquet(ms_path)
+                        ms_df = _read_csv_or_parquet(ms_path) if ms_path.exists() else _read_csv_or_parquet(ms_path.with_suffix(".csv"))
                         if "timestamp" in ms_df.columns:
                             ms_df["timestamp"] = pd.to_datetime(ms_df["timestamp"], utc=True, errors="coerce")
                             if "symbol" in ms_df.columns:
@@ -2143,7 +2162,7 @@ def main():
         ensure_dir(reports_root)
         with open(reports_root / "phase2_generation_diagnostics.json", "w", encoding="utf-8") as f:
             json.dump(generation_diagnostics, f, indent=2, sort_keys=True)
-        pd.DataFrame(columns=PRIMARY_OUTPUT_COLUMNS).to_parquet(reports_root / "phase2_candidates_raw.parquet", index=False)
+        write_parquet(pd.DataFrame(columns=PRIMARY_OUTPUT_COLUMNS), reports_root / "phase2_candidates_raw.parquet")
         pd.DataFrame(columns=PRIMARY_OUTPUT_COLUMNS).to_csv(reports_root / "phase2_candidates.csv", index=False)
         finalize_manifest(
             manifest,
@@ -2281,18 +2300,20 @@ def main():
     _write_gate_summary(fdr_df, reports_root / "gate_summary.json")
 
     # Canonical outputs
-    fdr_df.to_parquet(reports_root / "phase2_candidates_raw.parquet", index=False)
+    write_parquet(fdr_df, reports_root / "phase2_candidates_raw.parquet")
     
     canonical_df = ensure_candidate_schema(fdr_df)
-    canonical_df.to_parquet(reports_root / "phase2_candidates.parquet", index=False)
+    write_parquet(canonical_df, reports_root / "phase2_candidates.parquet")
     canonical_df.to_csv(reports_root / "phase2_candidates.csv", index=False)
 
-    fdr_df[["candidate_id", "family_id", "p_value", "sign"]].to_parquet(
-        reports_root / "phase2_pvals.parquet", index=False
+    write_parquet(
+        fdr_df[["candidate_id", "family_id", "p_value", "sign"]],
+        reports_root / "phase2_pvals.parquet",
     )
 
-    fdr_df[["candidate_id", "q_value", "is_discovery"]].to_parquet(
-        reports_root / "phase2_fdr.parquet", index=False
+    write_parquet(
+        fdr_df[["candidate_id", "q_value", "is_discovery"]],
+        reports_root / "phase2_fdr.parquet",
     )
 
     diagnostics_cols = [
@@ -2320,11 +2341,11 @@ def main():
         "shrinkage_adjustment_abs",
     ]
     diag_df = fdr_df[[c for c in diagnostics_cols if c in fdr_df.columns]].copy()
-    diag_df.to_parquet(reports_root / "phase2_shrinkage_diagnostics.parquet", index=False)
+    write_parquet(diag_df, reports_root / "phase2_shrinkage_diagnostics.parquet")
     diag_df.to_csv(reports_root / "phase2_shrinkage_diagnostics.csv", index=False)
 
     lambda_snapshot_df = _build_lambda_snapshot(fdr_df)
-    lambda_snapshot_df.to_parquet(reports_root / "phase2_lambda_snapshot.parquet", index=False)
+    write_parquet(lambda_snapshot_df, reports_root / "phase2_lambda_snapshot.parquet")
     lambda_snapshot_df.to_csv(reports_root / "phase2_lambda_snapshot.csv", index=False)
     save_lambda_state_json(
         fdr_df,

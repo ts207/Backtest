@@ -12,6 +12,26 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2] / "project"
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from pipelines._lib.io_utils import HAS_PYARROW, write_parquet
+
+
+def _read_table(path: Path) -> pd.DataFrame:
+    """Read a parquet/csv table, tolerating parquet engine absence."""
+    if path.exists():
+        if path.suffix.lower() == ".csv":
+            return pd.read_csv(path)
+        if HAS_PYARROW:
+            return pd.read_parquet(path)
+        alt = path.with_suffix(".csv")
+        if alt.exists():
+            return pd.read_csv(alt)
+        raise ImportError("pyarrow/fastparquet required to read parquet")
+    # Try alternate suffix.
+    alt = path.with_suffix(".csv") if path.suffix.lower() == ".parquet" else path.with_suffix(".parquet")
+    if alt.exists():
+        return _read_table(alt)
+    return pd.DataFrame()
+
 @pytest.fixture
 def mock_data_root(tmp_path):
     """
@@ -46,26 +66,26 @@ def mock_data_root(tmp_path):
             "is_gap": False,
         })
         
-        df.to_parquet(feat_dir / "slice.parquet", index=False)
-        df[["timestamp", "open", "high", "low", "close", "volume", "quote_volume", "is_gap"]].to_parquet(bar_dir / "slice.parquet", index=False)
+        write_parquet(df, feat_dir / "slice.parquet")
+        write_parquet(df[["timestamp", "open", "high", "low", "close", "volume", "quote_volume", "is_gap"]], bar_dir / "slice.parquet")
 
         # 2. Market state
         ms_dir = data_root / "lake" / "context" / "market_state" / sym
         ms_dir.mkdir(parents=True)
-        pd.DataFrame({
+        write_parquet(pd.DataFrame({
             "timestamp": timestamps,
             "vol_regime_code": [0] * n_bars,
             "vol_regime": ["high"] * n_bars,
-        }).to_parquet(ms_dir / "5m.parquet")
+        }), ms_dir / "5m.parquet")
 
     # 3. Universe
     univ_dir = data_root / "lake" / "metadata" / "universe_snapshots"
     univ_dir.mkdir(parents=True)
-    pd.DataFrame({
+    write_parquet(pd.DataFrame({
         "symbol": symbols,
         "listing_start": [pd.Timestamp("2020-01-01", tz="UTC")] * len(symbols),
         "listing_end": [pd.Timestamp("2025-01-01", tz="UTC")] * len(symbols)
-    }).to_parquet(univ_dir / "univ.parquet")
+    }), univ_dir / "univ.parquet")
     
     # 4. Mock fees
     (data_root / "lake" / "metadata").mkdir(parents=True, exist_ok=True)
@@ -107,12 +127,25 @@ import os
 PROJECT_ROOT = Path("{PROJECT_ROOT}")
 sys.path.insert(0, str(PROJECT_ROOT))
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
+from pipelines._lib.io_utils import HAS_PYARROW, write_parquet
+
+
+def _read_table(path: Path) -> pd.DataFrame:
+    if path.exists() and path.suffix.lower() == ".csv":
+        return pd.read_csv(path)
+    if path.exists() and path.suffix.lower() == ".parquet" and HAS_PYARROW:
+        return pd.read_parquet(path)
+    if path.with_suffix(".csv").exists():
+        return pd.read_csv(path.with_suffix(".csv"))
+    if path.with_suffix(".parquet").exists() and HAS_PYARROW:
+        return pd.read_parquet(path.with_suffix(".parquet"))
+    return pd.DataFrame()
 
 def main():
     data_root = Path(os.getenv("BACKTEST_DATA_ROOT"))
     run_id = "test_contract_complex"
     feat_path = data_root / "lake" / "features" / "perp" / "BTCUSDT" / "5m" / "features_v1" / "slice.parquet"
-    df = pd.read_parquet(feat_path)
+    df = _read_table(feat_path)
     
     events = []
     # Event 1: LIQUIDITY_VACUUM
@@ -139,7 +172,7 @@ def main():
     events_df = pd.DataFrame(events)
     out_dir = data_root / "reports" / "liquidity_vacuum" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
-    events_df.to_parquet(out_dir / "liquidity_vacuum_events.parquet")
+    write_parquet(events_df, out_dir / "liquidity_vacuum_events.parquet")
     
     manifest = start_manifest("custom_multi", run_id, {{}}, [], [])
     finalize_manifest(manifest, "success", stats={{}})
@@ -157,7 +190,7 @@ if __name__ == "__main__":
     res = run_script(registry_script, ["--run_id", run_id, "--symbols", symbols, "--event_type", "LIQUIDITY_VACUUM"], mock_data_root)
     assert res.returncode == 0
     
-    df_reg = pd.read_parquet(mock_data_root / "events" / run_id / "events.parquet")
+    df_reg = _read_table(mock_data_root / "events" / run_id / "events.parquet")
     assert (df_reg["event_type"] == "LIQUIDITY_VACUUM").all()
     assert "direction" in df_reg.columns
     
@@ -188,7 +221,7 @@ if __name__ == "__main__":
         ]
         out_dir = mock_data_root / "reports" / "liquidity_vacuum" / rid
         out_dir.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(events).to_parquet(out_dir / "liquidity_vacuum_events.parquet")
+        write_parquet(pd.DataFrame(events), out_dir / "liquidity_vacuum_events.parquet")
         
         run_script(registry_script, ["--run_id", rid, "--symbols", symbols, "--event_type", "LIQUIDITY_VACUUM"], mock_data_root)
         
@@ -204,7 +237,7 @@ if __name__ == "__main__":
         ], mock_data_root)
         assert res_p2.returncode == 0
         
-        df = pd.read_parquet(mock_data_root / "reports" / "phase2" / rid / "LIQUIDITY_VACUUM" / "phase2_candidates_raw.parquet")
+        df = _read_table(mock_data_root / "reports" / "phase2" / rid / "LIQUIDITY_VACUUM" / "phase2_candidates_raw.parquet")
         return df[df["rule_template"] == "continuation"]["expectancy"].iloc[0]
 
     exp_pos = run_directional_test(1.0, "pos")
@@ -254,7 +287,7 @@ def test_e2e_artifact_contract_deterministic(mock_data_root, tmp_path):
     ]
     out_dir = mock_data_root / "reports" / "liquidity_vacuum" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(events).to_parquet(out_dir / "liquidity_vacuum_events.parquet")
+    write_parquet(pd.DataFrame(events), out_dir / "liquidity_vacuum_events.parquet")
 
     # 1. Build Registry
     res = run_script(registry_script, ["--run_id", run_id, "--symbols", symbols, "--event_type", "LIQUIDITY_VACUUM"], mock_data_root)
@@ -300,8 +333,10 @@ def test_e2e_artifact_contract_deterministic(mock_data_root, tmp_path):
     assert res.returncode == 0
     
     promoted_path = mock_data_root / "reports" / "promotions" / run_id / "promoted_candidates.parquet"
+    if not promoted_path.exists():
+        promoted_path = promoted_path.with_suffix(".csv")
     assert promoted_path.exists()
-    df_promoted = pd.read_parquet(promoted_path)
+    df_promoted = _read_table(promoted_path)
     assert not df_promoted.empty
     
     # ASSERT: Authoritative OOS Split usage

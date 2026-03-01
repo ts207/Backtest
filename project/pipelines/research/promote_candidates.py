@@ -15,7 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from pipelines._lib.io_utils import ensure_dir
+from pipelines._lib.io_utils import ensure_dir, HAS_PYARROW, write_parquet
 from pipelines._lib.ontology_contract import load_run_manifest_hashes
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from research.candidate_schema import ensure_candidate_schema
@@ -166,6 +166,38 @@ def _as_bool(value: object) -> bool:
     return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "on"}
 
 
+def _read_csv_or_parquet(path: Path) -> pd.DataFrame:
+    """Read CSV or Parquet, falling back to CSV when parquet engines are absent."""
+    if path.exists():
+        if path.suffix.lower() == ".csv":
+            try:
+                return pd.read_csv(path)
+            except Exception:
+                return pd.DataFrame()
+        if path.suffix.lower() == ".parquet":
+            if HAS_PYARROW:
+                try:
+                    return pd.read_parquet(path)
+                except Exception:
+                    return pd.DataFrame()
+            alt = path.with_suffix(".csv")
+            try:
+                return pd.read_csv(alt) if alt.exists() else pd.DataFrame()
+            except Exception:
+                return pd.DataFrame()
+        try:
+            return pd.read_csv(path)
+        except Exception:
+            if HAS_PYARROW:
+                try:
+                    return pd.read_parquet(path)
+                except Exception:
+                    return pd.DataFrame()
+            return pd.DataFrame()
+    alt = path.with_suffix(".csv") if path.suffix.lower() == ".parquet" else path.with_suffix(".parquet")
+    return _read_csv_or_parquet(alt) if alt.exists() else pd.DataFrame()
+
+
 def _load_phase2_candidates(phase2_root: Path, run_id: str | None = None) -> pd.DataFrame:
     rows: List[pd.DataFrame] = []
     if not phase2_root.exists():
@@ -189,16 +221,15 @@ def _load_phase2_candidates(phase2_root: Path, run_id: str | None = None) -> pd.
         df = pd.DataFrame()
         source_path = ""
         
-        # Try primary filtered first, then raw fallback
-        for path in [parquet_path, raw_path]:
-            if path.exists():
-                try:
-                    df = pd.read_parquet(path)
-                    source_path = str(path)
-                    print(f"DEBUG: Found {len(df)} candidates in {path}")
-                    break
-                except Exception as e:
-                    logging.warning(f"Failed to read {path}: {e}")
+        # Try primary filtered first, then raw fallback (parquet or csv)
+        for path in [parquet_path, parquet_path.with_suffix(".csv"), raw_path, raw_path.with_suffix(".csv")]:
+            if not path.exists():
+                continue
+            df = _read_csv_or_parquet(path)
+            if not df.empty:
+                source_path = str(path)
+                print(f"DEBUG: Found {len(df)} candidates in {path}")
+                break
                 
         if df.empty:
             continue
@@ -231,14 +262,7 @@ def _load_phase2_candidates(phase2_root: Path, run_id: str | None = None) -> pd.
 def _load_hypothesis_audit(path: Path) -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
-    try:
-        if path.suffix == ".parquet":
-            df = pd.read_parquet(path)
-        else:
-            logging.warning(f"Expected .parquet for hypothesis audit, got {path.suffix}")
-            return pd.DataFrame()
-    except Exception:
-        return pd.DataFrame()
+    df = _read_csv_or_parquet(path)
     if df.empty:
         return pd.DataFrame()
     if "plan_row_id" not in df.columns or "status" not in df.columns:
@@ -663,17 +687,11 @@ def main() -> int:
                     audit_df.loc[audit_idx, "reject_reason"] += "|redundancy_gate"
                     audit_df.loc[audit_idx, "gate_promo_redundancy"] = False
                     
-        # Atomic writes via tmp + replace
+        # Writes (parquet preferred; CSV fallback when pyarrow is unavailable)
         audit_path_parquet = out_dir / "promotion_audit.parquet"
         promoted_path_parquet = out_dir / "promoted_candidates.parquet"
-        
-        tmp_audit = audit_path_parquet.with_suffix(".parquet.tmp")
-        audit_df.to_parquet(tmp_audit, index=False)
-        tmp_audit.replace(audit_path_parquet)
-        
-        tmp_promoted = promoted_path_parquet.with_suffix(".parquet.tmp")
-        promoted_df.to_parquet(tmp_promoted, index=False)
-        tmp_promoted.replace(promoted_path_parquet)
+        write_parquet(audit_df, audit_path_parquet)
+        write_parquet(promoted_df, promoted_path_parquet)
 
         # Removed redundant duplicate write of audit_df
 

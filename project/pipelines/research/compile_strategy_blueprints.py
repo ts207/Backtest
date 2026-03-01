@@ -19,7 +19,7 @@ DATA_ROOT = Path(os.getenv("BACKTEST_DATA_ROOT", PROJECT_ROOT.parent / "data"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pipelines._lib.execution_costs import resolve_execution_costs
-from pipelines._lib.io_utils import ensure_dir
+from pipelines._lib.io_utils import ensure_dir, write_parquet
 from pipelines._lib.selection_log import append_selection_log
 from pipelines._lib.run_manifest import finalize_manifest, start_manifest
 from pipelines._lib.ontology_contract import (
@@ -236,15 +236,37 @@ def _load_phase2_table(run_id: str, event_type: str) -> pd.DataFrame:
 def _event_stats(run_id: str, event_type: str) -> Dict[str, np.ndarray]:
     spec = EVENT_REGISTRY_SPECS.get(str(event_type))
     report_dir = spec.reports_dir if spec is not None else str(event_type)
-    file_name = spec.events_file if spec is not None else f"{event_type}_events.csv"
-    path = DATA_ROOT / "reports" / report_dir / run_id / file_name
-    if not path.exists():
+    # Parquet-first contract; tolerate CSV legacy exports.
+    file_name = spec.events_file if spec is not None else f"{event_type}_events.parquet"
+    base_path = DATA_ROOT / "reports" / report_dir / run_id / file_name
+
+    # Try the spec path, then alternate suffix to tolerate migrations/mismatches.
+    candidate_paths = [base_path]
+    if base_path.suffix.lower() == ".csv":
+        candidate_paths.append(base_path.with_suffix(".parquet"))
+    elif base_path.suffix.lower() == ".parquet":
+        candidate_paths.append(base_path.with_suffix(".csv"))
+
+    df = pd.DataFrame()
+    for path in candidate_paths:
+        if not path.exists():
+            continue
+        try:
+            if path.suffix.lower() == ".parquet":
+                df = pd.read_parquet(path)
+            else:
+                try:
+                    df = pd.read_csv(path)
+                except Exception:
+                    df = pd.read_parquet(path)
+            break
+        except Exception:
+            df = pd.DataFrame()
+            continue
+
+    if df.empty:
         return {"half_life": np.array([]), "adverse": np.array([]), "favorable": np.array([])}
 
-    try:
-        df = pd.read_csv(path)
-    except Exception:
-        return {"half_life": np.array([]), "adverse": np.array([]), "favorable": np.array([])}
     if spec is not None:
         df = filter_phase1_rows_for_event_type(df, spec.event_type)
     if df.empty:
@@ -255,7 +277,12 @@ def _event_stats(run_id: str, event_type: str) -> Dict[str, np.ndarray]:
         for col in cols:
             if col not in df.columns:
                 continue
-            arr = pd.to_numeric(df[col], errors="coerce").replace([np.inf, -np.inf], np.nan).dropna().to_numpy(dtype=float)
+            arr = (
+                pd.to_numeric(df[col], errors="coerce")
+                .replace([np.inf, -np.inf], np.nan)
+                .dropna()
+                .to_numpy(dtype=float)
+            )
             if arr.size == 0:
                 continue
             vals.extend(arr.tolist())
@@ -265,16 +292,31 @@ def _event_stats(run_id: str, event_type: str) -> Dict[str, np.ndarray]:
         out = out[np.isfinite(out)]
         return out
 
-    half_life = _pick(["rv_decay_half_life", "timing_landmark", "time_to_relax", "parent_time_to_relax", "time_to_secondary_shock"])
-    half_life = half_life[half_life > 0.0] if half_life.size else half_life
-
-    adverse = _pick(["mae_96", "range_pct_96", "adverse_proxy_excess", "adverse_proxy", "secondary_shock_within_h"])
-    adverse = np.abs(adverse)
-    adverse = adverse[adverse > 0.0] if adverse.size else adverse
-
-    favorable = _pick(["mfe_post_end", "forward_abs_return_h", "opportunity_value_excess", "opportunity_proxy_excess", "relaxed_within_96"])
-    favorable = np.abs(favorable)
-    favorable = favorable[favorable > 0.0] if favorable.size else favorable
+    # Prefer event-specific half-life / adverse / favorable proxies if present.
+    # Fallbacks are intentionally broad to support heterogeneous analyzers.
+    half_life = _pick(["rv_decay_half_life", "decay_half_life", "half_life_bars", "half_life"])
+    adverse = _pick(
+        [
+            "mae_96",
+            "mae_post_end",
+            "adverse_96",
+            "adverse",
+            "delta_adverse",
+            "delta_adverse_mean",
+            "adverse_move",
+        ]
+    )
+    favorable = _pick(
+        [
+            "mfe_96",
+            "mfe_post_end",
+            "favorable_96",
+            "favorable",
+            "delta_opportunity",
+            "delta_opportunity_mean",
+            "favorable_move",
+        ]
+    )
     return {"half_life": half_life, "adverse": adverse, "favorable": favorable}
 
 
@@ -1542,7 +1584,7 @@ def main() -> int:
 
         # Write attempts artifact
         if attempt_records:
-            pd.DataFrame(attempt_records).to_parquet(out_dir / "compile_attempts.parquet", index=False)
+            write_parquet(pd.DataFrame(attempt_records), out_dir / "compile_attempts.parquet")
 
         print(f"DEBUG: blueprints after loop={len(blueprints)}", file=sys.stderr)
         # Ensure we have a list of Blueprint objects, not tuples from _build_blueprint
@@ -1716,7 +1758,7 @@ def main() -> int:
         
         # Write selection ledger
         if selection_records:
-            pd.DataFrame(selection_records).to_parquet(out_dir / "compile_selection.parquet", index=False)
+            write_parquet(pd.DataFrame(selection_records), out_dir / "compile_selection.parquet")
 
         # ── Condition Enforcement Audit ──────────────────────────────────────
         # Emit one row per compiled blueprint with condition metadata.
@@ -1783,7 +1825,7 @@ def main() -> int:
         audit_path = out_dir / "compiled_blueprints_condition_audit.parquet"
         if condition_audit_rows:
             audit_df = pd.DataFrame(condition_audit_rows)
-            audit_df.to_parquet(audit_path, index=False)
+            write_parquet(audit_df, audit_path)
             outputs.append({"path": str(audit_path), "rows": int(len(condition_audit_rows)), "start_ts": None, "end_ts": None})
 
             # ── Audit Gate ───────────────────────────────────────────────────

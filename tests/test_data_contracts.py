@@ -3,9 +3,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "project"))
 
 import pytest
+
+# These tests validate Pandera schemas. In minimal environments (e.g. contract-only
+# test runs) Pandera may be intentionally absent.
+pytest.importorskip("pandera")
+
 import pandas as pd
-from schemas.data_contracts import Cleaned5mBarsSchema, EventRegistrySchema
 from pandera.errors import SchemaError
+from schemas.data_contracts import Cleaned5mBarsSchema, EventRegistrySchema
 
 def test_cleaned_schema_valid():
     df = pd.DataFrame([{

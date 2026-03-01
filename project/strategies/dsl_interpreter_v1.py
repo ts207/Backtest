@@ -8,7 +8,16 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
-from numba import njit
+# Numba is an optional performance dependency. Some environments (notably CI with newer
+# coverage versions) can fail to import numba. Fall back to a no-op decorator so the
+# interpreter remains functional (slower) and tests can collect.
+try:
+    from numba import njit  # type: ignore
+except Exception:  # pragma: no cover
+    def njit(*args, **kwargs):  # type: ignore
+        def _decorator(fn):
+            return fn
+        return _decorator
 
 LOGGER = logging.getLogger(__name__)
 
